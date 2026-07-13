@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { fetchCandidates, fetchOverview } from "@/lib/tourapi";
+import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
-import { publishImage } from "@/lib/instagram";
+import { publishCarousel } from "@/lib/instagram";
 
 export const maxDuration = 60;
 
@@ -34,23 +34,27 @@ export async function GET(req: NextRequest) {
       });
       if (dup.rows.length > 0) continue;
 
+      // 캐러셀용 이미지 수집 — 최소 장수 미달이면 이 후보는 건너뜀
+      spot.imageUrls = await fetchImages(spot.contentId, spot.imageUrl);
+      if (spot.imageUrls.length < MIN_IMAGES) continue;
+
       spot.overview = await fetchOverview(spot.contentId);
       const { caption } = await generateCaption(spot);
 
-      // Meta 토큰이 아직 없으면 드라이런: 캡션만 생성·저장하고 실제 업로드는 건너뜀.
-      // 계정 준비 전에 대시보드에서 실제 결과물을 미리 확인할 수 있음.
+      // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
       const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
-      const mediaId = dryRun ? null : await publishImage(spot.imageUrl, caption);
+      const mediaId = dryRun ? null : await publishCarousel(spot.imageUrls, caption);
 
       await db.execute({
-        sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, ig_media_id, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           spot.contentId,
           spot.name,
           spot.address,
           spot.category,
           spot.imageUrl,
+          JSON.stringify(spot.imageUrls),
           caption,
           mediaId,
           dryRun ? "dry_run" : "published",
@@ -61,6 +65,7 @@ export async function GET(req: NextRequest) {
         published: !dryRun,
         dryRun,
         place: spot.name,
+        images: spot.imageUrls.length,
         mediaId,
       });
     }

@@ -33,6 +33,7 @@ export async function initDb() {
         address TEXT,
         category TEXT,
         image_url TEXT,
+        image_urls TEXT,
         caption TEXT,
         ig_media_id TEXT,
         status TEXT DEFAULT 'published',
@@ -49,5 +50,13 @@ export async function initDb() {
     ],
     "write"
   );
+
+  // 기존 테이블 마이그레이션: image_urls 컬럼이 없으면 추가 (이미 있으면 에러 무시)
+  try {
+    await db.execute("ALTER TABLE posts ADD COLUMN image_urls TEXT");
+  } catch {
+    /* 이미 존재 */
+  }
+
   initialized = true;
 }

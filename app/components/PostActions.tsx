@@ -19,12 +19,17 @@ const btn: React.CSSProperties = {
 
 export default function PostActions({
   caption,
-  imageUrl,
+  imageUrls = [],
 }: {
   caption: string;
-  imageUrl?: string | null;
+  imageUrls?: string[];
 }) {
   const [copied, setCopied] = useState(false);
+
+  function openAllImages() {
+    // 각 이미지를 새 탭으로 열어 저장 (모바일은 길게 눌러 저장)
+    imageUrls.forEach((u) => window.open(u, "_blank", "noopener"));
+  }
 
   async function copyCaption() {
     try {
@@ -55,10 +60,10 @@ export default function PostActions({
       >
         {copied ? "✅ 복사됨!" : "📋 캡션 복사"}
       </button>
-      {imageUrl && (
-        <a href={imageUrl} target="_blank" rel="noopener noreferrer" style={btn}>
-          🖼️ 이미지 열기 · 저장
-        </a>
+      {imageUrls.length > 0 && (
+        <button onClick={openAllImages} style={btn}>
+          🖼️ 이미지 {imageUrls.length}장 열기 · 저장
+        </button>
       )}
       <a
         href="https://www.instagram.com/"

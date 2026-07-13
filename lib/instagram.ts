@@ -25,6 +25,57 @@ async function graphPost(path: string, body: Record<string, unknown>) {
   return json;
 }
 
+/** 컨테이너가 발행 준비될 때까지 대기 */
+async function waitForContainer(id: string) {
+  for (let i = 0; i < 15; i++) {
+    const status = await fetch(
+      `${GRAPH}/${id}?fields=status_code&access_token=${token()}`
+    ).then((r) => r.json());
+    if (status.status_code === "FINISHED") return;
+    if (status.status_code === "ERROR") {
+      throw new Error(`컨테이너 처리 실패: ${JSON.stringify(status)}`);
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error("컨테이너 처리 시간 초과");
+}
+
+/**
+ * 캐러셀(여러 장) 게시: 각 이미지 자식 컨테이너 → 캐러셀 컨테이너 → 발행.
+ * 이미지가 1장이면 단일 이미지로 게시.
+ */
+export async function publishCarousel(imageUrls: string[], caption: string): Promise<string> {
+  if (imageUrls.length <= 1) {
+    return publishImage(imageUrls[0], caption);
+  }
+
+  // 1) 자식 컨테이너들 생성 (캐러셀 항목)
+  const childIds: string[] = [];
+  for (const url of imageUrls.slice(0, 10)) {
+    const child = await graphPost(`${igUserId()}/media`, {
+      image_url: url,
+      is_carousel_item: true,
+    });
+    childIds.push(child.id);
+  }
+  // 자식 컨테이너 처리 대기
+  for (const id of childIds) await waitForContainer(id);
+
+  // 2) 캐러셀 컨테이너 생성
+  const carousel = await graphPost(`${igUserId()}/media`, {
+    media_type: "CAROUSEL",
+    caption,
+    children: childIds,
+  });
+  await waitForContainer(carousel.id);
+
+  // 3) 발행
+  const published = await graphPost(`${igUserId()}/media_publish`, {
+    creation_id: carousel.id,
+  });
+  return String(published.id);
+}
+
 /** 이미지 게시: 컨테이너 생성 → 발행. 발행된 media id 반환 */
 export async function publishImage(imageUrl: string, caption: string): Promise<string> {
   const container = await graphPost(`${igUserId()}/media`, {

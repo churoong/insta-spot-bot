@@ -42,11 +42,12 @@ async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
 작성 규칙:
 1. 장소의 정확한 이름/상호명은 본문과 해시태그 어디에도 절대 넣지 마. 궁금증을 유발하는 티저 스타일로.
 2. 지역(시/구 단위)은 힌트로 언급해도 됨. (예: "부산 어느 골목의...")
-3. 이모지를 적절히 사용하고 2~4문장, 친근한 반말 톤.
-4. 마지막에 반드시 이 안내를 자연스럽게 포함: 댓글에 "${keyword()}"라고 남기고 팔로우하면 DM으로 위치를 보내준다는 것.
-5. 해시태그 8~12개: 분위기·음식종류·지역·감성 키워드 위주. 상호명/정확한 장소명 해시태그는 금지.
+3. 자연스럽고 사람 냄새 나는 톤으로 써. 광고 문구 같은 뻔한 표현("인생맛집", "핫플 인정")은 피하고, 실제로 다녀온 사람이 친구한테 말하듯 3~5문장. 친근한 반말. 이모지는 2~4개만 적당히.
+4. 여러 장의 사진이 함께 올라가는 게시물이야. 자연스러우면 사진 얘기(분위기, 디테일)를 한두 개 녹여도 좋아.
+5. 마지막에 반드시 이 안내를 자연스럽게 포함: 댓글에 "${keyword()}"라고 남기고 팔로우하면 DM으로 위치를 보내준다는 것. (딱딱하지 않게)
+6. 해시태그는 줄바꿈 후 8~12개: 분위기·음식종류·지역·감성 키워드 위주. 상호명/정확한 장소명 해시태그는 절대 금지.
 
-캡션 본문과 해시태그만 출력해. 다른 말은 하지 마.`;
+캡션 본문과 해시태그만 출력해. 설명이나 따옴표 없이 바로 캡션만.`;
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -55,21 +56,28 @@ async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 1024 },
+        generationConfig: {
+          maxOutputTokens: 1200,
+          // flash-latest는 thinking 모델이라 추론에 토큰을 다 써 캡션이 잘림 → thinking 끔
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       }),
       signal: AbortSignal.timeout(30000),
     }
   );
   if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${await res.text()}`);
   const json = await res.json();
-  const text: string = json?.candidates?.[0]?.content?.parts
-    ?.map((p: any) => p.text ?? "")
-    .join("")
-    .trim();
-  if (!text) throw new Error("Gemini 응답이 비어있음");
+  const cand = json?.candidates?.[0];
+  const text: string = (cand?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "").trim();
 
-  // 안전장치: 모델이 실수로 상호명을 넣었으면 템플릿으로 폴백
-  if (text.includes(spot.name)) return generateWithTemplate(spot);
+  // 안전장치: 응답이 잘렸거나(MAX_TOKENS) 규칙 위반이면 템플릿으로 폴백
+  const truncated = cand?.finishReason && cand.finishReason !== "STOP";
+  const missingKeyword = !text.includes(keyword());
+  const missingHashtag = !text.includes("#");
+  const leakedName = text.includes(spot.name);
+  if (!text || truncated || missingKeyword || missingHashtag || leakedName) {
+    return generateWithTemplate(spot);
+  }
 
   return { caption: `${text}\n\n${SOURCE_LINE}` };
 }
@@ -77,19 +85,34 @@ async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
 // ===== 2순위: 템플릿 폴백 (LLM 없이 완전 무료·무의존) =====
 
 const FOOD_OPENERS = [
-  "{region} 골목에 숨어있는 이 집... 아는 사람만 간다는 그곳 🤫",
-  "{region}에서 요즘 조용히 입소문 타는 중이라는 이 집 🍽️",
-  "현지인들이 아껴둔 {region} 맛집, 사진만 봐도 벌써 배고프다 😋",
-  "{region} 가면 꼭 들러야 한다는 바로 그 집 ✨",
+  "{region} 골목 안쪽에 이런 데가 있더라고 🤫 아는 사람만 조용히 다닌다는 곳.",
+  "{region} 갔다가 우연히 들어갔는데, 이거 완전 취향저격이었어 🍽️",
+  "요즘 {region}에서 조용히 입소문 타는 중이라는 그 집. 사진 보면 왜인지 알 듯 😋",
+  "{region} 왔으면 여기는 그냥 지나치기 아까워. 분위기부터 남다르더라 ✨",
+  "저장해두고 {region} 갈 때 꼭 가보려고 아껴둔 곳이야 📌",
 ];
 const TRAVEL_OPENERS = [
-  "{region}에 이런 곳이 있었다니... 사진 그대로예요 🌿",
-  "주말에 어디 갈지 고민된다면, {region}의 이 풍경 어때요? 🏞️",
-  "사람 붐비기 전에 다녀와야 할 {region}의 숨은 명소 📸",
-  "{region} 현지인들이 조용히 아끼는 그 장소 ✨",
+  "{region}에 이런 데가 숨어있었네. 사진으로 봐도 공기가 다른 느낌 🌿",
+  "주말에 어디 갈지 고민이면, {region}의 여기 어때? 사람도 아직 많이 없어 📸",
+  "{region} 현지인들이 조용히 아껴둔다는 장소. 왜 아껴두는지 알 것 같아 ✨",
+  "무심코 들렀다가 한참 머물렀던 {region}의 그곳. 이런 뷰는 반칙이지 🏞️",
+  "{region} 드라이브 코스에 하나 추가. 여기 진짜 저장각이야 📌",
 ];
-const FOOD_TAGS = ["맛집추천", "숨은맛집", "로컬맛집", "맛스타그램", "먹스타그램", "미식여행", "현지인맛집", "맛집투어"];
-const TRAVEL_TAGS = ["여행스타그램", "국내여행", "숨은명소", "여행추천", "풍경스타그램", "주말나들이", "감성여행", "사진맛집"];
+// 가끔 붙는 두 번째 문장 (자연스러움 강화)
+const FOOD_LINES = [
+  "메뉴 하나하나 정성이 느껴져서 또 생각날 듯.",
+  "웨이팅 있어도 납득되는 맛이랄까.",
+  "혼밥이든 모임이든 실패 없을 것 같은 곳.",
+  "가격도 착해서 더 정드는 집이야.",
+];
+const TRAVEL_LINES = [
+  "노을 질 때 오면 진짜 예쁠 것 같아.",
+  "산책하듯 천천히 둘러보기 딱 좋아.",
+  "사진 찍기도 좋고 멍때리기도 좋고.",
+  "계절 바뀔 때마다 다른 느낌일 듯.",
+];
+const FOOD_TAGS = ["맛집추천", "숨은맛집", "로컬맛집", "맛스타그램", "먹스타그램", "미식여행", "현지인맛집", "맛집투어", "먹킷리스트", "동네맛집"];
+const TRAVEL_TAGS = ["여행스타그램", "국내여행", "숨은명소", "여행추천", "풍경스타그램", "주말나들이", "감성여행", "사진맛집", "국내여행지", "드라이브코스"];
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -125,6 +148,7 @@ function generateWithTemplate(spot: Spot): CaptionResult {
     "{region}",
     region || "요즘 뜨는 이 동네"
   );
+  const line = pick(isFood ? FOOD_LINES : TRAVEL_LINES);
 
   // 유효한 시/도·구 단위만 해시태그로 (비정상 주소면 지역 태그 생략)
   const regionTags = [sido, gu]
@@ -136,9 +160,9 @@ function generateWithTemplate(spot: Spot): CaptionResult {
     .join(" ");
 
   const caption =
-    `${opener}\n\n` +
-    `여기가 어딘지 궁금하다면 댓글에 "${keyword()}" 남기고 팔로우해 주세요!\n` +
-    `DM으로 위치 몰래 알려드릴게요 📩\n\n` +
+    `${opener} ${line}\n\n` +
+    `어디인지 궁금하면 댓글에 "${keyword()}" 남기고 팔로우해줘 🙌\n` +
+    `위치는 DM으로 살짝 보내줄게 📩\n\n` +
     `${tags}\n\n${SOURCE_LINE}`;
 
   return { caption };

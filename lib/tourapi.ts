@@ -12,8 +12,17 @@ export interface Spot {
   name: string;
   address: string;
   category: string; // "맛집" | "여행지"
-  imageUrl: string;
+  imageUrl: string; // 대표 이미지(썸네일)
+  imageUrls: string[]; // 캐러셀용 전체 이미지 (대표 포함, 최대 10장)
   overview: string;
+}
+
+// 인스타 캐러셀 제약: 2~10장. 게시물당 최소 이 장수는 확보(부족하면 후보 건너뜀).
+export const MIN_IMAGES = 5;
+export const MAX_IMAGES = 10;
+
+function toHttps(u: string): string {
+  return String(u).replace(/^http:/, "https:");
 }
 
 function pick<T>(arr: T[]): T {
@@ -58,9 +67,36 @@ export async function fetchCandidates(): Promise<Spot[]> {
       name: it.title,
       address: [it.addr1, it.addr2].filter(Boolean).join(" "),
       category: contentTypeId === 39 ? "맛집" : "여행지",
-      imageUrl: String(it.firstimage).replace(/^http:/, "https:"),
+      imageUrl: toHttps(it.firstimage),
+      imageUrls: [toHttps(it.firstimage)],
       overview: "",
     }));
+}
+
+/**
+ * 장소의 추가 이미지들을 가져와 대표 이미지와 합쳐 최대 MAX_IMAGES장 반환.
+ * (detailImage2 = 콘텐츠 이미지 목록)
+ */
+export async function fetchImages(
+  contentId: string,
+  firstImage: string
+): Promise<string[]> {
+  const urls = new Set<string>([toHttps(firstImage)]);
+  try {
+    const items = await call("detailImage2", {
+      contentId,
+      imageYN: "Y",
+      numOfRows: "20",
+    });
+    for (const it of items) {
+      const u = it.originimgurl || it.smallimageurl;
+      if (u) urls.add(toHttps(u));
+      if (urls.size >= MAX_IMAGES) break;
+    }
+  } catch {
+    // 추가 이미지 실패 시 대표 이미지만
+  }
+  return [...urls].slice(0, MAX_IMAGES);
 }
 
 /** 상세 설명(overview) 채우기 */

@@ -7,7 +7,7 @@ async function loadData() {
   try {
     await initDb();
     const posts = await db.execute(
-      "SELECT id, place_name, address, category, image_url, caption, status, created_at FROM posts ORDER BY id DESC LIMIT 50"
+      "SELECT id, place_name, address, category, image_url, image_urls, caption, status, created_at FROM posts ORDER BY id DESC LIMIT 50"
     );
     const dms = await db.execute(
       "SELECT COUNT(*) AS n FROM dm_log"
@@ -80,32 +80,24 @@ export default async function Home() {
               아직 게시물이 없습니다. 크론이 첫 실행되면 여기에 표시됩니다.
             </p>
           )}
-          {data.posts.map((p: any) => (
-            <div
-              key={p.id}
-              style={{
-                display: "flex",
-                gap: 14,
-                background: "#1a1d24",
-                border: "1px solid #2a2e38",
-                borderRadius: 12,
-                padding: 14,
-                marginBottom: 10,
-              }}
-            >
-              {p.image_url && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={p.image_url}
-                  alt=""
-                  width={72}
-                  height={72}
-                  style={{ borderRadius: 8, objectFit: "cover", flexShrink: 0 }}
-                />
-              )}
-              <div style={{ minWidth: 0, flex: 1 }}>
+          {data.posts.map((p: any) => {
+            const imgs: string[] = parseImages(p.image_urls, p.image_url);
+            return (
+              <div
+                key={p.id}
+                style={{
+                  background: "#1a1d24",
+                  border: "1px solid #2a2e38",
+                  borderRadius: 12,
+                  padding: 14,
+                  marginBottom: 10,
+                }}
+              >
                 <div style={{ fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}>
                   {p.category === "맛집" ? "🍜" : "🏞️"} {p.place_name}
+                  {imgs.length > 1 && (
+                    <span style={{ fontSize: 12, color: "#9aa0ae" }}>🖼️ {imgs.length}장</span>
+                  )}
                   {p.status === "dry_run" && (
                     <span
                       style={{
@@ -122,9 +114,40 @@ export default async function Home() {
                     </span>
                   )}
                 </div>
-                <div style={{ color: "#9aa0ae", fontSize: 13, marginBottom: 6 }}>
+                <div style={{ color: "#9aa0ae", fontSize: 13, margin: "4px 0 10px" }}>
                   {p.address} · {p.created_at}
                 </div>
+
+                {/* 이미지 캐러셀 미리보기 (가로 스크롤) */}
+                {imgs.length > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      overflowX: "auto",
+                      paddingBottom: 6,
+                      marginBottom: 10,
+                    }}
+                  >
+                    {imgs.map((src, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={i}
+                        src={src}
+                        alt=""
+                        width={110}
+                        height={110}
+                        style={{
+                          borderRadius: 8,
+                          objectFit: "cover",
+                          flexShrink: 0,
+                          border: "1px solid #2a2e38",
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+
                 {p.caption && (
                   <div
                     style={{
@@ -141,15 +164,28 @@ export default async function Home() {
                   </div>
                 )}
                 {p.status === "dry_run" && p.caption && (
-                  <PostActions caption={p.caption} imageUrl={p.image_url} />
+                  <PostActions caption={p.caption} imageUrls={imgs} />
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </>
       )}
     </main>
   );
+}
+
+/** image_urls JSON을 배열로 파싱 (없으면 단일 image_url로 폴백) */
+function parseImages(imageUrls: string | null, imageUrl: string | null): string[] {
+  if (imageUrls) {
+    try {
+      const arr = JSON.parse(imageUrls);
+      if (Array.isArray(arr) && arr.length) return arr.filter(Boolean);
+    } catch {
+      /* 파싱 실패 시 폴백 */
+    }
+  }
+  return imageUrl ? [imageUrl] : [];
 }
 
 function Stat({ label, value }: { label: string; value: number }) {
