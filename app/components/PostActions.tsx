@@ -26,9 +26,26 @@ export default function PostActions({
 }) {
   const [copied, setCopied] = useState(false);
 
-  function openAllImages() {
-    // 각 이미지를 새 탭으로 열어 저장 (모바일은 길게 눌러 저장)
-    imageUrls.forEach((u) => window.open(u, "_blank", "noopener"));
+  const [saving, setSaving] = useState(false);
+
+  function proxyUrl(u: string, i: number) {
+    return `/api/image?url=${encodeURIComponent(u)}&name=photo-${i + 1}`;
+  }
+
+  async function saveAllImages() {
+    // 우리 서버 프록시를 거쳐 강제 다운로드. 브라우저 다중 다운로드 제한을
+    // 피하려고 순차적으로 트리거.
+    setSaving(true);
+    for (let i = 0; i < imageUrls.length; i++) {
+      const a = document.createElement("a");
+      a.href = proxyUrl(imageUrls[i], i);
+      a.download = `photo-${i + 1}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      await new Promise((r) => setTimeout(r, 700));
+    }
+    setSaving(false);
   }
 
   async function copyCaption() {
@@ -61,8 +78,8 @@ export default function PostActions({
         {copied ? "✅ 복사됨!" : "📋 캡션 복사"}
       </button>
       {imageUrls.length > 0 && (
-        <button onClick={openAllImages} style={btn}>
-          🖼️ 이미지 {imageUrls.length}장 열기 · 저장
+        <button onClick={saveAllImages} disabled={saving} style={btn}>
+          {saving ? "⏳ 저장 중..." : `⬇️ 사진 ${imageUrls.length}장 저장`}
         </button>
       )}
       <a

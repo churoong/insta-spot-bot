@@ -66,8 +66,9 @@ export default async function Home() {
               드립니다. 각 게시물의 <b>캡션 복사</b> + <b>이미지 저장</b> 버튼으로
               인스타에 직접 올려보세요. Meta 토큰을 넣으면 자동 업로드로 전환됩니다.
               <div style={{ marginTop: 8, color: "#c9b98a", fontSize: 12.5 }}>
-                📱 올리는 법: ① 이미지 열기 → 길게 눌러 저장 → ② 인스타 앱에서 새
-                게시물 → ③ <b>캡션 복사</b> 눌러 설명란에 붙여넣기 → 업로드!
+                📱 올리는 법: ① <b>사진 저장</b> 버튼 누르기(또는 사진 하나씩 탭해서
+                저장) → ② 인스타 앱에서 새 게시물에 여러 장 선택 → ③ <b>캡션 복사</b>{" "}
+                눌러 설명란에 붙여넣기 → 업로드!
               </div>
             </div>
           )}
@@ -130,20 +131,27 @@ export default async function Home() {
                     }}
                   >
                     {imgs.map((src, i) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      // 썸네일을 탭하면 우리 서버 프록시로 개별 저장 (모바일 대응)
+                      <a
                         key={i}
-                        src={src}
-                        alt=""
-                        width={110}
-                        height={110}
-                        style={{
-                          borderRadius: 8,
-                          objectFit: "cover",
-                          flexShrink: 0,
-                          border: "1px solid #2a2e38",
-                        }}
-                      />
+                        href={`/api/image?url=${encodeURIComponent(src)}&name=photo-${i + 1}`}
+                        download={`photo-${i + 1}.jpg`}
+                        title="탭하면 저장돼요"
+                        style={{ flexShrink: 0, lineHeight: 0 }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={src}
+                          alt=""
+                          width={110}
+                          height={110}
+                          style={{
+                            borderRadius: 8,
+                            objectFit: "cover",
+                            border: "1px solid #2a2e38",
+                          }}
+                        />
+                      </a>
                     ))}
                   </div>
                 )}
