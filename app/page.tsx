@@ -1,4 +1,5 @@
 import { db, initDb } from "@/lib/db";
+import PostActions from "./components/PostActions";
 
 export const dynamic = "force-dynamic";
 
@@ -61,9 +62,13 @@ export default async function Home() {
                 lineHeight: 1.6,
               }}
             >
-              🟡 <b>미리보기 모드</b> — Meta 토큰이 아직 없어서 실제 인스타그램
-              업로드는 하지 않고, 봇이 만들 캡션만 미리 생성해 보여줍니다. 토큰을
-              넣으면 자동으로 실제 발행 모드로 전환됩니다.
+              🟡 <b>반자동 모드</b> — Meta 연결 전까지는 봇이 사진·캡션을 준비해
+              드립니다. 각 게시물의 <b>캡션 복사</b> + <b>이미지 저장</b> 버튼으로
+              인스타에 직접 올려보세요. Meta 토큰을 넣으면 자동 업로드로 전환됩니다.
+              <div style={{ marginTop: 8, color: "#c9b98a", fontSize: 12.5 }}>
+                📱 올리는 법: ① 이미지 열기 → 길게 눌러 저장 → ② 인스타 앱에서 새
+                게시물 → ③ <b>캡션 복사</b> 눌러 설명란에 붙여넣기 → 업로드!
+              </div>
             </div>
           )}
           <div style={{ display: "flex", gap: 12, margin: "20px 0" }}>
@@ -134,6 +139,9 @@ export default async function Home() {
                   >
                     {p.caption}
                   </div>
+                )}
+                {p.status === "dry_run" && p.caption && (
+                  <PostActions caption={p.caption} imageUrl={p.image_url} />
                 )}
               </div>
             </div>
