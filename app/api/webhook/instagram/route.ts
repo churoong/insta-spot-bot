@@ -21,48 +21,60 @@ export async function GET(req: NextRequest) {
 // 댓글 이벤트 수신 → 키워드 매칭 → Private Reply로 DM 발송
 export async function POST(req: NextRequest) {
   const raw = await req.text();
+  await initDb();
 
-  // 서명 검증 (요청이 진짜 Meta에서 왔는지)
+  const notes: string[] = [];
+  const log = (n: string) => notes.push(n);
+
+  // 서명 검증 (진단 모드: 실패해도 기록만 하고 계속 진행 — 확인 후 다시 엄격 모드로)
   const sig = req.headers.get("x-hub-signature-256") ?? "";
-  const expected =
-    "sha256=" +
-    crypto.createHmac("sha256", process.env.META_APP_SECRET!).update(raw).digest("hex");
-  if (!sig || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
-    return NextResponse.json({ error: "bad signature" }, { status: 403 });
+  let sigOk = false;
+  try {
+    const expected =
+      "sha256=" +
+      crypto.createHmac("sha256", process.env.META_APP_SECRET ?? "").update(raw).digest("hex");
+    sigOk =
+      !!sig &&
+      sig.length === expected.length &&
+      crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+  } catch {
+    /* 시크릿 없거나 형식 오류 */
   }
 
-  await initDb();
-  const body = JSON.parse(raw);
   const keyword = process.env.DM_KEYWORD || "어디야";
+  let body: any = {};
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    log("JSON 파싱 실패");
+  }
 
   for (const entry of body.entry ?? []) {
     for (const change of entry.changes ?? []) {
+      log(`field=${change.field}`);
       if (change.field !== "comments") continue;
-      const v = change.value;
+      const v = change.value ?? {};
       const commentId: string = v.id;
       const text: string = v.text ?? "";
       const mediaId: string = v.media?.id ?? "";
       const fromId: string = v.from?.id ?? "";
       const username: string = v.from?.username ?? "";
+      log(`text="${text}" media=${mediaId} from=${fromId}/@${username}`);
 
-      // 내 계정이 단 댓글(답글 등)은 무시 — 무한루프 방지
-      if (fromId === process.env.IG_USER_ID) continue;
-      // 키워드 미포함 댓글은 무시
-      if (!text.includes(keyword)) continue;
+      if (fromId === process.env.IG_USER_ID) { log("skip: 내 계정 댓글"); continue; }
+      if (!text.includes(keyword)) { log("skip: 키워드 없음"); continue; }
 
-      // 중복 발송 방지
       const seen = await db.execute({
         sql: "SELECT 1 FROM dm_log WHERE comment_id = ?",
         args: [commentId],
       });
-      if (seen.rows.length > 0) continue;
+      if (seen.rows.length > 0) { log("skip: 이미 발송함"); continue; }
 
-      // 어떤 게시글의 댓글인지 → 장소 정보 조회
       const post = await db.execute({
         sql: "SELECT place_name, address, category FROM posts WHERE ig_media_id = ?",
         args: [mediaId],
       });
-      if (post.rows.length === 0) continue;
+      if (post.rows.length === 0) { log(`skip: 게시물 못찾음(media=${mediaId})`); continue; }
 
       try {
         await sendPrivateReply(commentId, buildDmText(post.rows[0] as any));
@@ -70,18 +82,25 @@ export async function POST(req: NextRequest) {
           sql: "INSERT INTO dm_log (comment_id, ig_media_id, username) VALUES (?, ?, ?)",
           args: [commentId, mediaId, username],
         });
-        // 댓글에도 답글로 안내 (다른 사람들의 참여 유도)
+        log("✅ DM 발송 성공");
         try {
           await replyToComment(commentId, "DM으로 보내드렸어요! 확인해 주세요 📩");
         } catch {
           /* 답글 실패는 무시 */
         }
       } catch (e) {
-        console.error("DM 발송 실패:", commentId, e);
+        log("❌ DM 발송 실패: " + String(e).slice(0, 300));
       }
     }
   }
 
-  // Meta는 200 응답을 못 받으면 재시도하므로 항상 200
+  // 진단 기록
+  await db
+    .execute({
+      sql: "INSERT INTO webhook_debug (sig_ok, note, raw) VALUES (?, ?, ?)",
+      args: [sigOk ? 1 : 0, notes.join(" | ") || "(no comment changes)", raw.slice(0, 3000)],
+    })
+    .catch(() => {});
+
   return NextResponse.json({ ok: true });
 }

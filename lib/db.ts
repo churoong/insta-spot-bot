@@ -47,6 +47,13 @@ export async function initDb() {
         sent_at TEXT DEFAULT (datetime('now'))
       )`,
       `CREATE INDEX IF NOT EXISTS idx_posts_media ON posts(ig_media_id)`,
+      `CREATE TABLE IF NOT EXISTS webhook_debug (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sig_ok INTEGER,
+        note TEXT,
+        raw TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`,
     ],
     "write"
   );
