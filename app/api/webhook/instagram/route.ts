@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { buildDmText } from "@/lib/caption";
+import { buildDmText, buildReplyText } from "@/lib/caption";
 import { sendPrivateReply, replyToComment } from "@/lib/instagram";
 
 export const maxDuration = 30;
@@ -83,10 +83,12 @@ export async function POST(req: NextRequest) {
           args: [commentId, mediaId, username],
         });
         log("✅ DM 발송 성공");
+        // 공개 대댓글로도 안내 (자연스러운 문구 + 이모지)
         try {
-          await replyToComment(commentId, "DM으로 보내드렸어요! 확인해 주세요 📩");
-        } catch {
-          /* 답글 실패는 무시 */
+          await replyToComment(commentId, buildReplyText());
+          log("✅ 대댓글 성공");
+        } catch (e) {
+          log("대댓글 실패(무시): " + String(e).slice(0, 150));
         }
       } catch (e) {
         log("❌ DM 발송 실패: " + String(e).slice(0, 300));

@@ -33,19 +33,19 @@ async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
   const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
   const prompt = `인스타그램 ${spot.category} 소개 계정의 게시글 캡션을 한국어로 작성해줘.
 
-장소 정보:
+장소 정보(캡션에 위치를 드러내지 않기 위한 참고용, 아래 정보로 분위기만 파악):
 - 이름: ${spot.name} (절대 캡션에 쓰지 말 것!)
-- 주소: ${spot.address}
+- 주소: ${spot.address} (지역명 노출 금지, 분위기 파악용)
 - 분류: ${spot.category}
-- 설명: ${spot.overview || "(설명 없음 — 사진 분위기와 지역 특성으로 작성)"}
+- 설명: ${spot.overview || "(설명 없음 — 사진 분위기로 작성)"}
 
 작성 규칙:
 1. 장소의 정확한 이름/상호명은 본문과 해시태그 어디에도 절대 넣지 마. 궁금증을 유발하는 티저 스타일로.
-2. 지역(시/구 단위)은 힌트로 언급해도 됨. (예: "부산 어느 골목의...")
+2. ⭐가장 중요: 위치를 추측할 수 있는 그 어떤 힌트도 넣지 마. 시/도/시군구/동/읍면 등 지역명, 유명 거리·랜드마크·역 이름, 지역 특산·방언 등 어디인지 짐작하게 하는 표현 전부 금지. 위치는 비밀이고 오직 DM으로만 알려줄 거야. (예: "부산", "서면", "제주" 같은 단어 금지)
 3. 자연스럽고 사람 냄새 나는 톤으로 써. 광고 문구 같은 뻔한 표현("인생맛집", "핫플 인정")은 피하고, 실제로 다녀와 본 사람이 소개하듯 3~5문장. 반드시 **친근하지만 정중한 존댓말(해요체)** 로 써. 반말 금지. 이모지는 2~4개만 적당히.
 4. 여러 장의 사진이 함께 올라가는 게시물이야. 자연스러우면 사진 얘기(분위기, 디테일)를 한두 개 녹여도 좋아.
 5. 마지막에 반드시 이 안내를 자연스럽게 포함: 댓글에 "${keyword()}"라고 남기고 팔로우하면 DM으로 위치를 보내준다는 것. (딱딱하지 않게)
-6. 해시태그는 줄바꿈 후 8~12개: 분위기·음식종류·지역·감성 키워드 위주. 상호명/정확한 장소명 해시태그는 절대 금지.
+6. 해시태그는 줄바꿈 후 8~12개: 분위기·음식종류·감성 키워드 위주. 상호명·정확한 장소명은 물론 지역명(지명) 해시태그도 절대 금지. (#부산맛집, #제주여행 같은 지역 태그 금지)
 
 캡션 본문과 해시태그만 출력해. 설명이나 따옴표 없이 바로 캡션만.`;
 
@@ -75,28 +75,47 @@ async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
   const missingKeyword = !text.includes(keyword());
   const missingHashtag = !text.includes("#");
   const leakedName = text.includes(spot.name);
-  if (!text || truncated || missingKeyword || missingHashtag || leakedName) {
+  const leakedLocation = leaksLocation(text, spot.address);
+  if (!text || truncated || missingKeyword || missingHashtag || leakedName || leakedLocation) {
     return generateWithTemplate(spot);
   }
 
   return { caption: `${text}\n\n${SOURCE_LINE}` };
 }
 
+/** 캡션에 주소의 지역명(시/도/구/동/거리)이 새어나갔는지 검사 */
+function leaksLocation(text: string, address: string): boolean {
+  const parts = address.split(/\s+/).slice(0, 3);
+  const terms = new Set<string>();
+  for (const p of parts) {
+    const stripped = p.replace(
+      /(특별자치도|특별자치시|특별시|광역시|자치도|자치시|도|시|군|구|읍|면|동|리|로|길|가|번길)$/g,
+      ""
+    );
+    if (stripped.length >= 2) terms.add(stripped);
+  }
+  const short = SIDO_SHORT[parts[0] ?? ""];
+  if (short) terms.add(short);
+  for (const t of terms) if (t && text.includes(t)) return true;
+  return false;
+}
+
 // ===== 2순위: 템플릿 폴백 (LLM 없이 완전 무료·무의존) =====
 
+// 지역명 노출 금지 — 위치는 DM으로만. 오프너에 지역 힌트 없음.
 const FOOD_OPENERS = [
-  "{region} 골목 안쪽에 이런 데가 있더라고요 🤫 아는 사람만 조용히 다닌다는 곳이에요.",
-  "{region} 갔다가 우연히 들어갔는데, 완전 취향저격이었어요 🍽️",
-  "요즘 {region}에서 조용히 입소문 타는 중이라는 그 집이에요. 사진 보시면 왜인지 아실 거예요 😋",
-  "{region} 오시면 여기는 그냥 지나치기 아까워요. 분위기부터 남다르더라고요 ✨",
-  "저장해두고 {region} 가실 때 꼭 들러보시라고 아껴둔 곳이에요 📌",
+  "골목 안쪽에 이런 데가 있더라고요 🤫 아는 사람만 조용히 다닌다는 곳이에요.",
+  "우연히 들어갔다가 완전 취향저격이었어요 🍽️ 이런 곳은 아껴두고 싶더라고요.",
+  "요즘 조용히 입소문 타는 중이라는 그 집이에요. 사진 보시면 왜인지 아실 거예요 😋",
+  "그냥 지나치기 아까운 곳이에요. 분위기부터 남다르더라고요 ✨",
+  "저장해두고 꼭 다시 가보려고 아껴둔 곳이에요 📌",
 ];
 const TRAVEL_OPENERS = [
-  "{region}에 이런 데가 숨어있었네요. 사진으로 봐도 공기가 다른 느낌이에요 🌿",
-  "주말에 어디 갈지 고민이시면, {region}의 여기 어떠세요? 사람도 아직 많이 없어요 📸",
-  "{region} 현지인들이 조용히 아껴둔다는 장소예요. 왜 아껴두는지 알 것 같아요 ✨",
-  "무심코 들렀다가 한참 머물렀던 {region}의 그곳이에요. 이런 뷰는 반칙이죠 🏞️",
-  "{region} 드라이브 코스에 하나 추가해 보세요. 여기 진짜 저장각이에요 📌",
+  "이런 데가 숨어있었네요. 사진으로 봐도 공기가 다른 느낌이에요 🌿",
+  "주말에 어디 갈지 고민이시면 여기 어떠세요? 사람도 아직 많이 없어요 📸",
+  "현지인들이 조용히 아껴둔다는 장소예요. 왜 아껴두는지 알 것 같아요 ✨",
+  "무심코 들렀다가 한참 머물렀던 그곳이에요. 이런 뷰는 반칙이죠 🏞️",
+  "다음 나들이 코스에 하나 추가해 보세요. 여기 진짜 저장각이에요 📌",
 ];
 // 가끔 붙는 두 번째 문장 (자연스러움 강화)
 const FOOD_LINES = [
@@ -126,36 +145,15 @@ const SIDO_SHORT: Record<string, string> = {
   전라남도: "전남", 경상북도: "경북", 경상남도: "경남",
   제주특별자치도: "제주", 제주도: "제주",
 };
-const VALID_SHORT = new Set(Object.values(SIDO_SHORT));
-
-/**
- * 주소에서 "서울 성북구" 같은 지역 힌트 추출 (상호명 노출 없음).
- * 알려진 시/도가 아니면(비정상 주소) 빈 문자열 반환 → 지역 태그/힌트 생략.
- */
-function regionHint(address: string): { region: string; sido: string; gu: string } {
-  const parts = address.split(/\s+/);
-  const sido = SIDO_SHORT[parts[0] ?? ""] ?? "";
-  if (!VALID_SHORT.has(sido)) return { region: "", sido: "", gu: "" };
-  const gu = /(구|시|군)$/.test(parts[1] ?? "") ? parts[1] : "";
-  return { region: [sido, gu].filter(Boolean).join(" "), sido, gu };
-}
-
 function generateWithTemplate(spot: Spot): CaptionResult {
-  const { region, sido, gu } = regionHint(spot.address);
   const isFood = spot.category === "맛집";
-  // region이 있으면 "{region}"에 지역명, 없으면 자연스러운 일반 표현으로 대체
-  const opener = pick(isFood ? FOOD_OPENERS : TRAVEL_OPENERS).replace(
-    "{region}",
-    region || "요즘 뜨는 이 동네"
-  );
+  // 지역명 노출 금지 — 오프너는 이미 지역 힌트 없음
+  const opener = pick(isFood ? FOOD_OPENERS : TRAVEL_OPENERS);
   const line = pick(isFood ? FOOD_LINES : TRAVEL_LINES);
 
-  // 유효한 시/도·구 단위만 해시태그로 (비정상 주소면 지역 태그 생략)
-  const regionTags = [sido, gu]
-    .filter(Boolean)
-    .flatMap((r) => [`${r}${isFood ? "맛집" : "여행"}`, `${r}핫플`]);
-  const tags = [...new Set([...regionTags, ...(isFood ? FOOD_TAGS : TRAVEL_TAGS)])]
-    .slice(0, 12)
+  // 지역(지명) 해시태그 없이 분위기·감성 태그만 사용
+  const tags = (isFood ? FOOD_TAGS : TRAVEL_TAGS)
+    .slice(0, 10)
     .map((t) => `#${t.replace(/\s+/g, "")}`)
     .join(" ");
 
@@ -181,4 +179,17 @@ export function buildDmText(spot: {
     `\n좋은 시간 보내세요! 다음 장소도 기대해 주세요 💛\n` +
     `(정보 출처: 한국관광공사)`
   );
+}
+
+// 댓글에 다는 공개 대댓글 — "DM으로 보내드릴게요" 안내 (자연스럽게, 이모지 포함)
+const REPLY_TEMPLATES = [
+  '궁금하셨죠? 방금 위치를 DM으로 살짝 보내드렸어요! 확인해 보세요 🤫💌',
+  '넵! 어디인지 DM으로 콕 찍어 보내드렸어요 📩 맛있게(즐겁게) 다녀오세요 😊',
+  '위치 정보 DM으로 쏙 넣어드렸어요! 팔로우해두시면 다음 장소도 놓치지 않으실 거예요 🙌✨',
+  '기다리셨죠? 방금 DM으로 위치 보내드렸으니 메시지함 확인해 주세요 💌😉',
+  '오케이! DM으로 자세한 위치 보내드렸어요 📍 좋은 시간 보내세요 💛',
+];
+
+export function buildReplyText(): string {
+  return REPLY_TEMPLATES[Math.floor(Math.random() * REPLY_TEMPLATES.length)];
 }
