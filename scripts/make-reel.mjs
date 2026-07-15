@@ -128,26 +128,63 @@ async function main() {
   console.log("완료:", subject.name);
 }
 
-/** Vercel Blob(토큰 있으면) 또는 catbox.moe로 공개 업로드 → URL 반환 */
+/** curl로 파일 업로드하고 stdout 반환 (Actions 러너에 curl 내장) */
+function curlUpload(args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn("curl", ["-s", "--max-time", "120", ...args]);
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`curl exit ${code}`))));
+  });
+}
+
+/**
+ * 공개 URL 업로드 (폴백 체인).
+ * 1) Vercel Blob (BLOB_READ_WRITE_TOKEN 있으면 — 가장 안정)
+ * 2) tmpfiles.org (무료·무계정, 60분 보관 — 인스타가 가져가기엔 충분)
+ * 3) catbox.moe (무료·무계정)
+ */
 async function uploadPublic(filePath) {
-  const buf = fs.readFileSync(filePath);
   if (process.env.BLOB_READ_WRITE_TOKEN) {
-    const { put } = await import("@vercel/blob");
-    const res = await put(`reels/${Date.now()}.mp4`, buf, {
-      access: "public",
-      contentType: "video/mp4",
-      token: process.env.BLOB_READ_WRITE_TOKEN,
-    });
-    return res.url;
+    try {
+      const { put } = await import("@vercel/blob");
+      const res = await put(`reels/${Date.now()}.mp4`, fs.readFileSync(filePath), {
+        access: "public",
+        contentType: "video/mp4",
+        token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      return res.url;
+    } catch (e) {
+      console.error("Vercel Blob 실패, 다음 폴백:", String(e).slice(0, 150));
+    }
   }
-  // 폴백: catbox.moe (무료·무계정)
-  const form = new FormData();
-  form.append("reqtype", "fileupload");
-  form.append("fileToUpload", new Blob([buf], { type: "video/mp4" }), "reel.mp4");
-  const res = await fetch("https://catbox.moe/user/api.php", { method: "POST", body: form });
-  const url = (await res.text()).trim();
-  if (!url.startsWith("http")) throw new Error("catbox 업로드 실패: " + url.slice(0, 200));
-  return url;
+
+  // tmpfiles.org — 응답: {"status":"success","data":{"url":"https://tmpfiles.org/ID/f.mp4"}}
+  // /dl/ 페이지 HTML 안의 서명된 직접 다운로드 링크를 추출해야 raw 파일이 나옴.
+  try {
+    const out = await curlUpload(["-F", `file=@${filePath}`, "https://tmpfiles.org/api/v1/upload"]);
+    const pageUrl = JSON.parse(out)?.data?.url?.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    if (pageUrl) {
+      const html = await fetch(pageUrl, { signal: AbortSignal.timeout(20000) }).then((r) => r.text());
+      const m = html.match(/href="(https:\/\/tmpfiles\.org\/dl\/[^"]+\.mp4)"/);
+      if (m) return m[1];
+      console.error("tmpfiles 서명 링크 못 찾음");
+    } else {
+      console.error("tmpfiles 응답 이상:", out.slice(0, 150));
+    }
+  } catch (e) {
+    console.error("tmpfiles 실패, 다음 폴백:", String(e).slice(0, 150));
+  }
+
+  // catbox.moe
+  const out = await curlUpload([
+    "-F", "reqtype=fileupload",
+    "-F", "userhash=",
+    "-F", `fileToUpload=@${filePath}`,
+    "https://catbox.moe/user/api.php",
+  ]);
+  if (out.startsWith("http")) return out;
+  throw new Error("모든 업로드 실패. catbox 응답: " + out.slice(0, 200));
 }
 
 main()
