@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
-import { publishCarousel, maybeRefreshToken } from "@/lib/instagram";
+import { publishCarousel, maybeRefreshToken, fetchEngagement } from "@/lib/instagram";
 
 export const maxDuration = 60;
 
@@ -21,6 +21,28 @@ export async function GET(req: NextRequest) {
     if (tr.note) console.log("[token]", tr.refreshed ? "갱신됨:" : "", tr.note);
   } catch (e) {
     console.error("[token] 갱신 중 오류(무시):", e);
+  }
+
+  // 최근 발행 게시물의 반응 수(좋아요·댓글) 수집 — 인기 랭킹·주간 베스트용
+  if (process.env.IG_ACCESS_TOKEN) {
+    try {
+      const recent = await db.execute(
+        "SELECT id, ig_media_id FROM posts WHERE status='published' AND ig_media_id IS NOT NULL ORDER BY id DESC LIMIT 10"
+      );
+      await Promise.all(
+        recent.rows.map(async (r: any) => {
+          const eng = await fetchEngagement(String(r.ig_media_id));
+          if (eng) {
+            await db.execute({
+              sql: "UPDATE posts SET like_count = ?, comment_count = ? WHERE id = ?",
+              args: [eng.likes, eng.comments, r.id],
+            });
+          }
+        })
+      );
+    } catch (e) {
+      console.error("[engagement] 수집 오류(무시):", e);
+    }
   }
 
   // 일일 발행 한도 체크 (Graph API 한도 50/일, 기본 24/일)
@@ -54,8 +76,8 @@ export async function GET(req: NextRequest) {
       const mediaId = dryRun ? null : await publishCarousel(spot.imageUrls, caption);
 
       await db.execute({
-        sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           spot.contentId,
           spot.name,
@@ -66,6 +88,8 @@ export async function GET(req: NextRequest) {
           caption,
           mediaId,
           dryRun ? "dry_run" : "published",
+          spot.mapx ?? null,
+          spot.mapy ?? null,
         ],
       });
 

@@ -15,6 +15,15 @@ export interface Spot {
   imageUrl: string; // 대표 이미지(썸네일)
   imageUrls: string[]; // 캐러셀용 전체 이미지 (대표 포함, 최대 10장)
   overview: string;
+  mapx?: string; // 경도 (근처 추천용)
+  mapy?: string; // 위도
+}
+
+export interface NearbySpot {
+  name: string;
+  address: string;
+  category: string;
+  distM: number; // 미터
 }
 
 // 인스타 캐러셀 제약: 2~10장. 게시물당 최소 이 장수는 확보(부족하면 후보 건너뜀).
@@ -70,7 +79,47 @@ export async function fetchCandidates(): Promise<Spot[]> {
       imageUrl: toHttps(it.firstimage),
       imageUrls: [toHttps(it.firstimage)],
       overview: "",
+      mapx: it.mapx ? String(it.mapx) : undefined,
+      mapy: it.mapy ? String(it.mapy) : undefined,
     }));
+}
+
+/**
+ * 좌표 기준 근처 가볼 만한 곳 최대 2곳 (DM에 끼워주는 보너스 추천).
+ * locationBasedList2, 반경 3km, 거리순.
+ */
+export async function fetchNearby(
+  mapx: string,
+  mapy: string,
+  excludeName: string
+): Promise<NearbySpot[]> {
+  try {
+    const items = await call("locationBasedList2", {
+      mapX: mapx,
+      mapY: mapy,
+      radius: "3000",
+      arrange: "S", // 거리순 + 대표이미지 있는 항목
+      numOfRows: "10",
+      pageNo: "1",
+    });
+    return items
+      .filter(
+        (it: any) =>
+          it.title &&
+          it.title !== excludeName &&
+          // 관광지(12)·문화시설(14)·음식점(39)만 추천 (숙박·쇼핑 등 제외)
+          ["12", "14", "39"].includes(String(it.contenttypeid))
+      )
+      .slice(0, 2)
+      .map((it: any) => ({
+        name: it.title,
+        address: [it.addr1, it.addr2].filter(Boolean).join(" "),
+        category: String(it.contenttypeid) === "39" ? "맛집" : "가볼 곳",
+        distM: Math.round(Number(it.dist) || 0),
+      }));
+  } catch {
+    return [];
+  }
 }
 
 /**

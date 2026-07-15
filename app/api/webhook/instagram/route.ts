@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { buildDmText, buildReplyText } from "@/lib/caption";
 import { sendPrivateReply, replyToComment } from "@/lib/instagram";
+import { fetchNearby } from "@/lib/tourapi";
 
 export const maxDuration = 30;
 
@@ -74,13 +75,17 @@ export async function POST(req: NextRequest) {
       if (seen.rows.length > 0) { log("skip: 이미 발송함"); continue; }
 
       const post = await db.execute({
-        sql: "SELECT place_name, address, category FROM posts WHERE ig_media_id = ?",
+        sql: "SELECT place_name, address, category, mapx, mapy FROM posts WHERE ig_media_id = ?",
         args: [mediaId],
       });
       if (post.rows.length === 0) { log(`skip: 게시물 못찾음(media=${mediaId})`); continue; }
 
       try {
-        await sendPrivateReply(commentId, buildDmText(post.rows[0] as any));
+        // 근처 추천 2곳 (좌표 있을 때만, 실패해도 DM은 발송)
+        const p = post.rows[0] as any;
+        const nearby =
+          p.mapx && p.mapy ? await fetchNearby(String(p.mapx), String(p.mapy), String(p.place_name)) : [];
+        await sendPrivateReply(commentId, buildDmText(p, nearby));
         await db.execute({
           sql: "INSERT INTO dm_log (comment_id, ig_media_id, username) VALUES (?, ?, ?)",
           args: [commentId, mediaId, username],

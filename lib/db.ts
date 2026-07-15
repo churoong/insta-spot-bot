@@ -63,11 +63,20 @@ export async function initDb() {
     "write"
   );
 
-  // 기존 테이블 마이그레이션: image_urls 컬럼이 없으면 추가 (이미 있으면 에러 무시)
-  try {
-    await db.execute("ALTER TABLE posts ADD COLUMN image_urls TEXT");
-  } catch {
-    /* 이미 존재 */
+  // 기존 테이블 마이그레이션: 없는 컬럼 추가 (이미 있으면 에러 무시)
+  const migrations = [
+    "ALTER TABLE posts ADD COLUMN image_urls TEXT",
+    "ALTER TABLE posts ADD COLUMN mapx TEXT",
+    "ALTER TABLE posts ADD COLUMN mapy TEXT",
+    "ALTER TABLE posts ADD COLUMN like_count INTEGER DEFAULT 0",
+    "ALTER TABLE posts ADD COLUMN comment_count INTEGER DEFAULT 0",
+  ];
+  for (const sql of migrations) {
+    try {
+      await db.execute(sql);
+    } catch {
+      /* 이미 존재 */
+    }
   }
 
   initialized = true;

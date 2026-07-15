@@ -7,13 +7,24 @@ async function loadData() {
   try {
     await initDb();
     const posts = await db.execute(
-      "SELECT id, place_name, address, category, image_url, image_urls, caption, status, created_at FROM posts ORDER BY id DESC LIMIT 50"
+      "SELECT id, place_name, address, category, image_url, image_urls, caption, status, created_at, like_count, comment_count FROM posts ORDER BY id DESC LIMIT 50"
     );
     const dms = await db.execute(
       "SELECT COUNT(*) AS n FROM dm_log"
     );
+    const popular = await db.execute(
+      `SELECT place_name, like_count, comment_count,
+              (COALESCE(like_count,0) + COALESCE(comment_count,0) * 3) AS score
+       FROM posts WHERE status='published' AND category != '주간베스트'
+       ORDER BY score DESC, id DESC LIMIT 3`
+    );
     const live = process.env.IG_ACCESS_TOKEN ? true : false;
-    return { posts: posts.rows, dmCount: Number(dms.rows[0].n), live };
+    return {
+      posts: posts.rows,
+      dmCount: Number(dms.rows[0].n),
+      popular: popular.rows.filter((r: any) => Number(r.score) > 0),
+      live,
+    };
   } catch (e) {
     return { error: String(e) };
   }
@@ -76,6 +87,28 @@ export default async function Home() {
             <Stat label={data.live ? "발행된 게시글" : "생성된 미리보기"} value={data.posts.length} />
             <Stat label="발송된 DM" value={data.dmCount} />
           </div>
+
+          {data.popular && data.popular.length > 0 && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>🔥 인기 TOP{data.popular.length}</div>
+              {data.popular.map((p: any, i: number) => (
+                <div key={i} style={{ color: "#c8cdd8", fontSize: 13.5, padding: "3px 0" }}>
+                  {["🥇", "🥈", "🥉"][i]} {p.place_name}
+                  <span style={{ color: "#9aa0ae", marginLeft: 8 }}>
+                    ❤️ {Number(p.like_count) || 0} 💬 {Number(p.comment_count) || 0}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {data.posts.length === 0 && (
             <p style={{ color: "#9aa0ae" }}>
               아직 게시물이 없습니다. 크론이 첫 실행되면 여기에 표시됩니다.
@@ -117,6 +150,11 @@ export default async function Home() {
                 </div>
                 <div style={{ color: "#9aa0ae", fontSize: 13, margin: "4px 0 10px" }}>
                   {p.address} · {p.created_at}
+                  {p.status === "published" && (
+                    <span style={{ marginLeft: 8 }}>
+                      ❤️ {Number(p.like_count) || 0} 💬 {Number(p.comment_count) || 0}
+                    </span>
+                  )}
                 </div>
 
                 {/* 이미지 캐러셀 미리보기 (가로 스크롤) */}

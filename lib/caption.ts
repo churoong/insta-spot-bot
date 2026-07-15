@@ -166,18 +166,44 @@ function generateWithTemplate(spot: Spot): CaptionResult {
   return { caption };
 }
 
-/** 댓글 키워드에 응답하는 DM 본문 */
-export function buildDmText(spot: {
-  place_name: string;
-  address: string | null;
-  category: string | null;
-}): string {
-  return (
+/** 댓글 키워드에 응답하는 DM 본문 (+근처 추천 보너스) */
+export function buildDmText(
+  spot: {
+    place_name: string;
+    address: string | null;
+    category: string | null;
+  },
+  nearby: { name: string; address: string; category: string; distM: number }[] = []
+): string {
+  let text =
     `안녕하세요! 궁금해하셨던 ${spot.category ?? "장소"} 알려드릴게요 🤫\n\n` +
     `📍 ${spot.place_name}\n` +
-    (spot.address ? `🗺️ ${spot.address}\n` : "") +
+    (spot.address ? `🗺️ ${spot.address}\n` : "");
+
+  if (nearby.length > 0) {
+    text += `\n🚶 근처에 이런 곳도 있어요!\n`;
+    for (const n of nearby) {
+      const dist = n.distM >= 1000 ? `${(n.distM / 1000).toFixed(1)}km` : `${n.distM}m`;
+      text += `• ${n.name} (${n.category} · 약 ${dist})\n`;
+    }
+  }
+
+  text +=
     `\n좋은 시간 보내세요! 다음 장소도 기대해 주세요 💛\n` +
-    `(정보 출처: 한국관광공사)`
+    `(정보 출처: 한국관광공사)`;
+  return text;
+}
+
+/** 주간 베스트 TOP3 게시물 캡션 (장소명 비공개 유지 — 위치는 DM으로) */
+export function buildWeeklyCaption(count: number): string {
+  return (
+    `🔥 이번 주 여러분이 가장 사랑해주신 TOP${count}를 모아봤어요!\n\n` +
+    `좋아요와 댓글이 가장 뜨거웠던 곳들이에요. 다들 어디인지 눈치채셨을까요? 🤭\n` +
+    `아직 위치를 못 받으신 분들은 지금이 기회예요.\n\n` +
+    `궁금하신 분은 댓글에 "${keyword()}" 남기고 팔로우해 주세요 🙌\n` +
+    `TOP${count} 전부 DM으로 몰아서 보내드릴게요 📩\n\n` +
+    `#주간베스트 #이주의명소 #맛집추천 #여행추천 #숨은명소 #저장각 #먹스타그램 #여행스타그램\n\n` +
+    SOURCE_LINE
   );
 }
 

@@ -156,3 +156,23 @@ export async function sendPrivateReply(commentId: string, text: string) {
 export async function replyToComment(commentId: string, text: string) {
   await graphPost(`${commentId}/replies`, { message: text });
 }
+
+/** 게시물 반응 수 조회 (좋아요·댓글) — 인기 랭킹·주간 베스트용 */
+export async function fetchEngagement(
+  mediaId: string
+): Promise<{ likes: number; comments: number } | null> {
+  try {
+    const res = await fetch(
+      `${GRAPH}/${mediaId}?fields=like_count,comments_count&access_token=${encodeURIComponent(await getToken())}`,
+      { signal: AbortSignal.timeout(15000) }
+    );
+    const json = await res.json();
+    if (json.error) return null;
+    return {
+      likes: Number(json.like_count ?? 0),
+      comments: Number(json.comments_count ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
