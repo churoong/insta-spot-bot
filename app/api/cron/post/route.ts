@@ -72,9 +72,10 @@ async function runCron(forceFeatured = false) {
   }
 
   // 일일 발행 한도 체크 (Graph API 한도 50/일, 기본 24/일)
+  // dry_run(미리보기)은 실제 인스타 발행이 아니므로 제외
   const limit = Number(process.env.POSTS_PER_DAY_LIMIT || 24);
   const today = await db.execute(
-    "SELECT COUNT(*) AS n FROM posts WHERE created_at >= datetime('now', '-1 day')"
+    "SELECT COUNT(*) AS n FROM posts WHERE status='published' AND created_at >= datetime('now', '-1 day')"
   );
   if (Number(today.rows[0].n) >= limit) {
     return { skipped: true, reason: "daily limit reached" };
