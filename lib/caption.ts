@@ -194,6 +194,22 @@ export function buildDmText(
   return text;
 }
 
+/** 릴스용 캡션 (짧고 강한 훅 + 위치 비공개 + DM 유도) */
+export function buildReelCaption(category: string): string {
+  const hook =
+    category === "맛집"
+      ? "이 집, 사진만 봐도 군침 도시죠? 🤤"
+      : "여기 진짜 실화냐는 소리 나오는 곳이에요 😳";
+  return (
+    `${hook}\n\n` +
+    `끝까지 보시면 왜 다들 저장하는지 아실 거예요 👀\n` +
+    `어디인지 궁금하시면 댓글에 "${keyword()}" 남기고 팔로우해 주세요 🙌\n` +
+    `위치는 DM으로 살짝 보내드릴게요 📩\n\n` +
+    `#릴스 #reels #국내여행 #맛집추천 #여행에미치다 #숨은명소 #저장각 #여행스타그램 #먹스타그램 #여행릴스\n\n` +
+    SOURCE_LINE
+  );
+}
+
 /** 주간 베스트 TOP3 게시물 캡션 (장소명 비공개 유지 — 위치는 DM으로) */
 export function buildWeeklyCaption(count: number): string {
   return (

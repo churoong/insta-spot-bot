@@ -144,6 +144,37 @@ export async function publishImage(imageUrl: string, caption: string): Promise<s
   return String(published.id);
 }
 
+/**
+ * 릴스(동영상) 발행: video_url로 REELS 컨테이너 생성 → 처리 대기 → 발행.
+ * 동영상은 이미지보다 처리 시간이 길어 대기를 넉넉히(최대 ~4분) 둔다.
+ */
+export async function publishReel(videoUrl: string, caption: string): Promise<string> {
+  const container = await graphPost(`${igUserId()}/media`, {
+    media_type: "REELS",
+    video_url: videoUrl,
+    caption,
+    share_to_feed: true,
+  });
+
+  // 동영상 처리 대기 (인코딩 검증에 수십 초~수 분)
+  const id = String(container.id);
+  for (let i = 0; i < 80; i++) {
+    const status = await fetch(
+      `${GRAPH}/${id}?fields=status_code,status&access_token=${encodeURIComponent(await getToken())}`
+    ).then((r) => r.json());
+    if (status.status_code === "FINISHED") break;
+    if (status.status_code === "ERROR") {
+      throw new Error(`릴스 컨테이너 처리 실패: ${JSON.stringify(status)}`);
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+
+  const published = await graphPost(`${igUserId()}/media_publish`, {
+    creation_id: id,
+  });
+  return String(published.id);
+}
+
 /** 댓글에 대한 비공개 답장(Private Reply) — 댓글 작성자에게 DM 발송 */
 export async function sendPrivateReply(commentId: string, text: string) {
   await graphPost(`${igUserId()}/messages`, {
