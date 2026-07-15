@@ -49,17 +49,17 @@ export async function publishCarousel(imageUrls: string[], caption: string): Pro
     return publishImage(imageUrls[0], caption);
   }
 
-  // 1) 자식 컨테이너들 생성 (캐러셀 항목)
-  const childIds: string[] = [];
-  for (const url of imageUrls.slice(0, 10)) {
-    const child = await graphPost(`${igUserId()}/media`, {
-      image_url: url,
-      is_carousel_item: true,
-    });
-    childIds.push(child.id);
-  }
-  // 자식 컨테이너 처리 대기
-  for (const id of childIds) await waitForContainer(id);
+  // 1) 자식 컨테이너들 병렬 생성 (캐러셀 항목) — 순차로 하면 Vercel 60초 초과
+  const childIds: string[] = await Promise.all(
+    imageUrls.slice(0, 10).map((url) =>
+      graphPost(`${igUserId()}/media`, {
+        image_url: url,
+        is_carousel_item: true,
+      }).then((c) => String(c.id))
+    )
+  );
+  // 자식 컨테이너 처리 병렬 대기 (총 대기 = 가장 느린 1장, 합산 아님)
+  await Promise.all(childIds.map((id) => waitForContainer(id)));
 
   // 2) 캐러셀 컨테이너 생성
   const carousel = await graphPost(`${igUserId()}/media`, {
