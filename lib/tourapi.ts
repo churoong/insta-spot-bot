@@ -77,18 +77,26 @@ export async function fetchCandidates(): Promise<Spot[]> {
  * 장소의 추가 이미지들을 가져와 대표 이미지와 합쳐 최대 MAX_IMAGES장 반환.
  * (detailImage2 = 콘텐츠 이미지 목록)
  */
+// 인스타에 어울리지 않는 편의시설 사진 제외 (imgname 라벨 기준).
+// 예: "장애인화장실 내부", "장애인주차장", "기저귀 교환대" 등.
+const BAD_IMG_NAME =
+  /(화장실|주차|기저귀|수유|경사로|안내도|안내판|표지판|매표|엘리베이터|승강기|휠체어|점자|유도블록|소화전|진입로|비상|피난|보관함|매표소|안내소)/;
+
 export async function fetchImages(
   contentId: string,
   firstImage: string
 ): Promise<string[]> {
+  // 대표 이미지(firstimage)는 관광공사가 고른 사진이라 항상 포함.
   const urls = new Set<string>([toHttps(firstImage)]);
   try {
     const items = await call("detailImage2", {
       contentId,
       imageYN: "Y",
-      numOfRows: "20",
+      numOfRows: "30",
     });
     for (const it of items) {
+      // 화장실·주차장 등 편의시설 사진은 라벨로 걸러냄
+      if (it.imgname && BAD_IMG_NAME.test(it.imgname)) continue;
       const u = it.originimgurl || it.smallimageurl;
       if (u) urls.add(toHttps(u));
       if (urls.size >= MAX_IMAGES) break;
