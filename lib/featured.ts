@@ -40,9 +40,10 @@ async function fetchHundredYearPool(): Promise<FeaturedEntry[]> {
       }
     }
 
-    // API 호출 (전체 목록)
+    // API 호출 (전체 목록) — HYS_API_KEY 우선, 없으면 TOUR_API_KEY로 시도
+    const key = process.env.HYS_API_KEY || process.env.TOUR_API_KEY!;
     const res = await fetch(
-      `${HYS_API}?page=1&perPage=3000&serviceKey=${encodeURIComponent(process.env.TOUR_API_KEY!)}`,
+      `${HYS_API}?page=1&perPage=3000&serviceKey=${encodeURIComponent(key)}`,
       { signal: AbortSignal.timeout(20000) }
     );
     const json = await res.json();
@@ -75,11 +76,18 @@ async function fetchHundredYearPool(): Promise<FeaturedEntry[]> {
 
 const BASE = "https://apis.data.go.kr/B551011/KorService2";
 
-/** 이름 정규화 (공백 제거) 후 포함 관계로 매칭 */
+/** 이름 정규화 (공백·대괄호 태그 제거) 후 포함 관계로 매칭 */
 function nameMatch(a: string, b: string): boolean {
-  const na = a.replace(/\s+/g, "");
-  const nb = b.replace(/\s+/g, "");
+  const norm = (s: string) => s.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, "");
+  const na = norm(a);
+  const nb = norm(b);
   return na.includes(nb) || nb.includes(na);
+}
+
+/** 지역 대조: TourAPI 주소에 목록의 지역명(앞 2글자)이 포함되는지 (동명 가게 오매칭 방지) */
+function regionMatch(addr: string, region: string): boolean {
+  if (!region) return true;
+  return String(addr ?? "").includes(region.slice(0, 2));
 }
 
 /**
@@ -91,12 +99,10 @@ export async function pickFeatured(): Promise<{ spot: Spot; label: string } | nu
   const curated = (featuredData.list as FeaturedEntry[]).sort(() => Math.random() - 0.5);
   const hundred = (await fetchHundredYearPool()).sort(() => Math.random() - 0.5);
 
-  // 큐레이션(희소·프리미엄)과 백년가게(대규모 풀)를 번갈아 시도 — 후보 최대 20개
-  const entries: FeaturedEntry[] = [];
-  for (let i = 0; i < 10; i++) {
-    if (curated[i]) entries.push(curated[i]);
-    if (hundred[i]) entries.push(hundred[i]);
-  }
+  // 큐레이션(희소·프리미엄)과 백년가게(대규모 풀)를 반반 섞어 무작위 순서로 시도 — 후보 최대 20개
+  const entries: FeaturedEntry[] = [...curated.slice(0, 10), ...hundred.slice(0, 10)].sort(
+    () => Math.random() - 0.5
+  );
 
   for (const entry of entries) {
     try {
@@ -122,10 +128,8 @@ export async function pickFeatured(): Promise<{ spot: Spot; label: string } | nu
           it.firstimage &&
           (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3") &&
           nameMatch(String(it.title), entry.name) &&
-          // 백년가게는 동명 가게 오매칭 방지를 위해 시/도 앞 2글자 대조
-          (entry.type !== "hundred" ||
-            !entry.region ||
-            String(it.addr1 ?? "").slice(0, 2) === entry.region.slice(0, 2))
+          // 동명 가게 오매칭 방지: 모든 항목에서 지역 대조 (예: 서울 진주회관 ≠ 천안 진주회관)
+          regionMatch(String(it.addr1 ?? ""), entry.region)
       );
       if (!hit) continue;
 
