@@ -8,14 +8,69 @@ import { db } from "./db";
 export interface FeaturedEntry {
   name: string;
   region: string;
-  type: "michelin" | "renowned";
+  type: "michelin" | "renowned" | "hundred";
 }
 
 /** 캡션·DM에 쓰는 사실 기반 문구 (과장·단정 없이) */
 export function featuredLabel(type: string): string {
-  return type === "michelin"
-    ? "미쉐린 가이드에 이름을 올린 적 있는 곳으로 알려져 있어요"
-    : "전국에서 일부러 찾아온다고 소문난 유명 맛집이에요";
+  if (type === "michelin") return "미쉐린 가이드에 이름을 올린 적 있는 곳으로 알려져 있어요";
+  if (type === "hundred") return "중소벤처기업부가 인증한 '백년가게'로 선정된 곳이에요";
+  return "전국에서 일부러 찾아온다고 소문난 유명 맛집이에요";
+}
+
+// ===== 백년가게 공공데이터 자동 동기화 =====
+// 소상공인시장진흥공단_전국 백년가게 지정리스트 (data.go.kr, 월 2회 갱신, 이용제한 없음)
+// TOUR_API_KEY와 같은 data.go.kr 인증키 사용 (해당 데이터셋 활용신청 필요)
+const HYS_API =
+  "https://api.odcloud.kr/api/15132695/v1/uddi:82fc1cc1-f636-46fc-ae0d-b1f2da5052b4";
+
+/** 백년가게 목록을 API에서 받아 7일간 DB(config)에 캐시. 실패 시 빈 배열. */
+async function fetchHundredYearPool(): Promise<FeaturedEntry[]> {
+  try {
+    // 캐시 확인
+    const cached = await db.execute(
+      "SELECT value, updated_at FROM config WHERE key = 'hys_list'"
+    );
+    if (cached.rows.length > 0) {
+      const age =
+        Date.now() -
+        new Date(String(cached.rows[0].updated_at).replace(" ", "T") + "Z").getTime();
+      if (age < 7 * 86_400_000) {
+        return JSON.parse(String(cached.rows[0].value));
+      }
+    }
+
+    // API 호출 (전체 목록)
+    const res = await fetch(
+      `${HYS_API}?page=1&perPage=3000&serviceKey=${encodeURIComponent(process.env.TOUR_API_KEY!)}`,
+      { signal: AbortSignal.timeout(20000) }
+    );
+    const json = await res.json();
+    if (!Array.isArray(json?.data) || json.data.length === 0) {
+      console.log("[백년가게] API 응답 없음(활용신청 필요할 수 있음):", JSON.stringify(json).slice(0, 120));
+      // 캐시가 있으면 만료됐어도 재사용
+      if (cached.rows.length > 0) return JSON.parse(String(cached.rows[0].value));
+      return [];
+    }
+
+    const pool: FeaturedEntry[] = json.data
+      .map((r: any) => ({
+        name: String(r["업체명"] ?? "").trim(),
+        region: String(r["업체주소"] ?? "").split(/\s+/)[0] ?? "",
+        type: "hundred" as const,
+      }))
+      .filter((e: FeaturedEntry) => e.name.length >= 2);
+
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('hys_list', ?, datetime('now'))",
+      args: [JSON.stringify(pool)],
+    });
+    console.log(`[백년가게] 목록 동기화: ${pool.length}곳`);
+    return pool;
+  } catch (e) {
+    console.error("[백년가게] 동기화 실패(무시):", e);
+    return [];
+  }
 }
 
 const BASE = "https://apis.data.go.kr/B551011/KorService2";
@@ -28,12 +83,20 @@ function nameMatch(a: string, b: string): boolean {
 }
 
 /**
- * 목록에서 아직 발행 안 한 인증맛집을 골라 TourAPI에서 자료 확보.
- * 조건: 검색됨 + 이름 매칭 + 공공누리 Type1/3 + 이미지 3장 이상.
+ * 인증맛집 후보 선정: 큐레이션 목록(미쉐린 이력 등) + 백년가게 공공데이터(자동 동기화).
+ * 조건: TourAPI 검색됨 + 이름 매칭 + (백년가게는 지역 대조) + 공공누리 Type1/3 + 이미지 3장 이상.
  * 실패하면 null (호출부는 일반 발행으로 진행).
  */
 export async function pickFeatured(): Promise<{ spot: Spot; label: string } | null> {
-  const entries = (featuredData.list as FeaturedEntry[]).sort(() => Math.random() - 0.5);
+  const curated = (featuredData.list as FeaturedEntry[]).sort(() => Math.random() - 0.5);
+  const hundred = (await fetchHundredYearPool()).sort(() => Math.random() - 0.5);
+
+  // 큐레이션(희소·프리미엄)과 백년가게(대규모 풀)를 번갈아 시도 — 후보 최대 20개
+  const entries: FeaturedEntry[] = [];
+  for (let i = 0; i < 10; i++) {
+    if (curated[i]) entries.push(curated[i]);
+    if (hundred[i]) entries.push(hundred[i]);
+  }
 
   for (const entry of entries) {
     try {
@@ -58,7 +121,11 @@ export async function pickFeatured(): Promise<{ spot: Spot; label: string } | nu
         (it: any) =>
           it.firstimage &&
           (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3") &&
-          nameMatch(String(it.title), entry.name)
+          nameMatch(String(it.title), entry.name) &&
+          // 백년가게는 동명 가게 오매칭 방지를 위해 시/도 앞 2글자 대조
+          (entry.type !== "hundred" ||
+            !entry.region ||
+            String(it.addr1 ?? "").slice(0, 2) === entry.region.slice(0, 2))
       );
       if (!hit) continue;
 
