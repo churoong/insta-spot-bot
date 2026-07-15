@@ -1,5 +1,6 @@
-// Meta Instagram Graph API — 공식 API만 사용 (비공식 자동화는 계정 정지 사유)
-const GRAPH = "https://graph.facebook.com/v23.0";
+// Instagram API with Instagram Login (공식 API). graph.instagram.com 사용.
+// 비공식 자동화는 계정 정지 사유이므로 절대 사용하지 않음.
+const GRAPH = "https://graph.instagram.com/v23.0";
 
 function token() {
   return process.env.IG_ACCESS_TOKEN!;
@@ -9,12 +10,11 @@ function igUserId() {
 }
 
 async function graphPost(path: string, body: Record<string, unknown>) {
-  const res = await fetch(`${GRAPH}/${path}`, {
+  // access_token은 쿼리 파라미터로, 본문은 JSON (graph.instagram.com 검증된 방식)
+  const url = `${GRAPH}/${path}?access_token=${encodeURIComponent(token())}`;
+  const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token()}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30000),
   });
