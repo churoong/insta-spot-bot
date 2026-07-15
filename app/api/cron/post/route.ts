@@ -3,6 +3,7 @@ import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
 import { publishCarousel, maybeRefreshToken, fetchEngagement } from "@/lib/instagram";
+import { pickFeatured } from "@/lib/featured";
 
 export const maxDuration = 60;
 
@@ -17,15 +18,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // ?featured=1 → 인증맛집 회차 강제 (테스트용)
+  const forceFeatured = req.nextUrl.searchParams.get("featured") === "1";
+
   if (req.nextUrl.searchParams.get("sync") === "1") {
-    const result = await runCron();
+    const result = await runCron(forceFeatured);
     return NextResponse.json(result);
   }
 
   // cron-job.org에는 즉시 응답, 발행은 백그라운드에서
   after(async () => {
     try {
-      const r = await runCron();
+      const r = await runCron(forceFeatured);
       console.log("[cron/post]", JSON.stringify(r));
     } catch (e) {
       console.error("[cron/post] 오류:", e);
@@ -34,7 +38,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ accepted: true });
 }
 
-async function runCron() {
+async function runCron(forceFeatured = false) {
   await initDb();
 
   // 토큰 자동 갱신: 7일 넘게 묵었으면 새 60일 토큰으로 교체 (실패해도 발행은 계속)
@@ -76,6 +80,26 @@ async function runCron() {
     return { skipped: true, reason: "daily limit reached" };
   }
 
+  // 인증맛집 회차: 매 FEATURED_EVERY번째(기본 4) 게시물, 또는 ?featured=1 강제.
+  // 목록에서 못 찾으면 일반 발행으로 자연스럽게 진행.
+  const FEATURED_EVERY = Number(process.env.FEATURED_EVERY || 4);
+  const total = Number(
+    (await db.execute("SELECT COUNT(*) AS n FROM posts")).rows[0].n
+  );
+  if (forceFeatured || (FEATURED_EVERY > 0 && total % FEATURED_EVERY === FEATURED_EVERY - 1)) {
+    try {
+      const f = await pickFeatured();
+      if (f) {
+        f.spot.overview = await fetchOverview(f.spot.contentId);
+        const { caption } = await generateCaption(f.spot, { featuredBy: f.label });
+        return await publishAndSave(f.spot, caption, f.label);
+      }
+      console.log("[featured] 후보 없음 → 일반 발행으로 진행");
+    } catch (e) {
+      console.error("[featured] 오류(일반 발행으로 진행):", e);
+    }
+  }
+
   // 아직 안 올린 장소 찾기 (최대 3번 다른 지역 시도)
   for (let attempt = 0; attempt < 3; attempt++) {
     const candidates = await fetchCandidates();
@@ -92,32 +116,48 @@ async function runCron() {
 
       spot.overview = await fetchOverview(spot.contentId);
       const { caption } = await generateCaption(spot);
-
-      // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
-      const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
-      const mediaId = dryRun ? null : await publishCarousel(spot.imageUrls, caption);
-
-      await db.execute({
-        sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [
-          spot.contentId,
-          spot.name,
-          spot.address,
-          spot.category,
-          spot.imageUrl,
-          JSON.stringify(spot.imageUrls),
-          caption,
-          mediaId,
-          dryRun ? "dry_run" : "published",
-          spot.mapx ?? null,
-          spot.mapy ?? null,
-        ],
-      });
-
-      return { published: !dryRun, dryRun, place: spot.name, images: spot.imageUrls.length, mediaId };
+      return await publishAndSave(spot, caption, null);
     }
   }
 
   return { published: false, reason: "no new candidates found" };
+}
+
+/** 발행(또는 드라이런) 후 DB 저장 — 일반/인증맛집 공용 */
+async function publishAndSave(
+  spot: import("@/lib/tourapi").Spot,
+  caption: string,
+  featuredBy: string | null
+) {
+  // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
+  const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
+  const mediaId = dryRun ? null : await publishCarousel(spot.imageUrls, caption);
+
+  await db.execute({
+    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy, featured_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      spot.contentId,
+      spot.name,
+      spot.address,
+      spot.category,
+      spot.imageUrl,
+      JSON.stringify(spot.imageUrls),
+      caption,
+      mediaId,
+      dryRun ? "dry_run" : "published",
+      spot.mapx ?? null,
+      spot.mapy ?? null,
+      featuredBy,
+    ],
+  });
+
+  return {
+    published: !dryRun,
+    dryRun,
+    place: spot.name,
+    images: spot.imageUrls.length,
+    featured: !!featuredBy,
+    mediaId,
+  };
 }

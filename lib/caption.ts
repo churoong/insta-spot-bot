@@ -16,22 +16,30 @@ function keyword() {
  * 규칙: 상호명/정확한 장소명은 본문·해시태그 모두 금지,
  * 댓글 키워드 + 팔로우 → DM 안내 문구 포함, 출처 명시.
  */
-export async function generateCaption(spot: Spot): Promise<CaptionResult> {
+export interface CaptionOpts {
+  /** 인증·유명 맛집 사실 문구 (예: "미쉐린 가이드에 이름을 올린 적 있는 곳으로 알려져 있어요") */
+  featuredBy?: string;
+}
+
+export async function generateCaption(spot: Spot, opts: CaptionOpts = {}): Promise<CaptionResult> {
   if (process.env.GEMINI_API_KEY) {
     try {
-      return await generateWithGemini(spot);
+      return await generateWithGemini(spot, opts);
     } catch (e) {
       console.error("Gemini 실패, 템플릿 폴백 사용:", e);
     }
   }
-  return generateWithTemplate(spot);
+  return generateWithTemplate(spot, opts);
 }
 
 // ===== 1순위: Google Gemini (무료 등급 — 하루 1,500회, 카드 불필요) =====
 
-async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
+async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<CaptionResult> {
   const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
   const { sido, gu } = regionHint(spot.address);
+  const featuredRule = opts.featuredBy
+    ? `\n7. ⭐이 집의 특별한 사실: "${opts.featuredBy}". 이 사실을 첫 문장 훅으로 강렬하게 활용해 (예: "미쉐린 가이드에 이름을 올렸던 그 집..."). 단, 과장하거나 공식 제휴처럼 보이게 하지 말고 사실만 언급. 상호명은 여전히 비밀.`
+    : "";
   const regionTagGuide = sido
     ? `지역 해시태그 2~4개를 반드시 포함해 (예: #${sido}${spot.category === "맛집" ? "맛집" : "여행"}${gu ? `, #${gu}${spot.category === "맛집" ? "맛집" : "여행"}, #${gu}핫플` : ""}). 단, 지역명은 해시태그에만 쓰고 본문에는 절대 쓰지 마.`
     : `지역 해시태그는 생략해.`;
@@ -49,7 +57,7 @@ async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
 3. 자연스럽고 사람 냄새 나는 톤으로 써. 광고 문구 같은 뻔한 표현("인생맛집", "핫플 인정")은 피하고, 실제로 다녀와 본 사람이 소개하듯 3~5문장. 반드시 **친근하지만 정중한 존댓말(해요체)** 로 써. 반말 금지. 이모지는 2~4개만 적당히.
 4. 여러 장의 사진이 함께 올라가는 게시물이야. 자연스러우면 사진 얘기(분위기, 디테일)를 한두 개 녹여도 좋아.
 5. 마지막에 반드시 이 안내를 자연스럽게 포함: 댓글에 "${keyword()}"라고 남기고 팔로우하면 DM으로 위치를 보내준다는 것. (딱딱하지 않게)
-6. 해시태그는 줄바꿈 후 8~12개: 분위기·음식종류·감성 키워드 위주. ${regionTagGuide} 상호명·정확한 장소명 해시태그는 절대 금지.
+6. 해시태그는 줄바꿈 후 8~12개: 분위기·음식종류·감성 키워드 위주. ${regionTagGuide} 상호명·정확한 장소명 해시태그는 절대 금지.${featuredRule}
 
 캡션 본문과 해시태그만 출력해. 설명이나 따옴표 없이 바로 캡션만.`;
 
@@ -83,7 +91,7 @@ async function generateWithGemini(spot: Spot): Promise<CaptionResult> {
   const body = text.split("#")[0];
   const leakedLocation = leaksLocation(body, spot.address);
   if (!text || truncated || missingKeyword || missingHashtag || leakedName || leakedLocation) {
-    return generateWithTemplate(spot);
+    return generateWithTemplate(spot, opts);
   }
 
   return { caption: `${text}\n\n${SOURCE_LINE}` };
@@ -160,10 +168,13 @@ const SIDO_SHORT: Record<string, string> = {
   전라남도: "전남", 경상북도: "경북", 경상남도: "경남",
   제주특별자치도: "제주", 제주도: "제주",
 };
-function generateWithTemplate(spot: Spot): CaptionResult {
+function generateWithTemplate(spot: Spot, opts: CaptionOpts = {}): CaptionResult {
   const isFood = spot.category === "맛집";
   // 본문에는 지역명 노출 금지 — 오프너는 지역 힌트 없음
-  const opener = pick(isFood ? FOOD_OPENERS : TRAVEL_OPENERS);
+  // 인증맛집이면 사실 훅을 오프너로 사용
+  const opener = opts.featuredBy
+    ? `${opts.featuredBy} 🏅 그런데 어디인지는... 비밀이에요 🤫`
+    : pick(isFood ? FOOD_OPENERS : TRAVEL_OPENERS);
   const line = pick(isFood ? FOOD_LINES : TRAVEL_LINES);
 
   // 해시태그에는 지역 태그 포함 (탐색 노출용) + 분위기·감성 태그
@@ -191,13 +202,15 @@ export function buildDmText(
     place_name: string;
     address: string | null;
     category: string | null;
+    featured_by?: string | null;
   },
   nearby: { name: string; address: string; category: string; distM: number }[] = []
 ): string {
   let text =
     `안녕하세요! 궁금해하셨던 ${spot.category ?? "장소"} 알려드릴게요 🤫\n\n` +
     `📍 ${spot.place_name}\n` +
-    (spot.address ? `🗺️ ${spot.address}\n` : "");
+    (spot.address ? `🗺️ ${spot.address}\n` : "") +
+    (spot.featured_by ? `🏅 ${spot.featured_by}\n` : "");
 
   if (nearby.length > 0) {
     text += `\n🚶 근처에 이런 곳도 있어요!\n`;
