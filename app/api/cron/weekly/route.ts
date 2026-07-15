@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { buildWeeklyCaption } from "@/lib/caption";
 import { publishCarousel } from "@/lib/instagram";
@@ -8,12 +8,28 @@ export const maxDuration = 60;
 // 주 1회(일요일 저녁 권장) 외부 크론이 호출:
 // GET /api/cron/weekly  (Authorization: Bearer $CRON_SECRET)
 // ?dry=1 을 붙이면 실제 발행 없이 선정 결과만 반환 (테스트용)
+// 발행은 오래 걸리므로 즉시 응답 후 after()로 백그라운드 처리 (dry/sync 제외).
 export async function GET(req: NextRequest) {
   if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const dry = req.nextUrl.searchParams.get("dry") === "1";
+  const sync = req.nextUrl.searchParams.get("sync") === "1";
 
+  if (dry || sync) {
+    return NextResponse.json(await runWeekly(dry));
+  }
+  after(async () => {
+    try {
+      console.log("[cron/weekly]", JSON.stringify(await runWeekly(false)));
+    } catch (e) {
+      console.error("[cron/weekly] 오류:", e);
+    }
+  });
+  return NextResponse.json({ accepted: true });
+}
+
+async function runWeekly(dry: boolean) {
   await initDb();
 
   // 이번 주 식별자 (중복 발행 방지)
@@ -24,7 +40,7 @@ export async function GET(req: NextRequest) {
     args: [weekId],
   });
   if (dup.rows.length > 0) {
-    return NextResponse.json({ skipped: true, reason: "이번 주 베스트는 이미 발행됨" });
+    return { skipped: true, reason: "이번 주 베스트는 이미 발행됨" };
   }
 
   // 지난 7일 발행 게시물 중 반응(좋아요 + 댓글×3) TOP3 선정
@@ -40,10 +56,7 @@ export async function GET(req: NextRequest) {
      LIMIT 3`
   );
   if (top.rows.length < 2) {
-    return NextResponse.json(
-      { skipped: true, reason: `지난 7일 발행 게시물이 부족함(${top.rows.length}건)` },
-      { status: 200 }
-    );
+    return { skipped: true, reason: `지난 7일 발행 게시물이 부족함(${top.rows.length}건)` };
   }
 
   const rows = top.rows as any[];
@@ -58,7 +71,7 @@ export async function GET(req: NextRequest) {
     .join("\n");
 
   if (dry) {
-    return NextResponse.json({
+    return {
       dry: true,
       weekId,
       top: rows.map((r, i) => ({
@@ -69,7 +82,7 @@ export async function GET(req: NextRequest) {
       })),
       images: images.length,
       caption,
-    });
+    };
   }
 
   const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
@@ -91,12 +104,12 @@ export async function GET(req: NextRequest) {
     ],
   });
 
-  return NextResponse.json({
+  return {
     published: !dryRun,
     weekId,
     top: rows.map((r, i) => `${i + 1}위 ${r.place_name}`),
     mediaId,
-  });
+  };
 }
 
 /** ISO 주차 번호 */
