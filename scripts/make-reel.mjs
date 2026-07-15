@@ -68,8 +68,8 @@ async function main() {
   }
   if (!subject) throw new Error("릴스 대상 장소를 찾지 못함");
 
-  // 3) 캡션: 릴스 전용 훅 (신선한 장소면 일반 캡션도 참고 가능하나 릴스는 짧게)
-  const caption = buildReelCaption(subject.category);
+  // 3) 캡션: 릴스 전용 훅 + 지역 해시태그 (본문 위치 비공개)
+  const caption = buildReelCaption(subject.category, subject.address);
 
   // 4) 이미지 다운로드 (최대 8장)
   const urls = subject.imageUrls.slice(0, 8);
