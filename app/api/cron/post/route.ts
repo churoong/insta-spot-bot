@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
-import { publishCarousel } from "@/lib/instagram";
+import { publishCarousel, maybeRefreshToken } from "@/lib/instagram";
 
 export const maxDuration = 60;
 
@@ -14,6 +14,14 @@ export async function GET(req: NextRequest) {
   }
 
   await initDb();
+
+  // 토큰 자동 갱신: 7일 넘게 묵었으면 새 60일 토큰으로 교체 (실패해도 발행은 계속)
+  try {
+    const tr = await maybeRefreshToken();
+    if (tr.note) console.log("[token]", tr.refreshed ? "갱신됨:" : "", tr.note);
+  } catch (e) {
+    console.error("[token] 갱신 중 오류(무시):", e);
+  }
 
   // 일일 발행 한도 체크 (Graph API 한도 50/일, 기본 24/일)
   const limit = Number(process.env.POSTS_PER_DAY_LIMIT || 24);

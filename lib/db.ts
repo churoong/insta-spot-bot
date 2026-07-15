@@ -54,6 +54,11 @@ export async function initDb() {
         raw TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       )`,
+      `CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TEXT DEFAULT (datetime('now'))
+      )`,
     ],
     "write"
   );
