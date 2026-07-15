@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const notes: string[] = [];
   const log = (n: string) => notes.push(n);
 
-  // 서명 검증 (진단 모드: 실패해도 기록만 하고 계속 진행 — 확인 후 다시 엄격 모드로)
+  // 서명 검증 (요청이 진짜 Meta에서 왔는지) — 검증 실패 시 차단
   const sig = req.headers.get("x-hub-signature-256") ?? "";
   let sigOk = false;
   try {
@@ -39,6 +39,9 @@ export async function POST(req: NextRequest) {
       crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
   } catch {
     /* 시크릿 없거나 형식 오류 */
+  }
+  if (!sigOk) {
+    return NextResponse.json({ error: "bad signature" }, { status: 403 });
   }
 
   const keyword = process.env.DM_KEYWORD || "어디야";
