@@ -1,0 +1,37 @@
+name: 모음집 자동 발행
+
+on:
+  workflow_dispatch: {} # 수동 실행 (테스트용)
+  schedule:
+    - cron: "0 10 * * 0,2,4" # 매주 일·화·목 UTC 10:00 = KST 19:00 (주 3회)
+
+jobs:
+  roundup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 한글 폰트 설치 (인포그래픽 렌더링용)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-nanum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 모음집 생성·발행
+        run: npx tsx scripts/make-roundup.mjs
+        env:
+          TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
