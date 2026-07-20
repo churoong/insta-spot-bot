@@ -1,19 +1,19 @@
 {
-  "_설명": "모음집(공개형 N선) 테마 로테이션. keyword는 TourAPI 검색어, areaCode 없으면 전국. count는 목표 수(최소 5 미달 시 다음 테마로).",
+  "_설명": "모음집(공개형 N선) 테마 로테이션. keyword=TourAPI 검색어, areaCode 없으면 전국, months=제철(비면 사계절), emoji=인포그래픽 한줄평 앞 이모지.",
   "themes": [
-    { "key": "sundae", "title": "전국 순대국 맛집 10선", "keyword": "순대", "region": "전국", "count": 10, "tags": ["순대국", "순대국밥", "국밥맛집"] },
-    { "key": "dwaeji-busan", "title": "부산 돼지국밥 성지 8선", "keyword": "돼지국밥", "areaCode": 6, "region": "부산", "count": 8, "tags": ["돼지국밥", "부산맛집", "부산여행"] },
-    { "key": "kalguksu", "title": "전국 칼국수 맛집 10선", "keyword": "칼국수", "region": "전국", "count": 10, "tags": ["칼국수", "칼국수맛집", "면스타그램"] },
-    { "key": "naengmyeon", "title": "전국 냉면 맛집 10선", "keyword": "냉면", "region": "전국", "count": 10, "tags": ["냉면", "냉면맛집", "평양냉면"] },
-    { "key": "gukbap", "title": "전국 국밥 맛집 10선", "keyword": "국밥", "region": "전국", "count": 10, "tags": ["국밥", "국밥맛집", "해장맛집"] },
-    { "key": "makguksu", "title": "전국 막국수 맛집 8선", "keyword": "막국수", "region": "전국", "count": 8, "tags": ["막국수", "막국수맛집", "메밀막국수"] },
-    { "key": "bread", "title": "전국 빵지순례 10선", "keyword": "빵", "region": "전국", "count": 10, "tags": ["빵지순례", "빵스타그램", "베이커리카페"] },
-    { "key": "gomtang", "title": "전국 곰탕·설렁탕 8선", "keyword": "곰탕", "region": "전국", "count": 8, "tags": ["곰탕", "설렁탕", "국물맛집"] },
-    { "key": "milmyeon-busan", "title": "부산 밀면 성지 7선", "keyword": "밀면", "areaCode": 6, "region": "부산", "count": 7, "tags": ["밀면", "부산밀면", "부산맛집"] },
-    { "key": "mandu", "title": "전국 손만두 맛집 8선", "keyword": "만두", "region": "전국", "count": 8, "tags": ["만두", "손만두", "만두맛집"] },
-    { "key": "chueotang", "title": "전국 추어탕 맛집 8선", "keyword": "추어탕", "region": "전국", "count": 8, "tags": ["추어탕", "보양식", "건강밥상"] },
-    { "key": "heukdwaeji-jeju", "title": "제주 흑돼지 맛집 7선", "keyword": "흑돼지", "areaCode": 39, "region": "제주", "count": 7, "tags": ["제주흑돼지", "제주맛집", "제주여행"] },
-    { "key": "jjamppong", "title": "전국 짬뽕 맛집 8선", "keyword": "짬뽕", "region": "전국", "count": 8, "tags": ["짬뽕", "짬뽕맛집", "중식맛집"] },
-    { "key": "cafe-seoul", "title": "서울 감성 카페 10선", "keyword": "카페", "areaCode": 1, "region": "서울", "count": 10, "tags": ["서울카페", "감성카페", "카페투어"] }
+    { "key": "sundae", "title": "전국 순대국 맛집 10선", "keyword": "순대", "region": "전국", "count": 10, "emoji": "🍲", "tags": ["순대국", "순대국밥", "국밥맛집"] },
+    { "key": "dwaeji-busan", "title": "부산 돼지국밥 성지 8선", "keyword": "돼지국밥", "areaCode": 6, "region": "부산", "count": 8, "emoji": "🍲", "tags": ["돼지국밥", "부산맛집", "부산여행"] },
+    { "key": "kalguksu", "title": "전국 칼국수 맛집 10선", "keyword": "칼국수", "region": "전국", "count": 10, "emoji": "🍜", "months": [10, 11, 12, 1, 2, 3], "tags": ["칼국수", "칼국수맛집", "면스타그램"] },
+    { "key": "naengmyeon", "title": "전국 냉면 맛집 10선", "keyword": "냉면", "region": "전국", "count": 10, "emoji": "🍜", "months": [5, 6, 7, 8, 9], "tags": ["냉면", "냉면맛집", "평양냉면"] },
+    { "key": "gukbap", "title": "전국 국밥 맛집 10선", "keyword": "국밥", "region": "전국", "count": 10, "emoji": "🍲", "months": [9, 10, 11, 12, 1, 2, 3], "tags": ["국밥", "국밥맛집", "해장맛집"] },
+    { "key": "makguksu", "title": "전국 막국수 맛집 8선", "keyword": "막국수", "region": "전국", "count": 8, "emoji": "🍜", "months": [4, 5, 6, 7, 8, 9, 10], "tags": ["막국수", "막국수맛집", "메밀막국수"] },
+    { "key": "bread", "title": "전국 빵지순례 10선", "keyword": "빵", "region": "전국", "count": 10, "emoji": "🥐", "tags": ["빵지순례", "빵스타그램", "베이커리카페"] },
+    { "key": "gomtang", "title": "전국 곰탕·설렁탕 8선", "keyword": "곰탕", "region": "전국", "count": 8, "emoji": "🥘", "months": [10, 11, 12, 1, 2, 3], "tags": ["곰탕", "설렁탕", "국물맛집"] },
+    { "key": "milmyeon-busan", "title": "부산 밀면 성지 7선", "keyword": "밀면", "areaCode": 6, "region": "부산", "count": 7, "emoji": "🍜", "months": [5, 6, 7, 8, 9], "tags": ["밀면", "부산밀면", "부산맛집"] },
+    { "key": "mandu", "title": "전국 손만두 맛집 8선", "keyword": "만두", "region": "전국", "count": 8, "emoji": "🥟", "months": [11, 12, 1, 2], "tags": ["만두", "손만두", "만두맛집"] },
+    { "key": "chueotang", "title": "전국 추어탕 맛집 8선", "keyword": "추어탕", "region": "전국", "count": 8, "emoji": "🥘", "months": [8, 9, 10, 11], "tags": ["추어탕", "보양식", "건강밥상"] },
+    { "key": "heukdwaeji-jeju", "title": "제주 흑돼지 맛집 7선", "keyword": "흑돼지", "areaCode": 39, "region": "제주", "count": 7, "emoji": "🥓", "tags": ["제주흑돼지", "제주맛집", "제주여행"] },
+    { "key": "jjamppong", "title": "전국 짬뽕 맛집 8선", "keyword": "짬뽕", "region": "전국", "count": 8, "emoji": "🍜", "months": [9, 10, 11, 12, 1, 2, 3], "tags": ["짬뽕", "짬뽕맛집", "중식맛집"] },
+    { "key": "cafe-seoul", "title": "서울 감성 카페 10선", "keyword": "카페", "areaCode": 1, "region": "서울", "count": 10, "emoji": "☕", "tags": ["서울카페", "감성카페", "카페투어"] }
   ]
 }

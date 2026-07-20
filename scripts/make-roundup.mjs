@@ -1,10 +1,11 @@
 // 모음집(공개형 N선) 자동 생성·발행 — GitHub Actions에서 실행.
-// 흐름: 테마 로테이션 → TourAPI 검색으로 식당 수집(사진·공공누리 확인) →
-//       Gemini 한줄평 → sharp로 표지 인포그래픽 합성 → 표지+사진 캐러셀 발행 → Turso 기록.
+// 흐름: 계절 가중 테마 선택 → TourAPI 수집(공공누리 확인) → 백년가게 대조 →
+//       Gemini 한줄평·음식사진 선별 → v2 인포그래픽 표지 + 이름표 슬라이드 합성 →
+//       업로드 → 캐러셀 발행 → Turso 기록.
 //
 // 필요한 환경변수: TOUR_API_KEY, GEMINI_API_KEY, GEMINI_MODEL,
 //   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN, IG_USER_ID, IG_ACCESS_TOKEN
-//   (선택) BLOB_READ_WRITE_TOKEN, ROUNDUP_DRY=1(발행 없이 이미지 파일만 생성)
+//   (선택) BLOB_READ_WRITE_TOKEN, IG_USERNAME, ROUNDUP_DRY=1(발행 없이 미리보기 파일 생성)
 
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -14,6 +15,8 @@ import os from "node:os";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "roundup-"));
 const TOUR = "https://apis.data.go.kr/B551011/KorService2";
 const DRY = process.env.ROUNDUP_DRY === "1";
+const HANDLE = process.env.IG_USERNAME || "tourist_710";
+const FONT = "'Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
 
 const SIDO_SHORT = {
   서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
@@ -24,15 +27,18 @@ const SIDO_SHORT = {
   제주특별자치도: "제주", 제주도: "제주",
 };
 
+const BAD_IMG_NAME =
+  /(화장실|주차|기저귀|수유|경사로|안내도|안내판|표지판|매표|엘리베이터|승강기|휠체어|점자|유도블록|소화전|진입로|비상|피난|보관함|안내소|계산대)/;
+
+const toHttps = (u) => String(u ?? "").replace(/^http:/, "https:");
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const normName = (s) => String(s).replace(/\[[^\]]*\]/g, "").replace(/\s+/g, "");
+
 function shortRegion(addr) {
   const parts = String(addr ?? "").split(/\s+/);
   const sido = SIDO_SHORT[parts[0]] ?? (parts[0] ?? "").slice(0, 2);
   const gu = (parts[1] ?? "").replace(/(특별자치)?(시|군|구)$/, "");
   return [sido, gu].filter(Boolean).join(" ");
-}
-
-function esc(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 async function tourCall(endpoint, params) {
@@ -47,7 +53,7 @@ async function tourCall(endpoint, params) {
   return Array.isArray(items) ? items : items ? [items] : [];
 }
 
-/** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3) */
+/** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
 async function collectPlaces(theme) {
   const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
   if (theme.areaCode) params.areaCode = String(theme.areaCode);
@@ -55,7 +61,6 @@ async function collectPlaces(theme) {
   items = items.filter(
     (it) => it.firstimage && (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3")
   );
-  // 지역 다양성: 같은 시군구 최대 2곳
   const seen = {};
   const picked = [];
   for (const it of items.sort(() => Math.random() - 0.5)) {
@@ -67,28 +72,33 @@ async function collectPlaces(theme) {
       name: String(it.title).replace(/\[[^\]]*\]/g, "").trim(),
       address: [it.addr1, it.addr2].filter(Boolean).join(" "),
       region: rg,
-      imageUrl: String(it.firstimage).replace(/^http:/, "https:"),
+      imageUrl: toHttps(it.firstimage),
     });
     if (picked.length >= theme.count) break;
   }
   return picked;
 }
 
-const BAD_IMG_NAME =
-  /(화장실|주차|기저귀|수유|경사로|안내도|안내판|표지판|매표|엘리베이터|승강기|휠체어|점자|유도블록|소화전|진입로|비상|피난|보관함|안내소|계산대)/;
+/** 백년가게 목록(DB 캐시)과 대조 → 해당 가게에 hundred 플래그 */
+async function markHundredYear(db, places) {
+  try {
+    const r = await db.execute("SELECT value FROM config WHERE key = 'hys_list'");
+    if (!r.rows.length) return;
+    const names = JSON.parse(String(r.rows[0].value)).map((e) => normName(e.name));
+    for (const p of places) {
+      const pn = normName(p.name);
+      if (names.some((n) => n && (pn.includes(n) || n.includes(pn)))) p.hundred = true;
+    }
+  } catch {
+    /* 무시 */
+  }
+}
 
-const toHttps = (u) => String(u ?? "").replace(/^http:/, "https:");
-
-/**
- * 가게별 이미지 목록에서 Gemini 비전으로 "음식 사진"을 골라 대표 이미지 교체.
- * 실패하면 기존 대표 이미지 유지 (무해한 폴백).
- */
+/** 가게별 이미지 중 Gemini 비전으로 음식 사진 선택 (실패 시 기존 유지) */
 async function pickFoodImage(place) {
   try {
     const items = await tourCall("detailImage2", {
-      contentId: place.contentId,
-      imageYN: "Y",
-      numOfRows: "15",
+      contentId: place.contentId, imageYN: "Y", numOfRows: "15",
     });
     const cands = [
       { url: place.imageUrl, small: place.imageUrl },
@@ -103,7 +113,6 @@ async function pickFoodImage(place) {
       .slice(0, 6);
     if (cands.length <= 1 || !process.env.GEMINI_API_KEY) return;
 
-    // 썸네일 다운로드 → base64 (판별용이라 작은 이미지면 충분)
     const valid = [], parts = [];
     for (const c of cands) {
       try {
@@ -113,9 +122,7 @@ async function pickFoodImage(place) {
         if (b.length > 900_000) continue;
         valid.push(c);
         parts.push({ inlineData: { mimeType: "image/jpeg", data: b.toString("base64") } });
-      } catch {
-        /* skip */
-      }
+      } catch { /* skip */ }
     }
     if (valid.length <= 1) return;
 
@@ -126,16 +133,12 @@ async function pickFoodImage(place) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 건물 외관·간판·내부 전경은 제외. 음식 사진이 없으면 []. 예: [3,1]`,
-                },
-                ...parts,
-              ],
-            },
-          ],
+          contents: [{
+            parts: [
+              { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 건물 외관·간판·내부 전경은 제외. 음식 사진이 없으면 []. 예: [3,1]` },
+              ...parts,
+            ],
+          }],
           generationConfig: { maxOutputTokens: 60, thinkingConfig: { thinkingBudget: 0 } },
         }),
         signal: AbortSignal.timeout(40000),
@@ -150,9 +153,7 @@ async function pickFoodImage(place) {
       place.imageUrl = best.url;
       place.foodPicked = true;
     }
-  } catch {
-    /* 실패 시 기존 이미지 유지 */
-  }
+  } catch { /* 기존 이미지 유지 */ }
 }
 
 /** Gemini로 한줄평 생성 (실패 시 기본 문구) */
@@ -191,22 +192,21 @@ JSON 배열만 출력: ["...","..."] (${places.length}개)`;
   }
 }
 
-/** 표지 인포그래픽 합성 (sharp, 1080xH) */
+/** v2 표지 인포그래픽: 레드 배너 + 지역 칩 + 백년가게 배지 + 다크 푸터 */
 async function composeCover(theme, places) {
   const sharp = (await import("sharp")).default;
-  const W = 1080, HEADER = 170;
+  const W = 1080, HEADER = 180, FOOTER = 84;
   const rows = Math.ceil(places.length / 2);
-  const CELL_W = 540, CELL_H = Math.max(210, Math.floor(1180 / rows));
-  const H = HEADER + CELL_H * rows;
-  const PHOTO_W = 225, PAD = 12;
-  const FONT = "'Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
+  const CELL_W = 540, CELL_H = Math.floor((1350 - HEADER - FOOTER) / rows);
+  const H = HEADER + CELL_H * rows + FOOTER;
+  const PHOTO_W = 250, PAD = 12;
+  const emoji = theme.emoji || "💡";
 
-  // 사진 다운로드·리사이즈
   const photoLayers = [];
   for (let i = 0; i < places.length; i++) {
     try {
       const res = await fetch(places[i].imageUrl, { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) throw new Error("img http " + res.status);
+      if (!res.ok) continue;
       const buf = Buffer.from(await res.arrayBuffer());
       const col = i % 2, row = Math.floor(i / 2);
       const resized = await sharp(buf)
@@ -218,44 +218,46 @@ async function composeCover(theme, places) {
         left: col * CELL_W + CELL_W - PHOTO_W - PAD,
         top: HEADER + row * CELL_H + PAD,
       });
-    } catch {
-      /* 사진 실패 시 그 칸은 텍스트만 */
-    }
+    } catch { /* 사진 실패 시 텍스트만 */ }
   }
 
-  // 레이어 구성: ① 카드 배경 SVG → ② 사진 → ③ 텍스트 SVG (사진이 가려지지 않게 분리)
   let bgCells = "", textCells = "";
   for (let i = 0; i < places.length; i++) {
     const p = places[i];
     const col = i % 2, row = Math.floor(i / 2);
     const x = col * CELL_W, y = HEADER + row * CELL_H;
-    // 이름이 사진 영역(약 230px)을 넘지 않게 글자 크기 조절 + 말줄임
-    const rawName = p.name.length > 13 ? p.name.slice(0, 12) + "…" : p.name;
-    const nameSize = rawName.length <= 7 ? 31 : rawName.length <= 9 ? 26 : 20;
-    p.displayName = rawName;
-    const desc = p.desc ?? "";
-    const d1 = desc.slice(0, 12), d2 = desc.slice(12, 24);
-    bgCells += `<rect x="${x + 8}" y="${y + 6}" width="${CELL_W - 16}" height="${CELL_H - 12}" rx="14" fill="white" stroke="#eee2e2" stroke-width="2"/>`;
+    const nm = p.name.length > 13 ? p.name.slice(0, 12) + "…" : p.name;
+    const ns = nm.length <= 7 ? 30 : nm.length <= 9 ? 25 : 20;
+    const d1 = (p.desc ?? "").slice(0, 12), d2 = (p.desc ?? "").slice(12, 24);
+    const chipW = p.region.length * 20 + 46;
+    bgCells += `<rect x="${x + 8}" y="${y + 6}" width="${CELL_W - 16}" height="${CELL_H - 12}" rx="16" fill="white" stroke="#f1dede" stroke-width="2"/>`;
     textCells += `
     <g>
-      <rect x="${x + PAD + 8}" y="${y + PAD + 10}" width="44" height="44" rx="10" fill="#d92121"/>
-      <text x="${x + PAD + 30}" y="${y + PAD + 42}" font-family="${FONT}" font-size="28" font-weight="700" fill="#fff" text-anchor="middle">${i + 1}</text>
-      <text x="${x + PAD + 62}" y="${y + PAD + 40}" font-family="${FONT}" font-size="${nameSize}" font-weight="700" fill="#b81414">${esc(p.displayName)}</text>
-      <text x="${x + PAD + 10}" y="${y + PAD + 82}" font-family="${FONT}" font-size="23" font-weight="600" fill="#666">(${esc(p.region)})</text>
-      <text x="${x + PAD + 10}" y="${y + PAD + 122}" font-family="${FONT}" font-size="22" fill="#333">💡 ${esc(d1)}</text>
-      ${d2 ? `<text x="${x + PAD + 10}" y="${y + PAD + 152}" font-family="${FONT}" font-size="22" fill="#333">${esc(d2)}</text>` : ""}
+      <rect x="${x + PAD + 8}" y="${y + PAD + 10}" width="44" height="44" rx="12" fill="#d92121"/>
+      <text x="${x + PAD + 30}" y="${y + PAD + 42}" font-family="${FONT}" font-size="28" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
+      <text x="${x + PAD + 62}" y="${y + PAD + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      <rect x="${x + PAD + 8}" y="${y + PAD + 58}" width="${chipW}" height="34" rx="17" fill="#f6ede7"/>
+      <text x="${x + PAD + 8 + chipW / 2}" y="${y + PAD + 82}" font-family="${FONT}" font-size="20" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(p.region)}</text>
+      ${p.hundred ? `<rect x="${x + PAD + 8 + chipW + 8}" y="${y + PAD + 58}" width="110" height="34" rx="17" fill="#fff3d6" stroke="#e8c66a" stroke-width="1.5"/>
+      <text x="${x + PAD + 8 + chipW + 63}" y="${y + PAD + 82}" font-family="${FONT}" font-size="19" font-weight="800" fill="#9a7419" text-anchor="middle">백년가게</text>` : ""}
+      <text x="${x + PAD + 10}" y="${y + PAD + 128}" font-family="${FONT}" font-size="22" fill="#333">${emoji} ${esc(d1)}</text>
+      ${d2 ? `<text x="${x + PAD + 10}" y="${y + PAD + 158}" font-family="${FONT}" font-size="22" fill="#333">${esc(d2)}</text>` : ""}
     </g>`;
   }
+
   const bgSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <rect x="0" y="0" width="${W}" height="${HEADER}" fill="#fff"/>
-    <text x="${W / 2}" y="105" font-family="${FONT}" font-size="64" font-weight="800" fill="#d92121" text-anchor="middle">✦ ${esc(theme.title)} ✦</text>
-    <rect x="60" y="140" width="${W - 120}" height="5" fill="#d92121"/>
+    <rect x="0" y="0" width="${W}" height="${HEADER}" fill="#d92121"/>
+    <text x="${W / 2}" y="78" font-family="${FONT}" font-size="62" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(theme.title)}</text>
+    <text x="${W / 2}" y="138" font-family="${FONT}" font-size="26" font-weight="600" fill="#ffd9d9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
     ${bgCells}
+    <rect x="0" y="${H - FOOTER}" width="${W}" height="${FOOTER}" fill="#2b2323"/>
+    <text x="${W / 2}" y="${H - FOOTER + 38}" font-family="${FONT}" font-size="25" font-weight="700" fill="#ffffff" text-anchor="middle">여러분의 추천 맛집도 댓글로 남겨주세요 💬</text>
+    <text x="${W / 2}" y="${H - FOOTER + 68}" font-family="${FONT}" font-size="21" fill="#c9b8b8" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 일 새로운 리스트</text>
   </svg>`;
   const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
   const out = path.join(TMP, "cover.jpg");
-  await sharp({ create: { width: W, height: H, channels: 3, background: "#fdf8f4" } })
+  await sharp({ create: { width: W, height: H, channels: 3, background: "#fdf6f2" } })
     .composite([
       { input: Buffer.from(bgSvg), left: 0, top: 0 },
       ...photoLayers,
@@ -263,18 +265,42 @@ async function composeCover(theme, places) {
     ])
     .jpeg({ quality: 88 })
     .toFile(out);
-  console.log(`표지 합성 완료: ${out} (${places.length}곳, ${W}x${H})`);
+  console.log(`표지 합성 완료: ${places.length}곳, ${W}x${H}`);
   return out;
 }
 
-/** 받침 유무에 따른 조사 선택 (맛집→은/이, 카페→는/가) */
+/** 뒷장 슬라이드: 사진(1080x1350) + 하단 이름표 바 합성 */
+async function composeSlide(place, rank) {
+  const sharp = (await import("sharp")).default;
+  const W = 1080, H = 1350, BAR = 130;
+  const res = await fetch(place.imageUrl, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error("slide img http " + res.status);
+  const photo = await sharp(Buffer.from(await res.arrayBuffer()))
+    .resize(W, H, { fit: "cover" })
+    .jpeg({ quality: 85 })
+    .toBuffer();
+  const nm = place.name.length > 15 ? place.name.slice(0, 14) + "…" : place.name;
+  const ns = nm.length <= 9 ? 44 : nm.length <= 12 ? 36 : 30;
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="${H - BAR}" width="${W}" height="${BAR}" fill="#000000" fill-opacity="0.62"/>
+    <rect x="28" y="${H - BAR + 33}" width="64" height="64" rx="16" fill="#d92121"/>
+    <text x="60" y="${H - BAR + 78}" font-family="${FONT}" font-size="38" font-weight="800" fill="#fff" text-anchor="middle">${rank}</text>
+    <text x="116" y="${H - BAR + 62}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+    <text x="116" y="${H - BAR + 102}" font-family="${FONT}" font-size="26" fill="#e5d8d8">📍 ${esc(place.region)}${place.hundred ? " · 백년가게 인증" : ""}</text>
+  </svg>`;
+  const out = path.join(TMP, `slide_${rank}.jpg`);
+  await sharp(photo).composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).jpeg({ quality: 86 }).toFile(out);
+  return out;
+}
+
+/** 받침 유무 조사 선택 */
 function josa(word, withBatchim, without) {
   const code = word.charCodeAt(word.length - 1);
   if (code < 0xac00 || code > 0xd7a3) return withBatchim;
   return (code - 0xac00) % 28 > 0 ? withBatchim : without;
 }
 
-/** 댓글 참여 유도 문구 (게시물마다 랜덤 회전) */
+/** 댓글 참여 유도 문구 (전부 "추천 맛집 댓글로" 뉘앙스, 랜덤 회전) */
 function engagementLine(theme, count) {
   const spot = theme.keyword === "카페" ? "카페" : `${theme.keyword} 맛집`;
   const pool = [
@@ -289,14 +315,22 @@ function engagementLine(theme, count) {
 }
 
 function buildCaption(theme, places) {
-  // 모음집은 공개형 — 상호명이 이미 공개돼 있으므로 "어디야→DM" 유도 문구는 넣지 않음
-  const lines = places.map((p, i) => `${i + 1}. ${p.name} (${p.region}) — ${p.desc}`);
+  // 공개형 — "어디야→DM" 유도 문구 없음. 참여(추천 댓글)·저장 유도만.
+  const lines = places.map(
+    (p, i) => `${i + 1}. ${p.name}${p.hundred ? " 🏅" : ""} (${p.region}) — ${p.desc}`
+  );
+  const hundredCount = places.filter((p) => p.hundred).length;
+  const hundredLine =
+    hundredCount > 0
+      ? `🏅 표시된 ${hundredCount}곳은 중소벤처기업부 인증 '백년가게'예요!\n\n`
+      : "";
   const tags = [...(theme.tags ?? []), "맛집추천", "맛집리스트", "먹스타그램", "저장각", "맛집투어"]
     .map((t) => `#${t}`)
     .join(" ");
   return (
     `🔥 ${theme.title}\n\n` +
     `${lines.join("\n")}\n\n` +
+    hundredLine +
     `💬 ${engagementLine(theme, places.length)}\n\n` +
     `📌 저장해두고 하나씩 정복해 보세요!\n\n` +
     `${tags}\n\n📷 사진·정보 출처: 한국관광공사 TourAPI`
@@ -306,27 +340,37 @@ function buildCaption(theme, places) {
 async function main() {
   const { db, initDb } = await import("../lib/db.ts");
   const { publishCarousel } = await import("../lib/instagram.ts");
-  const themesData = JSON.parse(fs.readFileSync(new URL("../data/roundup-themes.json", import.meta.url), "utf8"));
+  const themesData = JSON.parse(
+    fs.readFileSync(new URL("../data/roundup-themes.json", import.meta.url), "utf8")
+  );
   await initDb();
 
-  // 테마 로테이션 포인터 (DB에 저장)
+  // 테마 선택: 로테이션 포인터 + 계절 가중 (months에 이번 달이 없으면 뒤로)
   const idxRow = await db.execute("SELECT value FROM config WHERE key='roundup_idx'");
-  let idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
+  const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
+  const month = new Date().getUTCMonth() + 1; // KST 보정 불필요(월 단위)
+  const all = themesData.themes;
+  const rotated = all.map((_, i) => all[(idx + i) % all.length]);
+  const inSeason = rotated.filter((t) => !t.months || t.months.includes(month));
+  const offSeason = rotated.filter((t) => t.months && !t.months.includes(month));
+  const ordered = [...inSeason, ...offSeason];
 
-  // 후보 테마 최대 3개 시도 (수집 부족 시 다음 테마)
   let theme = null, places = [];
-  for (let t = 0; t < 3; t++) {
-    const cand = themesData.themes[(idx + t) % themesData.themes.length];
+  for (let t = 0; t < Math.min(3, ordered.length); t++) {
+    const cand = ordered[t];
     const got = await collectPlaces(cand);
-    console.log(`[${cand.title}] 수집: ${got.length}곳 (목표 ${cand.count})`);
+    console.log(`[${cand.title}] 수집: ${got.length}곳 (목표 ${cand.count})${cand.months ? "" : " (사계절)"}`);
     if (got.length >= Math.min(5, cand.count)) {
       theme = cand;
       places = got;
-      idx = (idx + t + 1) % themesData.themes.length;
       break;
     }
   }
   if (!theme) throw new Error("수집 가능한 테마 없음");
+
+  // 백년가게 대조 (배지·캡션용)
+  await markHundredYear(db, places);
+  console.log(`백년가게: ${places.filter((p) => p.hundred).length}곳`);
 
   // 한줄평 먼저 (비전 호출이 분당 한도를 소모하기 전에)
   const descs = await makeDescriptions(theme, places);
@@ -339,25 +383,47 @@ async function main() {
   }
   console.log(`음식 사진 교체: ${places.filter((p) => p.foodPicked).length}/${places.length}곳`);
 
-  // 표지 합성
+  // 표지 + 이름표 슬라이드 합성
   const cover = await composeCover(theme, places);
+  const slideFiles = [];
+  for (let i = 0; i < Math.min(9, places.length); i++) {
+    try {
+      slideFiles.push(await composeSlide(places[i], i + 1));
+    } catch (e) {
+      console.error(`슬라이드 ${i + 1} 합성 실패(원본 사진 사용):`, String(e).slice(0, 100));
+      slideFiles.push(null);
+    }
+  }
 
   if (DRY) {
-    console.log("DRY 모드 — 발행 생략. 표지:", cover);
-    console.log(buildCaption(theme, places));
     fs.copyFileSync(cover, "roundup-preview.jpg");
+    if (slideFiles[0]) fs.copyFileSync(slideFiles[0], "roundup-slide-preview.jpg");
+    console.log("DRY 모드 — 발행 생략. roundup-preview.jpg / roundup-slide-preview.jpg 저장");
+    console.log(buildCaption(theme, places));
     return;
   }
 
-  // 표지 업로드 → 캐러셀 (표지 + 사진 최대 9장 = 10장 제한)
+  // 업로드: 표지 + 슬라이드 (합성 실패분은 원본 URL)
   const coverUrl = await uploadPublic(cover);
   console.log("표지 URL:", coverUrl);
-  const slides = [coverUrl, ...places.slice(0, 9).map((p) => p.imageUrl)];
+  const slideUrls = [];
+  for (let i = 0; i < slideFiles.length; i++) {
+    if (slideFiles[i]) {
+      try {
+        slideUrls.push(await uploadPublic(slideFiles[i]));
+        continue;
+      } catch (e) {
+        console.error(`슬라이드 ${i + 1} 업로드 실패(원본 사용):`, String(e).slice(0, 100));
+      }
+    }
+    slideUrls.push(places[i].imageUrl);
+  }
+
+  const slides = [coverUrl, ...slideUrls];
   const caption = buildCaption(theme, places);
   const mediaId = await publishCarousel(slides, caption);
   console.log("✅ 모음집 발행 완료! media id:", mediaId);
 
-  // 기록 (댓글 → DM에 전체 주소 목록 전달)
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   await db.execute({
     sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
@@ -373,9 +439,11 @@ async function main() {
       mediaId,
     ],
   });
+  // 포인터는 "선택된 테마의 원래 위치 + 1"로 이동 (계절 스킵돼도 로테이션 유지)
+  const chosenIdx = all.findIndex((t) => t.key === theme.key);
   await db.execute({
     sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('roundup_idx', ?, datetime('now'))",
-    args: [String(idx)],
+    args: [String((chosenIdx + 1) % all.length)],
   });
   console.log("완료:", theme.title);
 }
@@ -394,7 +462,7 @@ async function uploadPublic(filePath) {
   if (process.env.BLOB_READ_WRITE_TOKEN) {
     try {
       const { put } = await import("@vercel/blob");
-      const res = await put(`roundups/${Date.now()}.jpg`, fs.readFileSync(filePath), {
+      const res = await put(`roundups/${Date.now()}-${path.basename(filePath)}`, fs.readFileSync(filePath), {
         access: "public", contentType: "image/jpeg", token: process.env.BLOB_READ_WRITE_TOKEN,
       });
       return res.url;
