@@ -186,6 +186,27 @@ async function composeCover(theme, places) {
   return out;
 }
 
+/** 받침 유무에 따른 조사 선택 (맛집→은/이, 카페→는/가) */
+function josa(word, withBatchim, without) {
+  const code = word.charCodeAt(word.length - 1);
+  if (code < 0xac00 || code > 0xd7a3) return withBatchim;
+  return (code - 0xac00) % 28 > 0 ? withBatchim : without;
+}
+
+/** 댓글 참여 유도 문구 (게시물마다 랜덤 회전) */
+function engagementLine(theme, count) {
+  const spot = theme.keyword === "카페" ? "카페" : `${theme.keyword} 맛집`;
+  const pool = [
+    `여러분의 인생 ${spot}${josa(spot, "은", "는")} 어디인가요? 댓글로 알려주세요 🙌`,
+    `우리 동네 ${spot}${josa(spot, "이", "가")} 최고다! 하시는 분들, 댓글로 자랑해 주세요 🔥`,
+    `이 리스트에 없는 숨은 명가가 있다면, 여러분이 아는 진짜 ${theme.keyword} 성지를 댓글로 공유해 주세요 👀`,
+    `1~${count}번 중 가보신 곳 있나요? 번호와 후기를 댓글로 남겨주세요 🙋`,
+    `같이 가고 싶은 사람을 댓글에 태그해 보세요 🤝 여러분의 최애 ${spot}도 댓글로 남겨주시면 최고예요!`,
+    `댓글로 추천해 주신 곳은 다음 모음집 후보에 올려드려요! 여러분의 원픽 ${spot}${josa(spot, "은", "는")} 어디인가요? ✍️`,
+  ];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 function buildCaption(theme, places) {
   const keyword = process.env.DM_KEYWORD || "어디야";
   const lines = places.map((p, i) => `${i + 1}. ${p.name} (${p.region}) — ${p.desc}`);
@@ -195,6 +216,7 @@ function buildCaption(theme, places) {
   return (
     `🔥 ${theme.title}\n\n` +
     `${lines.join("\n")}\n\n` +
+    `💬 ${engagementLine(theme, places.length)}\n\n` +
     `📌 저장해두고 하나씩 정복해 보세요!\n` +
     `상세 주소가 궁금하시면 댓글에 "${keyword}" 남기고 팔로우해 주세요. ${places.length}곳 전부 DM으로 보내드릴게요 📩\n\n` +
     `${tags}\n\n📷 사진·정보 출처: 한국관광공사 TourAPI`
