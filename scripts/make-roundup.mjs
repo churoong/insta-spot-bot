@@ -364,6 +364,18 @@ async function main() {
   );
   await initDb();
 
+  // 발행 쿨다운(행동차단 회복) 중이면 모음집도 쉼 — 시도 반복이 차단을 연장시킴
+  if (!DRY) {
+    const cd = await db.execute("SELECT value FROM config WHERE key='publish_cooldown_until'");
+    if (cd.rows.length > 0) {
+      const until = new Date(String(cd.rows[0].value).replace(" ", "T") + "Z").getTime();
+      if (Date.now() < until) {
+        console.log("발행 쿨다운 중 — 모음집 건너뜀 (" + Math.round((until-Date.now())/60000) + "분 남음)");
+        return;
+      }
+    }
+  }
+
   // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
   const idxRow = await db.execute("SELECT value FROM config WHERE key='roundup_idx'");
   const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
