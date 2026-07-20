@@ -74,6 +74,87 @@ async function collectPlaces(theme) {
   return picked;
 }
 
+const BAD_IMG_NAME =
+  /(화장실|주차|기저귀|수유|경사로|안내도|안내판|표지판|매표|엘리베이터|승강기|휠체어|점자|유도블록|소화전|진입로|비상|피난|보관함|안내소|계산대)/;
+
+const toHttps = (u) => String(u ?? "").replace(/^http:/, "https:");
+
+/**
+ * 가게별 이미지 목록에서 Gemini 비전으로 "음식 사진"을 골라 대표 이미지 교체.
+ * 실패하면 기존 대표 이미지 유지 (무해한 폴백).
+ */
+async function pickFoodImage(place) {
+  try {
+    const items = await tourCall("detailImage2", {
+      contentId: place.contentId,
+      imageYN: "Y",
+      numOfRows: "15",
+    });
+    const cands = [
+      { url: place.imageUrl, small: place.imageUrl },
+      ...items
+        .filter((it) => !(it.imgname && BAD_IMG_NAME.test(it.imgname)))
+        .map((it) => ({
+          url: toHttps(it.originimgurl || it.smallimageurl),
+          small: toHttps(it.smallimageurl || it.originimgurl),
+        })),
+    ]
+      .filter((v, i, a) => v.url && a.findIndex((x) => x.url === v.url) === i)
+      .slice(0, 6);
+    if (cands.length <= 1 || !process.env.GEMINI_API_KEY) return;
+
+    // 썸네일 다운로드 → base64 (판별용이라 작은 이미지면 충분)
+    const valid = [], parts = [];
+    for (const c of cands) {
+      try {
+        const res = await fetch(c.small, { signal: AbortSignal.timeout(15000) });
+        if (!res.ok) continue;
+        const b = Buffer.from(await res.arrayBuffer());
+        if (b.length > 900_000) continue;
+        valid.push(c);
+        parts.push({ inlineData: { mimeType: "image/jpeg", data: b.toString("base64") } });
+      } catch {
+        /* skip */
+      }
+    }
+    if (valid.length <= 1) return;
+
+    const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 건물 외관·간판·내부 전경은 제외. 음식 사진이 없으면 []. 예: [3,1]`,
+                },
+                ...parts,
+              ],
+            },
+          ],
+          generationConfig: { maxOutputTokens: 60, thinkingConfig: { thinkingBudget: 0 } },
+        }),
+        signal: AbortSignal.timeout(40000),
+      }
+    );
+    const json = await res.json();
+    const text = json?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const m = text.match(/\[[\d,\s]*\]/);
+    const order = m ? JSON.parse(m[0]) : [];
+    const best = order.length ? valid[Number(order[0]) - 1] : null;
+    if (best?.url) {
+      place.imageUrl = best.url;
+      place.foodPicked = true;
+    }
+  } catch {
+    /* 실패 시 기존 이미지 유지 */
+  }
+}
+
 /** Gemini로 한줄평 생성 (실패 시 기본 문구) */
 async function makeDescriptions(theme, places) {
   const fallback = places.map(() => "현지에서 오래 사랑받아온 곳");
@@ -197,12 +278,12 @@ function josa(word, withBatchim, without) {
 function engagementLine(theme, count) {
   const spot = theme.keyword === "카페" ? "카페" : `${theme.keyword} 맛집`;
   const pool = [
-    `여러분의 인생 ${spot}${josa(spot, "은", "는")} 어디인가요? 댓글로 알려주세요 🙌`,
-    `우리 동네 ${spot}${josa(spot, "이", "가")} 최고다! 하시는 분들, 댓글로 자랑해 주세요 🔥`,
-    `이 리스트에 없는 숨은 명가가 있다면, 여러분이 아는 진짜 ${theme.keyword} 성지를 댓글로 공유해 주세요 👀`,
-    `1~${count}번 중 가보신 곳 있나요? 번호와 후기를 댓글로 남겨주세요 🙋`,
-    `같이 가고 싶은 사람을 댓글에 태그해 보세요 🤝 여러분의 최애 ${spot}도 댓글로 남겨주시면 최고예요!`,
-    `댓글로 추천해 주신 곳은 다음 모음집 후보에 올려드려요! 여러분의 원픽 ${spot}${josa(spot, "은", "는")} 어디인가요? ✍️`,
+    `여러분의 인생 ${spot}${josa(spot, "은", "는")} 어디인가요? 추천 맛집을 댓글로 남겨주세요 🙌`,
+    `우리 동네 ${spot}${josa(spot, "이", "가")} 최고다! 하시는 분들, 그 집을 댓글로 추천해 주세요 🔥`,
+    `이 리스트에 없는 숨은 명가가 있다면, 여러분이 아는 진짜 ${theme.keyword} 성지를 댓글로 추천해 주세요 👀`,
+    `1~${count}번 중 가보신 곳 있나요? 후기와 함께 여러분만의 추천 맛집도 댓글로 남겨주세요 🙋`,
+    `같이 가고 싶은 사람을 댓글에 태그해 보세요 🤝 여러분만 아는 추천 ${spot}도 댓글로 남겨주시면 최고예요!`,
+    `댓글로 추천해 주신 곳은 다음 모음집 후보에 올려드려요! 여러분의 원픽 ${spot}${josa(spot, "을", "를")} 댓글로 추천해 주세요 ✍️`,
   ];
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -248,9 +329,16 @@ async function main() {
   }
   if (!theme) throw new Error("수집 가능한 테마 없음");
 
-  // 한줄평
+  // 한줄평 먼저 (비전 호출이 분당 한도를 소모하기 전에)
   const descs = await makeDescriptions(theme, places);
   places.forEach((p, i) => (p.desc = descs[i]));
+
+  // 음식 사진 우선 선택 (Gemini 비전) — 무료 등급 분당 한도 고려해 4초 간격 순차
+  for (const p of places) {
+    await pickFoodImage(p);
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+  console.log(`음식 사진 교체: ${places.filter((p) => p.foodPicked).length}/${places.length}곳`);
 
   // 표지 합성
   const cover = await composeCover(theme, places);
