@@ -156,18 +156,24 @@ async function pickFoodImage(place) {
   } catch { /* 기존 이미지 유지 */ }
 }
 
-/** Gemini로 한줄평 생성 (실패 시 기본 문구) */
+/** Gemini로 한줄평(표지용) + 상세 설명(슬라이드용) 생성 (실패 시 기본 문구) */
 async function makeDescriptions(theme, places) {
-  const fallback = places.map(() => "현지에서 오래 사랑받아온 곳");
+  const fbShort = "현지에서 오래 사랑받아온 곳";
+  const fbDetail = `${theme.keyword} 하나로 오랜 시간 사랑받아온, 믿고 찾아갈 수 있는 곳이에요.`;
+  const fallback = places.map(() => ({ short: fbShort, detail: fbDetail }));
   if (!process.env.GEMINI_API_KEY) return fallback;
   try {
     const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-    const prompt = `"${theme.title}" 인스타 카드뉴스용 한줄평을 만들어줘.
+    const prompt = `인스타 카드뉴스용 문구를 만들어줘. 주제: "${theme.keyword} 맛집 모음"
 식당 목록:
 ${places.map((p, i) => `${i + 1}. ${p.name} (${p.region})`).join("\n")}
 
-규칙: 각 식당마다 ${theme.keyword} 메뉴 특징을 살린 짧은 한줄평(10~16자, 존댓말 아님, 명사형 종결. 예: "깊고 깔끔한 사골국물", "쫄깃한 수제 면발"). 상호명 반복 금지. 과장·허위 금지(일반적 묘사만).
-JSON 배열만 출력: ["...","..."] (${places.length}개)`;
+각 식당마다 두 가지를 만들어:
+- s: 표지용 짧은 한줄평 (10~16자, 명사형 종결. 예: "깊고 깔끔한 사골국물")
+- d: 상세 슬라이드용 설명 (28~40자, 존댓말 해요체 1~2문장. 메뉴 특징·분위기를 구체적으로. 예: "진한 사골 육수에 수제 순대가 푸짐해요. 웨이팅이 있어도 기다릴 가치가 있는 곳!")
+
+규칙: 상호명 반복 금지, 과장·허위 금지(일반적 묘사만), 지역 특색 살리면 좋음.
+JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
@@ -175,9 +181,9 @@ JSON 배열만 출력: ["...","..."] (${places.length}개)`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 800, thinkingConfig: { thinkingBudget: 0 } },
+          generationConfig: { maxOutputTokens: 1600, thinkingConfig: { thinkingBudget: 0 } },
         }),
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(40000),
       }
     );
     const json = await res.json();
@@ -186,7 +192,10 @@ JSON 배열만 출력: ["...","..."] (${places.length}개)`;
     if (!m) return fallback;
     const arr = JSON.parse(m[0]);
     if (!Array.isArray(arr)) return fallback;
-    return places.map((_, i) => String(arr[i] ?? fallback[i]).slice(0, 22));
+    return places.map((_, i) => ({
+      short: String(arr[i]?.s ?? fbShort).slice(0, 22),
+      detail: String(arr[i]?.d ?? fbDetail).slice(0, 48),
+    }));
   } catch {
     return fallback;
   }
@@ -201,6 +210,12 @@ async function composeCover(theme, places) {
   const H = HEADER + CELL_H * rows + FOOTER;
   const PHOTO_W = 250, PAD = 12;
   const emoji = theme.emoji || "💡";
+  // 홀수 개수면 마지막 카드는 가운데 정렬 (빈 칸 방지)
+  const cellPos = (i) => {
+    const lastOdd = places.length % 2 === 1 && i === places.length - 1;
+    const col = i % 2, row = Math.floor(i / 2);
+    return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: HEADER + row * CELL_H };
+  };
 
   const photoLayers = [];
   for (let i = 0; i < places.length; i++) {
@@ -208,15 +223,15 @@ async function composeCover(theme, places) {
       const res = await fetch(places[i].imageUrl, { signal: AbortSignal.timeout(20000) });
       if (!res.ok) continue;
       const buf = Buffer.from(await res.arrayBuffer());
-      const col = i % 2, row = Math.floor(i / 2);
+      const { x, y } = cellPos(i);
       const resized = await sharp(buf)
         .resize(PHOTO_W, CELL_H - PAD * 2, { fit: "cover" })
         .jpeg({ quality: 82 })
         .toBuffer();
       photoLayers.push({
         input: resized,
-        left: col * CELL_W + CELL_W - PHOTO_W - PAD,
-        top: HEADER + row * CELL_H + PAD,
+        left: x + CELL_W - PHOTO_W - PAD,
+        top: y + PAD,
       });
     } catch { /* 사진 실패 시 텍스트만 */ }
   }
@@ -224,8 +239,7 @@ async function composeCover(theme, places) {
   let bgCells = "", textCells = "";
   for (let i = 0; i < places.length; i++) {
     const p = places[i];
-    const col = i % 2, row = Math.floor(i / 2);
-    const x = col * CELL_W, y = HEADER + row * CELL_H;
+    const { x, y } = cellPos(i);
     const nm = p.name.length > 13 ? p.name.slice(0, 12) + "…" : p.name;
     const ns = nm.length <= 7 ? 30 : nm.length <= 9 ? 25 : 20;
     const d1 = (p.desc ?? "").slice(0, 12), d2 = (p.desc ?? "").slice(12, 24);
@@ -247,7 +261,7 @@ async function composeCover(theme, places) {
 
   const bgSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${W}" height="${HEADER}" fill="#d92121"/>
-    <text x="${W / 2}" y="78" font-family="${FONT}" font-size="62" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(theme.title)}</text>
+    <text x="${W / 2}" y="78" font-family="${FONT}" font-size="62" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(theme.titleResolved || theme.title)}</text>
     <text x="${W / 2}" y="138" font-family="${FONT}" font-size="26" font-weight="600" fill="#ffd9d9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
     ${bgCells}
     <rect x="0" y="${H - FOOTER}" width="${W}" height="${FOOTER}" fill="#2b2323"/>
@@ -269,10 +283,10 @@ async function composeCover(theme, places) {
   return out;
 }
 
-/** 뒷장 슬라이드: 사진(1080x1350) + 하단 이름표 바 합성 */
+/** 뒷장 상세 슬라이드: 사진(1080x1350) + 하단 이름·지역·상세설명 바 합성 */
 async function composeSlide(place, rank) {
   const sharp = (await import("sharp")).default;
-  const W = 1080, H = 1350, BAR = 130;
+  const W = 1080, H = 1350, BAR = 250;
   const res = await fetch(place.imageUrl, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error("slide img http " + res.status);
   const photo = await sharp(Buffer.from(await res.arrayBuffer()))
@@ -281,12 +295,17 @@ async function composeSlide(place, rank) {
     .toBuffer();
   const nm = place.name.length > 15 ? place.name.slice(0, 14) + "…" : place.name;
   const ns = nm.length <= 9 ? 44 : nm.length <= 12 ? 36 : 30;
+  // 상세 설명 2줄 래핑 (한 줄 최대 22자)
+  const detail = String(place.detail ?? "");
+  const d1 = detail.slice(0, 22), d2 = detail.slice(22, 44);
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <rect x="0" y="${H - BAR}" width="${W}" height="${BAR}" fill="#000000" fill-opacity="0.62"/>
-    <rect x="28" y="${H - BAR + 33}" width="64" height="64" rx="16" fill="#d92121"/>
-    <text x="60" y="${H - BAR + 78}" font-family="${FONT}" font-size="38" font-weight="800" fill="#fff" text-anchor="middle">${rank}</text>
-    <text x="116" y="${H - BAR + 62}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
-    <text x="116" y="${H - BAR + 102}" font-family="${FONT}" font-size="26" fill="#e5d8d8">📍 ${esc(place.region)}${place.hundred ? " · 백년가게 인증" : ""}</text>
+    <rect x="0" y="${H - BAR}" width="${W}" height="${BAR}" fill="#000000" fill-opacity="0.66"/>
+    <rect x="28" y="${H - BAR + 30}" width="64" height="64" rx="16" fill="#d92121"/>
+    <text x="60" y="${H - BAR + 75}" font-family="${FONT}" font-size="38" font-weight="800" fill="#fff" text-anchor="middle">${rank}</text>
+    <text x="116" y="${H - BAR + 60}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+    <text x="116" y="${H - BAR + 100}" font-family="${FONT}" font-size="26" fill="#e5d8d8">📍 ${esc(place.region)}${place.hundred ? " · 백년가게 인증" : ""}</text>
+    <text x="44" y="${H - BAR + 158}" font-family="${FONT}" font-size="29" font-weight="600" fill="#ffffff">${esc(d1)}</text>
+    ${d2 ? `<text x="44" y="${H - BAR + 202}" font-family="${FONT}" font-size="29" font-weight="600" fill="#ffffff">${esc(d2)}</text>` : ""}
   </svg>`;
   const out = path.join(TMP, `slide_${rank}.jpg`);
   await sharp(photo).composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).jpeg({ quality: 86 }).toFile(out);
@@ -328,7 +347,7 @@ function buildCaption(theme, places) {
     .map((t) => `#${t}`)
     .join(" ");
   return (
-    `🔥 ${theme.title}\n\n` +
+    `🔥 ${theme.titleResolved || theme.title}\n\n` +
     `${lines.join("\n")}\n\n` +
     hundredLine +
     `💬 ${engagementLine(theme, places.length)}\n\n` +
@@ -345,21 +364,17 @@ async function main() {
   );
   await initDb();
 
-  // 테마 선택: 로테이션 포인터 + 계절 가중 (months에 이번 달이 없으면 뒤로)
+  // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
   const idxRow = await db.execute("SELECT value FROM config WHERE key='roundup_idx'");
   const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
-  const month = new Date().getUTCMonth() + 1; // KST 보정 불필요(월 단위)
   const all = themesData.themes;
-  const rotated = all.map((_, i) => all[(idx + i) % all.length]);
-  const inSeason = rotated.filter((t) => !t.months || t.months.includes(month));
-  const offSeason = rotated.filter((t) => t.months && !t.months.includes(month));
-  const ordered = [...inSeason, ...offSeason];
+  const ordered = all.map((_, i) => all[(idx + i) % all.length]);
 
   let theme = null, places = [];
   for (let t = 0; t < Math.min(3, ordered.length); t++) {
     const cand = ordered[t];
     const got = await collectPlaces(cand);
-    console.log(`[${cand.title}] 수집: ${got.length}곳 (목표 ${cand.count})${cand.months ? "" : " (사계절)"}`);
+    console.log(`[${cand.key}] 수집: ${got.length}곳 (목표 ${cand.count})`);
     if (got.length >= Math.min(5, cand.count)) {
       theme = cand;
       places = got;
@@ -367,14 +382,20 @@ async function main() {
     }
   }
   if (!theme) throw new Error("수집 가능한 테마 없음");
+  // 제목의 {n}을 실제 수집 수로 치환
+  theme.titleResolved = String(theme.title).replace("{n}", String(places.length));
+  console.log("제목:", theme.titleResolved);
 
   // 백년가게 대조 (배지·캡션용)
   await markHundredYear(db, places);
   console.log(`백년가게: ${places.filter((p) => p.hundred).length}곳`);
 
-  // 한줄평 먼저 (비전 호출이 분당 한도를 소모하기 전에)
+  // 한줄평+상세설명 먼저 (비전 호출이 분당 한도를 소모하기 전에)
   const descs = await makeDescriptions(theme, places);
-  places.forEach((p, i) => (p.desc = descs[i]));
+  places.forEach((p, i) => {
+    p.desc = descs[i].short;
+    p.detail = descs[i].detail;
+  });
 
   // 음식 사진 우선 선택 (Gemini 비전) — 무료 등급 분당 한도 고려해 4초 간격 순차
   for (const p of places) {
@@ -430,7 +451,7 @@ async function main() {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
     args: [
       `roundup-${theme.key}-${today}`,
-      theme.title,
+      theme.titleResolved,
       places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
       "모음집",
       places[0].imageUrl,
