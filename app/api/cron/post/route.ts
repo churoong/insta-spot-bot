@@ -19,6 +19,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  // ?resetcooldown=1 → 발행 쿨다운 수동 해제 (차단 풀린 걸 확인했을 때)
+  if (req.nextUrl.searchParams.get("resetcooldown") === "1") {
+    await initDb();
+    await db.execute("DELETE FROM config WHERE key='publish_cooldown_until'");
+    return NextResponse.json({ ok: true, reset: "publish_cooldown_until 해제됨" });
+  }
+
   // ?featured=1 → 인증맛집 회차 강제 (테스트용)
   const forceFeatured = req.nextUrl.searchParams.get("featured") === "1";
 
@@ -47,11 +54,19 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ accepted: true });
 }
 
-/** 크론 실행 기록 — 백그라운드 실패도 DB에 남겨 진단 가능하게 */
+/** 크론 실행 기록 + 행동차단 감지 시 발행 쿨다운 설정 */
 async function clog(note: string) {
   try {
     await initDb();
-    await db.execute({ sql: "INSERT INTO cron_log (note) VALUES (?)", args: [note] });
+    await db.execute({ sql: "INSERT INTO cron_log (note) VALUES (?)", args: [note.slice(0, 500)] });
+    // 인스타 행동차단/발행제한 신호면 일정 시간 발행 중단 (계정 회복 시간 확보)
+    if (/2207051|action is blocked|request limit reached|행동이 차단/i.test(note)) {
+      const hours = Number(process.env.PUBLISH_COOLDOWN_HOURS || 12);
+      await db.execute({
+        sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('publish_cooldown_until', datetime('now', ?), datetime('now'))",
+        args: [`+${hours} hours`],
+      });
+    }
   } catch {
     /* 로그 실패는 무시 */
   }
@@ -67,25 +82,21 @@ async function runCron(forceFeatured = false) {
     return { skipped: true, reason: `KST 심야(${kstHour}시) — 발행 쉬는 시간` };
   }
 
-  // 인스타 행동차단(subcode 2207051) 백오프: 최근 6시간 내 차단 이력이 있으면
-  // 시도 자체를 쉼 — 실패 반복(컨테이너 생성 후 발행 거부)이 차단을 연장시킬 수 있음
+  // 발행 쿨다운: 행동차단이 감지되면 clog가 설정. 그 시각까지 발행 시도 자체를 쉼
+  // — 실패 반복(컨테이너 생성 후 발행 거부)이 차단을 연장시키므로 계정을 조용히 둠.
   try {
-    const lastBlock = await db.execute(
-      "SELECT created_at FROM cron_log WHERE note LIKE '%2207051%' ORDER BY id DESC LIMIT 1"
-    );
-    if (lastBlock.rows.length > 0) {
-      const age =
-        Date.now() -
-        new Date(String(lastBlock.rows[0].created_at).replace(" ", "T") + "Z").getTime();
-      if (age < 6 * 3600 * 1000) {
+    const cd = await db.execute("SELECT value FROM config WHERE key='publish_cooldown_until'");
+    if (cd.rows.length > 0) {
+      const until = new Date(String(cd.rows[0].value).replace(" ", "T") + "Z").getTime();
+      if (Date.now() < until) {
         return {
           skipped: true,
-          reason: `인스타 행동차단 백오프 (마지막 차단 ${Math.round(age / 60000)}분 전, 6시간 대기)`,
+          reason: `발행 쿨다운 (인스타 행동차단 회복 대기, ${Math.round((until - Date.now()) / 60000)}분 남음)`,
         };
       }
     }
   } catch {
-    /* 로그 조회 실패 시 정상 진행 */
+    /* 조회 실패 시 정상 진행 */
   }
 
   // 토큰 자동 갱신: 7일 넘게 묵었으면 새 60일 토큰으로 교체 (실패해도 발행은 계속)

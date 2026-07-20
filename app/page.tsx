@@ -81,10 +81,29 @@ async function loadData() {
        ORDER BY score DESC, id DESC LIMIT 3`
     );
     const live = process.env.IG_ACCESS_TOKEN ? true : false;
+
+    // 발행 상태(쿨다운) + 최근 크론 로그
+    let cooldownMin = 0;
+    try {
+      const cd = await db.execute("SELECT value FROM config WHERE key='publish_cooldown_until'");
+      if (cd.rows.length) {
+        const until = new Date(String(cd.rows[0].value).replace(" ", "T") + "Z").getTime();
+        cooldownMin = Math.max(0, Math.round((until - Date.now()) / 60000));
+      }
+    } catch { /* config 없음 */ }
+    let cronLog: any[] = [];
+    try {
+      cronLog = (
+        await db.execute("SELECT note, created_at FROM cron_log ORDER BY id DESC LIMIT 5")
+      ).rows;
+    } catch { /* 테이블 없음 */ }
+
     return {
       posts: posts.rows,
       dmCount: Number(dms.rows[0].n),
       popular: popular.rows.filter((r: any) => Number(r.score) > 0),
+      cooldownMin,
+      cronLog,
       live,
     };
   } catch (e) {
@@ -149,6 +168,25 @@ export default async function Home() {
             <Stat label={data.live ? "발행된 게시글" : "생성된 미리보기"} value={data.posts.length} />
             <Stat label="발송된 DM" value={data.dmCount} />
           </div>
+
+          {(data as any).cooldownMin > 0 && (
+            <div
+              style={{
+                background: "#3a1e1e",
+                border: "1px solid #5c2a2a",
+                borderRadius: 12,
+                padding: "12px 16px",
+                marginBottom: 16,
+                color: "#f0b4b4",
+                fontSize: 13.5,
+                lineHeight: 1.6,
+              }}
+            >
+              ⛔ <b>발행 일시중단</b> — 인스타그램이 이 계정의 게시 활동을 일시
+              제한했습니다(행동 차단). 재시도가 차단을 연장시키지 않도록 봇이 발행을
+              쉬는 중이에요. 약 {(data as any).cooldownMin >= 60 ? `${Math.round((data as any).cooldownMin / 60)}시간` : `${(data as any).cooldownMin}분`} 후 자동 재시도합니다. (읽기·DM·댓글은 정상)
+            </div>
+          )}
 
           {(() => {
             const guide = buildEngagementGuide(data.posts as any[]);
@@ -329,6 +367,22 @@ export default async function Home() {
               </div>
             );
           })}
+
+          {(data as any).cronLog && (data as any).cronLog.length > 0 && (
+            <details style={{ marginTop: 20, color: "#9aa0ae", fontSize: 12.5 }}>
+              <summary style={{ cursor: "pointer" }}>🛠 최근 발행 크론 기록 (진단용)</summary>
+              <div style={{ marginTop: 8, lineHeight: 1.7 }}>
+                {(data as any).cronLog.map((c: any, i: number) => (
+                  <div key={i} style={{ borderTop: "1px solid #23262e", padding: "5px 0" }}>
+                    <span style={{ color: "#6f7580" }}>{toKst(c.created_at)}</span>{" "}
+                    <span style={{ color: /실패|blocked|차단/.test(String(c.note)) ? "#e08080" : "#9aa0ae" }}>
+                      {String(c.note).slice(0, 160)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
         </>
       )}
     </main>
