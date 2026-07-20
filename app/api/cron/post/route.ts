@@ -67,6 +67,27 @@ async function runCron(forceFeatured = false) {
     return { skipped: true, reason: `KST 심야(${kstHour}시) — 발행 쉬는 시간` };
   }
 
+  // 인스타 행동차단(subcode 2207051) 백오프: 최근 6시간 내 차단 이력이 있으면
+  // 시도 자체를 쉼 — 실패 반복(컨테이너 생성 후 발행 거부)이 차단을 연장시킬 수 있음
+  try {
+    const lastBlock = await db.execute(
+      "SELECT created_at FROM cron_log WHERE note LIKE '%2207051%' ORDER BY id DESC LIMIT 1"
+    );
+    if (lastBlock.rows.length > 0) {
+      const age =
+        Date.now() -
+        new Date(String(lastBlock.rows[0].created_at).replace(" ", "T") + "Z").getTime();
+      if (age < 6 * 3600 * 1000) {
+        return {
+          skipped: true,
+          reason: `인스타 행동차단 백오프 (마지막 차단 ${Math.round(age / 60000)}분 전, 6시간 대기)`,
+        };
+      }
+    }
+  } catch {
+    /* 로그 조회 실패 시 정상 진행 */
+  }
+
   // 토큰 자동 갱신: 7일 넘게 묵었으면 새 60일 토큰으로 교체 (실패해도 발행은 계속)
   try {
     const tr = await maybeRefreshToken();
