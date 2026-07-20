@@ -125,6 +125,16 @@ export async function pickKakaoSpot(): Promise<import("./tourapi").Spot | null> 
 /** 카카오맵 길찾기 링크 (place_url 있으면 그걸, 없으면 좌표 기반 URL) */
 export function mapLink(p: { placeUrl?: string; name?: string; mapx?: string; mapy?: string }): string {
   if (p.placeUrl) return p.placeUrl;
-  if (p.name) return `https://map.kakao.com/?q=${encodeURIComponent(p.name)}`;
+  if (p.name) return searchMapUrl(p.name);
   return "https://map.kakao.com";
+}
+
+/**
+ * 키·승인 없이 만드는 카카오맵 검색 링크 (상호명+지역).
+ * 로컬 API 승인 전에도 DM 길찾기 링크를 제공하기 위한 기본 방식.
+ * 탭하면 카카오맵(웹/앱)에서 해당 장소를 검색해 보여줌.
+ */
+export function searchMapUrl(name: string, region = ""): string {
+  const q = [region, name].filter(Boolean).join(" ");
+  return `https://map.kakao.com/link/search/${encodeURIComponent(q)}`;
 }

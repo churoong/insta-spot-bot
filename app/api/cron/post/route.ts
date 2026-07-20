@@ -4,7 +4,7 @@ import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/t
 import { generateCaption } from "@/lib/caption";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
-import { findPlace, mapLink, pickKakaoSpot } from "@/lib/kakao";
+import { findPlace, mapLink, pickKakaoSpot, searchMapUrl } from "@/lib/kakao";
 
 // Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
 export const maxDuration = 300;
@@ -215,14 +215,15 @@ async function publishAndSave(
   caption: string,
   featuredBy: string | null
 ) {
-  // 카카오맵 길찾기 링크 (카카오 발굴 회차면 이미 있음, 아니면 조회)
-  let mapUrl: string | null = (spot as any).mapUrl ?? null;
-  if (!mapUrl) {
+  // 카카오맵 길찾기 링크. 기본은 키·승인 없이 만드는 검색 링크,
+  // 로컬 API 키가 있으면 정확한 장소 페이지(place_url)로 업그레이드.
+  const region = String(spot.address ?? "").split(/\s+/).slice(0, 2).join(" ");
+  let mapUrl: string = (spot as any).mapUrl ?? searchMapUrl(spot.name, region);
+  if (!(spot as any).mapUrl && process.env.KAKAO_REST_KEY) {
     try {
-      const region = String(spot.address ?? "").split(/\s+/).slice(0, 2).join(" ");
       const kp = await findPlace(spot.name, region);
       if (kp) mapUrl = mapLink(kp);
-    } catch { /* 무시 */ }
+    } catch { /* 검색 링크 유지 */ }
   }
 
   // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
