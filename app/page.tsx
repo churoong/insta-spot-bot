@@ -1,7 +1,69 @@
 import { db, initDb } from "@/lib/db";
 import PostActions from "./components/PostActions";
+import themesData from "@/data/roundup-themes.json";
 
 export const dynamic = "force-dynamic";
+
+// ===== 수동 참여 가이드: 매일 바뀌는 추천 해시태그·시간대 =====
+// 자동 좋아요/팔로우는 API 미지원+계정 정지 위험이라, 사람이 직접 하는 참여를 돕는다.
+
+const SIDO_TAG: Record<string, string> = {
+  서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
+  광주광역시: "광주", 대전광역시: "대전", 울산광역시: "울산",
+  경기도: "경기", 강원특별자치도: "강원", 강원도: "강원",
+  충청북도: "충북", 충청남도: "충남", 전북특별자치도: "전북", 전라남도: "전남",
+  경상북도: "경북", 경상남도: "경남", 제주특별자치도: "제주",
+};
+const EVERGREEN = ["맛집추천", "먹스타그램", "국내여행", "숨은맛집", "맛집투어", "여행스타그램", "로컬맛집", "주말나들이"];
+
+function buildEngagementGuide(posts: any[]) {
+  // 날짜 시드 (KST 기준, 매일 로테이션)
+  const day = Math.floor((Date.now() + 9 * 3600 * 1000) / 86400000);
+  const themes: any[] = (themesData as any).themes;
+
+  // ① 테마 태그 2개 (로테이션) + ② 최근 게시물 지역 태그 + ③ 상시 태그
+  const t1 = themes[day % themes.length];
+  const t2 = themes[(day + 7) % themes.length];
+  const regionTags = [
+    ...new Set(
+      posts
+        .filter((p) => p.status === "published" && p.address)
+        .slice(0, 8)
+        .map((p) => SIDO_TAG[String(p.address).split(/\s+/)[0]])
+        .filter(Boolean)
+        .map((r) => `${r}맛집`)
+    ),
+  ].slice(0, 2);
+  const tags = [
+    ...new Set([
+      ...(t1.tags ?? []).slice(0, 2),
+      ...(t2.tags ?? []).slice(0, 1),
+      ...regionTags,
+      EVERGREEN[day % EVERGREEN.length],
+      EVERGREEN[(day + 3) % EVERGREEN.length],
+    ]),
+  ].slice(0, 7);
+
+  // 반응 데이터 기반 추천 시간대 (충분한 데이터 없으면 기본 골든타임)
+  const hourScore: Record<number, number> = {};
+  for (const p of posts) {
+    if (p.status !== "published") continue;
+    const score = (Number(p.like_count) || 0) + (Number(p.comment_count) || 0) * 3;
+    if (score <= 0) continue;
+    const kstHour = (new Date(String(p.created_at).replace(" ", "T") + "Z").getUTCHours() + 9) % 24;
+    hourScore[kstHour] = (hourScore[kstHour] ?? 0) + score;
+  }
+  const topHours = Object.entries(hourScore)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([h]) => `${h}시`);
+  const timeSlots =
+    topHours.length >= 2
+      ? `${topHours.join(", ")} 전후 (우리 게시물 반응 데이터 기준) · 기본 골든타임 12~13시, 19~22시`
+      : "점심 12~13시, 저녁 19~22시 (인스타 골든타임)";
+
+  return { tags, timeSlots };
+}
 
 async function loadData() {
   try {
@@ -87,6 +149,58 @@ export default async function Home() {
             <Stat label={data.live ? "발행된 게시글" : "생성된 미리보기"} value={data.posts.length} />
             <Stat label="발송된 DM" value={data.dmCount} />
           </div>
+
+          {(() => {
+            const guide = buildEngagementGuide(data.posts as any[]);
+            return (
+              <div
+                style={{
+                  background: "#1a1d24",
+                  border: "1px solid #2a2e38",
+                  borderRadius: 12,
+                  padding: "14px 16px",
+                  marginBottom: 16,
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>📱 오늘의 참여 가이드 (10분)</div>
+                <div style={{ color: "#9aa0ae", fontSize: 12.5, marginBottom: 10 }}>
+                  자동 좋아요·팔로우는 계정 정지 위험이라, 매일 이 루틴만 직접 해주세요. 태그를 누르면
+                  인스타그램에서 바로 열려요.
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                  {guide.tags.map((t) => (
+                    <a
+                      key={t}
+                      href={`https://www.instagram.com/explore/tags/${encodeURIComponent(t)}/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "#8ab4f8",
+                        background: "#12151b",
+                        border: "1px solid #2a3d5c",
+                        borderRadius: 15,
+                        padding: "4px 11px",
+                        textDecoration: "none",
+                      }}
+                    >
+                      #{t}
+                    </a>
+                  ))}
+                </div>
+                <div style={{ color: "#c8cdd8", fontSize: 13, lineHeight: 1.8 }}>
+                  ① 위 태그의 최신글 15개에 좋아요 ❤️<br />
+                  ② 마음에 드는 게시물 2~3곳에 진심 댓글 💬<br />
+                  ③ 결이 맞는 활발한 계정 2~3개 팔로우 🤝<br />
+                  ④ 우리 게시물의 새 댓글에 하트·답글 달기 🙌
+                </div>
+                <div style={{ color: "#c9b98a", fontSize: 12.5, marginTop: 8 }}>
+                  ⏰ 추천 시간대: {guide.timeSlots}
+                </div>
+              </div>
+            );
+          })()}
 
           {data.popular && data.popular.length > 0 && (
             <div
