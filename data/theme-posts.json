@@ -1,0 +1,13 @@
+{
+  "_설명": "Pexels 스톡 사진 기반 테마·감성 게시물. query=Pexels 검색어(영문 권장), 특정 가게가 아니라 '분위기/무드'를 소개 → 참여 유도. 스톡이 잘 커버하는 감성(카페·디저트·브런치) 위주.",
+  "themes": [
+    { "key": "rainy-soup", "title": "비 오는 날 생각나는 뜨끈한 국물", "query": "hot soup steam bowl", "hook": "이런 날엔 국물이 최고죠 🍲", "tags": ["국물요리", "비오는날", "오늘뭐먹지", "먹스타그램"] },
+    { "key": "cozy-cafe", "title": "오늘 같은 날 가고 싶은 감성 카페", "query": "cozy cafe interior warm", "hook": "따뜻한 커피 한 잔의 여유 ☕", "tags": ["감성카페", "카페투어", "커피스타그램", "카페추천"] },
+    { "key": "dessert", "title": "달콤함이 필요한 순간, 디저트", "query": "dessert cake sweet plate", "hook": "당 충전이 필요할 때 🍰", "tags": ["디저트", "디저트카페", "달달구리", "먹스타그램"] },
+    { "key": "brunch", "title": "주말 아침을 여는 브런치", "query": "brunch breakfast table cozy", "hook": "주말 아침은 역시 브런치 🥐", "tags": ["브런치", "주말브런치", "브런치카페", "먹스타그램"] },
+    { "key": "night-snack", "title": "잠 못 드는 밤, 야식 땡기는 순간", "query": "late night snack food cozy", "hook": "야식의 유혹은 못 참죠 🌙", "tags": ["야식", "야식스타그램", "먹방", "오늘뭐먹지"] },
+    { "key": "coffee", "title": "커피 한 잔의 여유", "query": "coffee latte art cup", "hook": "오늘 커피는 뭐 드셨어요? ☕", "tags": ["커피스타그램", "카페", "coffee", "일상"] },
+    { "key": "summer-cool", "title": "더운 날 시원하게, 여름 별미", "query": "cold noodles shaved ice summer dessert", "hook": "이 더위엔 시원한 게 최고 🧊", "tags": ["여름별미", "냉면", "빙수", "여름먹거리"] },
+    { "key": "bbq", "title": "불판 위 지글지글, 고기의 시간", "query": "korean bbq grilled meat", "hook": "고기 앞에선 다들 진심이죠 🥩", "tags": ["고기맛집", "삼겹살", "회식", "먹스타그램"] }
+  ]
+}

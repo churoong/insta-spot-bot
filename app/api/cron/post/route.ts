@@ -1,7 +1,9 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/tourapi";
-import { generateCaption } from "@/lib/caption";
+import { generateCaption, generateLandmarkCaption } from "@/lib/caption";
+import { pickWikimediaSpot } from "@/lib/wikimedia";
+import { pickThemePost, buildThemeCaption } from "@/lib/pexels";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
 import { findPlace, mapLink, pickKakaoSpot, searchMapUrl } from "@/lib/kakao";
@@ -166,6 +168,49 @@ async function runCron(forceFeatured = false) {
       console.log("[featured] 후보 없음 → 일반 발행으로 진행");
     } catch (e) {
       console.error("[featured] 오류(일반 발행으로 진행):", e);
+    }
+  }
+
+  // Pexels 테마 회차: 키 있을 때 확률적으로 감성 테마 게시물(스톡 사진, 특정 가게 아님).
+  if (process.env.PEXELS_KEY && Math.random() < 1 / Number(process.env.THEME_EVERY || 6)) {
+    try {
+      const tp = await pickThemePost(MIN_IMAGES);
+      if (tp) {
+        const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+        const cid = `theme-${tp.theme.key}-${today}`;
+        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
+        if (dup.rows.length === 0) {
+          const caption = buildThemeCaption(tp.theme, tp.credit);
+          const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
+          const mediaId = dryRun ? null : await publishCarousel(tp.urls, caption);
+          await db.execute({
+            sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            args: [cid, tp.theme.title, "", "테마", tp.urls[0], JSON.stringify(tp.urls), caption, mediaId, dryRun ? "dry_run" : "published"],
+          });
+          return { published: !dryRun, dryRun, place: tp.theme.title, images: tp.urls.length, theme: true, mediaId };
+        }
+      }
+    } catch (e) {
+      console.error("[theme] 발행 오류(다음 경로로):", e);
+    }
+  }
+
+  // 위키미디어 여행지 회차: 확률적으로 유명 여행지를 CC 사진으로 발행(위치 공개형).
+  // WIKI_EVERY(기본 5)분의 1 확률. 실패 시 다음 경로로.
+  const WIKI_PROB = 1 / Number(process.env.WIKI_EVERY || 5);
+  if (Math.random() < WIKI_PROB) {
+    try {
+      const w = await pickWikimediaSpot(MIN_IMAGES);
+      if (w) {
+        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [w.spot.contentId] });
+        if (dup.rows.length === 0) {
+          const caption = await generateLandmarkCaption(w.spot, w.credit);
+          return await publishAndSave(w.spot, caption, null);
+        }
+      }
+    } catch (e) {
+      console.error("[wikimedia] 발행 오류(다음 경로로):", e);
     }
   }
 

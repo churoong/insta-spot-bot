@@ -19,6 +19,10 @@ function keyword() {
 export interface CaptionOpts {
   /** 인증·유명 맛집 사실 문구 (예: "미쉐린 가이드에 이름을 올린 적 있는 곳으로 알려져 있어요") */
   featuredBy?: string;
+  /** 사진 출처 라인 교체 (예: 위키미디어 CC 크레딧). 없으면 TourAPI 출처. */
+  sourceLine?: string;
+  /** 위치를 공개하는 게시물(여행지 등). true면 본문·해시태그에 장소·지역명 허용, DM 유도 없음 */
+  reveal?: boolean;
 }
 
 export async function generateCaption(spot: Spot, opts: CaptionOpts = {}): Promise<CaptionResult> {
@@ -310,6 +314,45 @@ export async function generateMyCaption(input: {
     (mapUrl ? `🧭 위치: ${mapUrl}\n` : "") +
     `\n${tags}`
   );
+}
+
+/**
+ * 위키미디어 여행지 게시용 캡션 — 장소명 공개, 여행 소개 톤 + CC 사진 출처 표기.
+ */
+export async function generateLandmarkCaption(spot: Spot, credit: string): Promise<string> {
+  const { name, address: region } = spot;
+  let body = "";
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+      const prompt = `인스타 여행 소개 게시글 본문을 써줘.
+- 장소: ${name} (${region})
+규칙: 친근한 존댓말(해요체) 3~4문장, 이 여행지의 매력·볼거리·분위기를 소개. 장소명 자연스럽게 언급. 과장·허위 금지, 실제로 유명한 곳이니 일반적으로 알려진 특징 위주. 이모지 2~3개. 해시태그·안내문구 없이 본문만.`;
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { maxOutputTokens: 700, thinkingConfig: { thinkingBudget: 0 } },
+          }),
+          signal: AbortSignal.timeout(30000),
+        }
+      );
+      const j = await res.json();
+      const t = (j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "").trim();
+      if (t && j.candidates?.[0]?.finishReason === "STOP") body = t;
+    } catch { /* 폴백 */ }
+  }
+  if (!body) body = `${region}의 대표 여행지 ${name} 🌿 사진만 봐도 한 번쯤 꼭 가보고 싶은 곳이에요. 여행 계획에 담아두세요!`;
+
+  const rTags = region.split(/\s+/).filter(Boolean).flatMap((r) => [`#${r}여행`, `#${r}가볼만한곳`]);
+  const tags = [...new Set([...rTags, "#국내여행", "#여행스타그램", "#여행에미치다", "#여행추천", "#풍경스타그램", "#여행에미치다"])]
+    .slice(0, 11)
+    .join(" ");
+
+  return `${body}\n\n📍 ${name} (${region})\n\n${tags}\n\n${credit}`;
 }
 
 /** 주간 베스트 TOP3 게시물 캡션 (장소명 비공개 유지 — 위치는 DM으로) */
