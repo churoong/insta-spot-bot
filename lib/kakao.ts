@@ -130,11 +130,10 @@ export function mapLink(p: { placeUrl?: string; name?: string; mapx?: string; ma
 }
 
 /**
- * 키·승인 없이 만드는 카카오맵 검색 링크 (상호명+지역).
- * 로컬 API 승인 전에도 DM 길찾기 링크를 제공하기 위한 기본 방식.
- * 탭하면 카카오맵(웹/앱)에서 해당 장소를 검색해 보여줌.
+ * 키·승인 없이 만드는 네이버 지도 검색 링크 (상호명+지역).
+ * 탭하면 네이버 지도(웹/앱)에서 해당 장소를 검색해 보여줌.
  */
 export function searchMapUrl(name: string, region = ""): string {
   const q = [region, name].filter(Boolean).join(" ");
-  return `https://map.kakao.com/link/search/${encodeURIComponent(q)}`;
+  return `https://map.naver.com/p/search/${encodeURIComponent(q)}`;
 }
