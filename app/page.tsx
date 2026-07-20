@@ -149,7 +149,7 @@ export default async function Home() {
                   )}
                 </div>
                 <div style={{ color: "#9aa0ae", fontSize: 13, margin: "4px 0 10px" }}>
-                  {p.address} · {p.created_at}
+                  {p.address} · {toKst(p.created_at)}
                   {p.status === "published" && (
                     <span style={{ marginLeft: 8 }}>
                       ❤️ {Number(p.like_count) || 0} 💬 {Number(p.comment_count) || 0}
@@ -219,6 +219,16 @@ export default async function Home() {
       )}
     </main>
   );
+}
+
+/** DB의 UTC 시각을 한국시간(KST) 표시로 변환 */
+function toKst(utc: string | null): string {
+  if (!utc) return "";
+  const d = new Date(String(utc).replace(" ", "T") + "Z");
+  if (isNaN(d.getTime())) return String(utc);
+  const k = new Date(d.getTime() + 9 * 3600 * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${k.getUTCMonth() + 1}/${k.getUTCDate()} ${pad(k.getUTCHours())}:${pad(k.getUTCMinutes())} KST`;
 }
 
 /** image_urls JSON을 배열로 파싱 (없으면 단일 image_url로 폴백) */

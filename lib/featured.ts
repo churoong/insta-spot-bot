@@ -99,8 +99,9 @@ export async function pickFeatured(): Promise<{ spot: Spot; label: string } | nu
   const curated = (featuredData.list as FeaturedEntry[]).sort(() => Math.random() - 0.5);
   const hundred = (await fetchHundredYearPool()).sort(() => Math.random() - 0.5);
 
-  // 큐레이션(희소·프리미엄)과 백년가게(대규모 풀)를 반반 섞어 무작위 순서로 시도 — 후보 최대 20개
-  const entries: FeaturedEntry[] = [...curated.slice(0, 10), ...hundred.slice(0, 10)].sort(
+  // 큐레이션(희소·프리미엄)과 백년가게(대규모 풀)를 반반 섞어 무작위 순서로 시도.
+  // 후보 최대 8개 — 후보당 API 2~3회 호출이라 많으면 Vercel 함수 시간 초과 위험
+  const entries: FeaturedEntry[] = [...curated.slice(0, 4), ...hundred.slice(0, 4)].sort(
     () => Math.random() - 0.5
   );
 

@@ -5,7 +5,8 @@ import { generateCaption } from "@/lib/caption";
 import { publishCarousel, maybeRefreshToken, fetchEngagement } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
 
-export const maxDuration = 60;
+// Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
+export const maxDuration = 300;
 
 // 외부 크론(cron-job.org 등)이 호출:
 // GET /api/cron/post  (Authorization: Bearer $CRON_SECRET)
@@ -41,6 +42,13 @@ export async function GET(req: NextRequest) {
 async function runCron(forceFeatured = false) {
   await initDb();
 
+  // 한국시간 심야(00~07시)에는 발행하지 않음 — 도달률 낮고 스팸으로 보일 수 있음.
+  // QUIET_HOURS_OFF=1 로 끌 수 있음. (크론 스케줄러가 어느 시간대든 안전)
+  const kstHour = (new Date().getUTCHours() + 9) % 24;
+  if (process.env.QUIET_HOURS_OFF !== "1" && !forceFeatured && kstHour < 8) {
+    return { skipped: true, reason: `KST 심야(${kstHour}시) — 발행 쉬는 시간` };
+  }
+
   // 토큰 자동 갱신: 7일 넘게 묵었으면 새 60일 토큰으로 교체 (실패해도 발행은 계속)
   try {
     const tr = await maybeRefreshToken();
@@ -53,7 +61,7 @@ async function runCron(forceFeatured = false) {
   if (process.env.IG_ACCESS_TOKEN) {
     try {
       const recent = await db.execute(
-        "SELECT id, ig_media_id FROM posts WHERE status='published' AND ig_media_id IS NOT NULL ORDER BY id DESC LIMIT 10"
+        "SELECT id, ig_media_id FROM posts WHERE status='published' AND ig_media_id IS NOT NULL ORDER BY id DESC LIMIT 6"
       );
       await Promise.all(
         recent.rows.map(async (r: any) => {
@@ -81,13 +89,10 @@ async function runCron(forceFeatured = false) {
     return { skipped: true, reason: "daily limit reached" };
   }
 
-  // 인증맛집 회차: 매 FEATURED_EVERY번째(기본 4) 게시물, 또는 ?featured=1 강제.
-  // 목록에서 못 찾으면 일반 발행으로 자연스럽게 진행.
+  // 인증맛집 회차: 평균 FEATURED_EVERY(기본 4)번에 1번꼴 확률 방식, 또는 ?featured=1 강제.
+  // (총 개수 % N 방식은 실패 시 같은 조건이 반복돼 발행이 고착되는 문제가 있어 확률로 변경)
   const FEATURED_EVERY = Number(process.env.FEATURED_EVERY || 4);
-  const total = Number(
-    (await db.execute("SELECT COUNT(*) AS n FROM posts")).rows[0].n
-  );
-  if (forceFeatured || (FEATURED_EVERY > 0 && total % FEATURED_EVERY === FEATURED_EVERY - 1)) {
+  if (forceFeatured || (FEATURED_EVERY > 0 && Math.random() < 1 / FEATURED_EVERY)) {
     try {
       const f = await pickFeatured();
       if (f) {

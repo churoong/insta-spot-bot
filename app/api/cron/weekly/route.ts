@@ -3,7 +3,7 @@ import { db, initDb } from "@/lib/db";
 import { buildWeeklyCaption } from "@/lib/caption";
 import { publishCarousel } from "@/lib/instagram";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 // 주 1회(일요일 저녁 권장) 외부 크론이 호출:
 // GET /api/cron/weekly  (Authorization: Bearer $CRON_SECRET)
