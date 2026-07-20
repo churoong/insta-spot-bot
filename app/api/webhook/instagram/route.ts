@@ -66,7 +66,21 @@ export async function POST(req: NextRequest) {
       log(`text="${text}" media=${mediaId} from=${fromId}/@${username}`);
 
       if (fromId === process.env.IG_USER_ID) { log("skip: 내 계정 댓글"); continue; }
-      if (!text.includes(keyword)) { log("skip: 키워드 없음"); continue; }
+      if (!text.includes(keyword)) {
+        // 키워드가 아닌 일반 댓글은 "팔로워 추천 모음"으로 수집 (모음집 후보 발굴용)
+        if (text.trim().length >= 2) {
+          await db
+            .execute({
+              sql: "INSERT OR IGNORE INTO comment_suggestions (comment_id, username, text, ig_media_id) VALUES (?, ?, ?, ?)",
+              args: [commentId, username, text.slice(0, 300), mediaId],
+            })
+            .catch(() => {});
+          log("수집: 일반 댓글 → 추천함");
+        } else {
+          log("skip: 키워드 없음");
+        }
+        continue;
+      }
 
       const seen = await db.execute({
         sql: "SELECT 1 FROM dm_log WHERE comment_id = ?",

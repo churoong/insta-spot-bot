@@ -64,6 +64,19 @@ export async function initDb() {
         note TEXT,
         created_at TEXT DEFAULT (datetime('now'))
       )`,
+      `CREATE TABLE IF NOT EXISTS follower_log (
+        date TEXT PRIMARY KEY,
+        count INTEGER,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS comment_suggestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        comment_id TEXT UNIQUE,
+        username TEXT,
+        text TEXT,
+        ig_media_id TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`,
     ],
     "write"
   );
@@ -76,6 +89,7 @@ export async function initDb() {
     "ALTER TABLE posts ADD COLUMN like_count INTEGER DEFAULT 0",
     "ALTER TABLE posts ADD COLUMN comment_count INTEGER DEFAULT 0",
     "ALTER TABLE posts ADD COLUMN featured_by TEXT",
+    "ALTER TABLE posts ADD COLUMN revealed INTEGER DEFAULT 0",
   ];
   for (const sql of migrations) {
     try {

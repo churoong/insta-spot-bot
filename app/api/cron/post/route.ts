@@ -2,7 +2,7 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
-import { publishCarousel, maybeRefreshToken, fetchEngagement } from "@/lib/instagram";
+import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
 
 // Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
@@ -74,6 +74,18 @@ async function clog(note: string) {
 
 async function runCron(forceFeatured = false) {
   await initDb();
+
+  // 팔로워 수 일일 스냅샷 (주간 리포트용, 읽기 호출이라 차단·쿨다운과 무관)
+  try {
+    const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // KST 날짜
+    const seen = await db.execute({ sql: "SELECT 1 FROM follower_log WHERE date = ?", args: [today] });
+    if (seen.rows.length === 0 && process.env.IG_ACCESS_TOKEN) {
+      const n = await fetchFollowers();
+      if (n !== null) {
+        await db.execute({ sql: "INSERT OR REPLACE INTO follower_log (date, count) VALUES (?, ?)", args: [today, n] });
+      }
+    }
+  } catch { /* 스냅샷 실패 무시 */ }
 
   // 한국시간 심야(00~07시)에는 발행하지 않음 — 도달률 낮고 스팸으로 보일 수 있음.
   // QUIET_HOURS_OFF=1 로 끌 수 있음. (크론 스케줄러가 어느 시간대든 안전)
@@ -188,6 +200,16 @@ async function publishAndSave(
   // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
   const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
   const mediaId = dryRun ? null : await publishCarousel(spot.imageUrls, caption);
+
+  // 새 게시물을 스토리로도 공유 (계정 활동감 유지 — 실패해도 발행에는 영향 없음)
+  // STORY_SHARE=0 으로 끌 수 있음
+  if (!dryRun && process.env.STORY_SHARE !== "0") {
+    try {
+      await publishStory(spot.imageUrl);
+    } catch (e) {
+      console.error("[story] 공유 실패(무시):", String(e).slice(0, 150));
+    }
+  }
 
   await db.execute({
     sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy, featured_by)

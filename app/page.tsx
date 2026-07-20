@@ -98,12 +98,59 @@ async function loadData() {
       ).rows;
     } catch { /* 테이블 없음 */ }
 
+    // 주간 리포트: 팔로워 추이 + 최근 7일 vs 이전 7일 성과
+    let report: any = null;
+    try {
+      const fl = (await db.execute("SELECT date, count FROM follower_log ORDER BY date DESC LIMIT 14")).rows as any[];
+      const cur = (
+        await db.execute(
+          `SELECT COUNT(*) n, COALESCE(SUM(like_count),0) l, COALESCE(SUM(comment_count),0) c
+           FROM posts WHERE status='published' AND created_at >= datetime('now','-7 days')`
+        )
+      ).rows[0] as any;
+      const prev = (
+        await db.execute(
+          `SELECT COUNT(*) n, COALESCE(SUM(like_count),0) l, COALESCE(SUM(comment_count),0) c
+           FROM posts WHERE status='published'
+             AND created_at >= datetime('now','-14 days') AND created_at < datetime('now','-7 days')`
+        )
+      ).rows[0] as any;
+      const best = (
+        await db.execute(
+          `SELECT place_name, like_count, comment_count FROM posts
+           WHERE status='published' AND created_at >= datetime('now','-7 days')
+           ORDER BY (COALESCE(like_count,0)+COALESCE(comment_count,0)*3) DESC LIMIT 1`
+        )
+      ).rows[0] as any;
+      const now = fl[0] ? Number(fl[0].count) : null;
+      const weekAgo = fl.find((r) => r.date <= new Date(Date.now() + 9 * 3600 * 1000 - 7 * 86400 * 1000).toISOString().slice(0, 10));
+      report = {
+        followers: now,
+        followersDelta: now !== null && weekAgo ? now - Number(weekAgo.count) : null,
+        posts7: Number(cur.n), likes7: Number(cur.l), comments7: Number(cur.c),
+        postsPrev: Number(prev.n), likesPrev: Number(prev.l), commentsPrev: Number(prev.c),
+        best: best ?? null,
+      };
+    } catch { /* 데이터 부족 */ }
+
+    // 팔로워 추천 댓글 모음 (모음집 후보 발굴용)
+    let suggestions: any[] = [];
+    try {
+      suggestions = (
+        await db.execute(
+          "SELECT username, text, created_at FROM comment_suggestions ORDER BY id DESC LIMIT 8"
+        )
+      ).rows;
+    } catch { /* 테이블 없음 */ }
+
     return {
       posts: posts.rows,
       dmCount: Number(dms.rows[0].n),
       popular: popular.rows.filter((r: any) => Number(r.score) > 0),
       cooldownMin,
       cronLog,
+      report,
+      suggestions,
       live,
     };
   } catch (e) {
@@ -261,6 +308,81 @@ export default async function Home() {
               ))}
             </div>
           )}
+          {(data as any).report && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>📊 주간 리포트 (최근 7일)</div>
+              {(() => {
+                const r = (data as any).report;
+                const delta = (cur: number, prev: number) =>
+                  prev > 0 || cur > 0 ? (
+                    <span style={{ color: cur >= prev ? "#7ee0a8" : "#e08080", fontSize: 12 }}>
+                      {" "}({cur >= prev ? "▲" : "▼"}{Math.abs(cur - prev)})
+                    </span>
+                  ) : null;
+                return (
+                  <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>
+                    👥 팔로워:{" "}
+                    {r.followers !== null ? (
+                      <>
+                        <b>{r.followers}</b>
+                        {r.followersDelta !== null && (
+                          <span style={{ color: r.followersDelta >= 0 ? "#7ee0a8" : "#e08080", fontSize: 12 }}>
+                            {" "}(주간 {r.followersDelta >= 0 ? "+" : ""}{r.followersDelta})
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span style={{ color: "#9aa0ae" }}>수집 중 (다음 크론부터 기록)</span>
+                    )}
+                    <br />
+                    📤 발행 {r.posts7}건{delta(r.posts7, r.postsPrev)} · ❤️ {r.likes7}
+                    {delta(r.likes7, r.likesPrev)} · 💬 {r.comments7}
+                    {delta(r.comments7, r.commentsPrev)}
+                    {r.best && (
+                      <>
+                        <br />
+                        🏆 이번 주 베스트: {r.best.place_name} (❤️ {Number(r.best.like_count) || 0} 💬{" "}
+                        {Number(r.best.comment_count) || 0})
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {(data as any).suggestions && (data as any).suggestions.length > 0 && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>💬 팔로워 추천 모음</div>
+              <div style={{ color: "#9aa0ae", fontSize: 12.5, marginBottom: 8 }}>
+                댓글로 들어온 추천·의견이에요. 괜찮은 가게는 다음 모음집 후보로!
+              </div>
+              {(data as any).suggestions.map((s: any, i: number) => (
+                <div key={i} style={{ borderTop: "1px solid #23262e", padding: "6px 0", fontSize: 13 }}>
+                  <span style={{ color: "#8ab4f8" }}>@{s.username || "익명"}</span>{" "}
+                  <span style={{ color: "#c8cdd8" }}>{String(s.text).slice(0, 80)}</span>{" "}
+                  <span style={{ color: "#6f7580", fontSize: 11.5 }}>{toKst(s.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {data.posts.length === 0 && (
             <p style={{ color: "#9aa0ae" }}>
               아직 게시물이 없습니다. 크론이 첫 실행되면 여기에 표시됩니다.

@@ -188,6 +188,34 @@ export async function replyToComment(commentId: string, text: string) {
   await graphPost(`${commentId}/replies`, { message: text });
 }
 
+/** 스토리 발행 (이미지) — 24시간 노출. 발행된 media id 반환 */
+export async function publishStory(imageUrl: string): Promise<string> {
+  const container = await graphPost(`${igUserId()}/media`, {
+    image_url: imageUrl,
+    media_type: "STORIES",
+  });
+  await waitForContainer(String(container.id));
+  const published = await graphPost(`${igUserId()}/media_publish`, {
+    creation_id: container.id,
+  });
+  return String(published.id);
+}
+
+/** 팔로워 수 조회 (주간 리포트용) */
+export async function fetchFollowers(): Promise<number | null> {
+  try {
+    const res = await fetch(
+      `${GRAPH}/${igUserId()}?fields=followers_count&access_token=${encodeURIComponent(await getToken())}`,
+      { signal: AbortSignal.timeout(15000) }
+    );
+    const json = await res.json();
+    if (json.error) return null;
+    return Number(json.followers_count ?? 0);
+  } catch {
+    return null;
+  }
+}
+
 /** 게시물 반응 수 조회 (좋아요·댓글) — 인기 랭킹·주간 베스트용 */
 export async function fetchEngagement(
   mediaId: string
