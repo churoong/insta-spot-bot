@@ -23,20 +23,38 @@ export async function GET(req: NextRequest) {
   const forceFeatured = req.nextUrl.searchParams.get("featured") === "1";
 
   if (req.nextUrl.searchParams.get("sync") === "1") {
-    const result = await runCron(forceFeatured);
-    return NextResponse.json(result);
+    try {
+      const result = await runCron(forceFeatured);
+      await clog("sync 완료: " + JSON.stringify(result));
+      return NextResponse.json(result);
+    } catch (e) {
+      await clog("sync 실패: " + String(e).slice(0, 400));
+      return NextResponse.json({ error: String(e).slice(0, 500) }, { status: 500 });
+    }
   }
 
   // cron-job.org에는 즉시 응답, 발행은 백그라운드에서
   after(async () => {
     try {
       const r = await runCron(forceFeatured);
+      await clog("완료: " + JSON.stringify(r));
       console.log("[cron/post]", JSON.stringify(r));
     } catch (e) {
+      await clog("실패: " + String(e).slice(0, 400));
       console.error("[cron/post] 오류:", e);
     }
   });
   return NextResponse.json({ accepted: true });
+}
+
+/** 크론 실행 기록 — 백그라운드 실패도 DB에 남겨 진단 가능하게 */
+async function clog(note: string) {
+  try {
+    await initDb();
+    await db.execute({ sql: "INSERT INTO cron_log (note) VALUES (?)", args: [note] });
+  } catch {
+    /* 로그 실패는 무시 */
+  }
 }
 
 async function runCron(forceFeatured = false) {

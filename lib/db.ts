@@ -59,6 +59,11 @@ export async function initDb() {
         value TEXT,
         updated_at TEXT DEFAULT (datetime('now'))
       )`,
+      `CREATE TABLE IF NOT EXISTS cron_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`,
     ],
     "write"
   );
