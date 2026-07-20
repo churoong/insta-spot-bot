@@ -203,6 +203,7 @@ export function buildDmText(
     address: string | null;
     category: string | null;
     featured_by?: string | null;
+    map_url?: string | null;
   },
   nearby: { name: string; address: string; category: string; distM: number }[] = []
 ): string {
@@ -210,7 +211,8 @@ export function buildDmText(
     `안녕하세요! 궁금해하셨던 ${spot.category ?? "장소"} 알려드릴게요 🤫\n\n` +
     `📍 ${spot.place_name}\n` +
     (spot.address ? `🗺️ ${spot.address}\n` : "") +
-    (spot.featured_by ? `🏅 ${spot.featured_by}\n` : "");
+    (spot.featured_by ? `🏅 ${spot.featured_by}\n` : "") +
+    (spot.map_url ? `🧭 길찾기: ${spot.map_url}\n` : "");
 
   if (nearby.length > 0) {
     text += `\n🚶 근처에 이런 곳도 있어요!\n`;

@@ -4,6 +4,7 @@ import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/t
 import { generateCaption } from "@/lib/caption";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
+import { findPlace, mapLink, pickKakaoSpot } from "@/lib/kakao";
 
 // Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
 export const maxDuration = 300;
@@ -168,6 +169,23 @@ async function runCron(forceFeatured = false) {
     }
   }
 
+  // 카카오 발굴 회차: 확률적으로 카카오맵으로 "지역+메뉴" 맛집을 발굴(TourAPI 사진 연결).
+  // TourAPI 자체 후보와 다른 맛집을 섞어 다양성을 높임. 키 없거나 실패 시 일반 발행.
+  if (process.env.KAKAO_REST_KEY && Math.random() < 1 / 3) {
+    try {
+      const ks = await pickKakaoSpot();
+      if (ks) {
+        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [ks.contentId] });
+        if (dup.rows.length === 0) {
+          const { caption } = await generateCaption(ks);
+          return await publishAndSave(ks, caption, null);
+        }
+      }
+    } catch (e) {
+      console.error("[kakao] 발굴 오류(일반 발행으로 진행):", e);
+    }
+  }
+
   // 아직 안 올린 장소 찾기 (최대 3번 다른 지역 시도)
   for (let attempt = 0; attempt < 3; attempt++) {
     const candidates = await fetchCandidates();
@@ -197,6 +215,16 @@ async function publishAndSave(
   caption: string,
   featuredBy: string | null
 ) {
+  // 카카오맵 길찾기 링크 (카카오 발굴 회차면 이미 있음, 아니면 조회)
+  let mapUrl: string | null = (spot as any).mapUrl ?? null;
+  if (!mapUrl) {
+    try {
+      const region = String(spot.address ?? "").split(/\s+/).slice(0, 2).join(" ");
+      const kp = await findPlace(spot.name, region);
+      if (kp) mapUrl = mapLink(kp);
+    } catch { /* 무시 */ }
+  }
+
   // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
   const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
   const mediaId = dryRun ? null : await publishCarousel(spot.imageUrls, caption);
@@ -212,8 +240,8 @@ async function publishAndSave(
   }
 
   await db.execute({
-    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy, featured_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy, featured_by, map_url)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       spot.contentId,
       spot.name,
@@ -227,6 +255,7 @@ async function publishAndSave(
       spot.mapx ?? null,
       spot.mapy ?? null,
       featuredBy,
+      mapUrl,
     ],
   });
 

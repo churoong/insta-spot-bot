@@ -156,6 +156,44 @@ export async function fetchImages(
   return [...urls].slice(0, MAX_IMAGES);
 }
 
+/** 상호명으로 TourAPI에서 장소+이미지 확보 (카카오 발굴 이름 → 사진 연결용) */
+export async function fetchSpotByName(
+  name: string,
+  regionHint = ""
+): Promise<Spot | null> {
+  try {
+    const items = await call("searchKeyword2", {
+      keyword: name,
+      contentTypeId: "39",
+      numOfRows: "5",
+    });
+    const norm = (s: string) => s.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, "");
+    const hit = items.find(
+      (it: any) =>
+        it.firstimage &&
+        (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3") &&
+        (norm(it.title).includes(norm(name)) || norm(name).includes(norm(it.title))) &&
+        (!regionHint || String(it.addr1 ?? "").includes(regionHint.slice(0, 2)))
+    );
+    if (!hit) return null;
+    const imageUrls = await fetchImages(String(hit.contentid), String(hit.firstimage));
+    if (imageUrls.length < MIN_IMAGES) return null;
+    return {
+      contentId: String(hit.contentid),
+      name: hit.title,
+      address: [hit.addr1, hit.addr2].filter(Boolean).join(" "),
+      category: "맛집",
+      imageUrl: toHttps(hit.firstimage),
+      imageUrls,
+      overview: "",
+      mapx: hit.mapx ? String(hit.mapx) : undefined,
+      mapy: hit.mapy ? String(hit.mapy) : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** 상세 설명(overview) 채우기 */
 export async function fetchOverview(contentId: string): Promise<string> {
   try {

@@ -90,6 +90,7 @@ export async function initDb() {
     "ALTER TABLE posts ADD COLUMN comment_count INTEGER DEFAULT 0",
     "ALTER TABLE posts ADD COLUMN featured_by TEXT",
     "ALTER TABLE posts ADD COLUMN revealed INTEGER DEFAULT 0",
+    "ALTER TABLE posts ADD COLUMN map_url TEXT",
   ];
   for (const sql of migrations) {
     try {

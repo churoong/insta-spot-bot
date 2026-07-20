@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
       if (seen.rows.length > 0) { log("skip: 이미 발송함"); continue; }
 
       const post = await db.execute({
-        sql: "SELECT place_name, address, category, mapx, mapy, featured_by FROM posts WHERE ig_media_id = ?",
+        sql: "SELECT place_name, address, category, mapx, mapy, featured_by, map_url FROM posts WHERE ig_media_id = ?",
         args: [mediaId],
       });
       if (post.rows.length === 0) { log(`skip: 게시물 못찾음(media=${mediaId})`); continue; }
