@@ -369,17 +369,34 @@ export default async function Home() {
                 marginBottom: 16,
               }}
             >
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>💬 팔로워 추천 모음</div>
-              <div style={{ color: "#9aa0ae", fontSize: 12.5, marginBottom: 8 }}>
-                댓글로 들어온 추천·의견이에요. 괜찮은 가게는 다음 모음집 후보로!
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>💬 팔로워 제보·추천함</div>
+              <div style={{ color: "#9aa0ae", fontSize: 12.5, marginBottom: 10 }}>
+                댓글로 들어온 맛집 제보·추천이에요. 지도에서 확인 후 괜찮으면 다음
+                모음집·게시 후보로 올려주세요. (사진은 저작권상 TourAPI 것만 사용 —
+                제보 가게가 TourAPI에 있으면 바로 게시 가능)
               </div>
-              {(data as any).suggestions.map((s: any, i: number) => (
-                <div key={i} style={{ borderTop: "1px solid #23262e", padding: "6px 0", fontSize: 13 }}>
-                  <span style={{ color: "#8ab4f8" }}>@{s.username || "익명"}</span>{" "}
-                  <span style={{ color: "#c8cdd8" }}>{String(s.text).slice(0, 80)}</span>{" "}
-                  <span style={{ color: "#6f7580", fontSize: 11.5 }}>{toKst(s.created_at)}</span>
-                </div>
-              ))}
+              {(data as any).suggestions.map((s: any, i: number) => {
+                const q = encodeURIComponent(String(s.text).replace(/[#@]/g, "").slice(0, 40));
+                return (
+                  <div key={i} style={{ borderTop: "1px solid #23262e", padding: "8px 0", fontSize: 13 }}>
+                    <div>
+                      <span style={{ color: "#8ab4f8" }}>@{s.username || "익명"}</span>{" "}
+                      <span style={{ color: "#c8cdd8" }}>{String(s.text).slice(0, 90)}</span>
+                    </div>
+                    <div style={{ marginTop: 4, display: "flex", gap: 8, alignItems: "center" }}>
+                      <a
+                        href={`https://map.naver.com/p/search/${q}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 12, color: "#7ee0a8", textDecoration: "none" }}
+                      >
+                        🗺️ 지도에서 확인
+                      </a>
+                      <span style={{ color: "#6f7580", fontSize: 11.5 }}>{toKst(s.created_at)}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
