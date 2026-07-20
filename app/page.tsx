@@ -69,7 +69,7 @@ async function loadData() {
   try {
     await initDb();
     const posts = await db.execute(
-      "SELECT id, place_name, address, category, image_url, image_urls, caption, status, created_at, like_count, comment_count FROM posts ORDER BY id DESC LIMIT 50"
+      "SELECT id, place_name, address, category, image_url, image_urls, caption, status, created_at, like_count, comment_count FROM posts ORDER BY datetime(created_at) DESC, id DESC LIMIT 50"
     );
     const dms = await db.execute(
       "SELECT COUNT(*) AS n FROM dm_log"
