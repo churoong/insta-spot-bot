@@ -64,7 +64,7 @@ async function clog(note: string) {
     await db.execute({ sql: "INSERT INTO cron_log (note) VALUES (?)", args: [note.slice(0, 500)] });
     // 인스타 행동차단/발행제한 신호면 일정 시간 발행 중단 (계정 회복 시간 확보)
     if (/2207051|action is blocked|request limit reached|행동이 차단/i.test(note)) {
-      const hours = Number(process.env.PUBLISH_COOLDOWN_HOURS || 12);
+      const hours = Number(process.env.PUBLISH_COOLDOWN_HOURS || 24);
       await db.execute({
         sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('publish_cooldown_until', datetime('now', ?), datetime('now'))",
         args: [`+${hours} hours`],
