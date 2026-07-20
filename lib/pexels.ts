@@ -45,17 +45,63 @@ export async function fetchPexelsPhotos(
   }
 }
 
-/** 테마 하나 골라 스톡 사진으로 구성 (실패 시 null) */
+/** Pixabay 스톡 사진 (Pexels 대안 — 무료·상업이용, 로그인만으로 키 발급) */
+export async function fetchPixabayPhotos(
+  query: string,
+  count = 8
+): Promise<{ urls: string[]; photographers: string[] }> {
+  if (!process.env.PIXABAY_KEY) return { urls: [], photographers: [] };
+  try {
+    const qs = new URLSearchParams({
+      key: process.env.PIXABAY_KEY,
+      q: query,
+      image_type: "photo",
+      orientation: "vertical",
+      per_page: String(Math.min(30, count * 3)),
+      safesearch: "true",
+    });
+    const res = await fetch(`https://pixabay.com/api/?${qs}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return { urls: [], photographers: [] };
+    const json = await res.json();
+    const hits: any[] = json?.hits ?? [];
+    const urls: string[] = [];
+    const photographers = new Set<string>();
+    for (const h of hits) {
+      const url = h?.largeImageURL || h?.webformatURL;
+      if (!url) continue;
+      urls.push(String(url));
+      if (h.user) photographers.add(String(h.user));
+      if (urls.length >= count) break;
+    }
+    return { urls, photographers: [...photographers].slice(0, 5) };
+  } catch {
+    return { urls: [], photographers: [] };
+  }
+}
+
+/** 테마 하나 골라 스톡 사진으로 구성 — Pexels → Pixabay 순으로 시도 (실패 시 null) */
 export async function pickThemePost(
   minImages = 5
 ): Promise<{ theme: ThemePost; urls: string[]; credit: string } | null> {
-  if (!process.env.PEXELS_KEY) return null;
+  if (!process.env.PEXELS_KEY && !process.env.PIXABAY_KEY) return null;
   const list = (themes.themes as ThemePost[]).sort(() => Math.random() - 0.5);
   for (const t of list.slice(0, 4)) {
-    const { urls, photographers } = await fetchPexelsPhotos(t.query, 8);
-    if (urls.length < minImages) continue;
-    const credit = `📷 사진: Pexels${photographers.length ? " (" + photographers.slice(0, 3).join(", ") + " 외)" : ""}`;
-    return { theme: t, urls: urls.slice(0, 9), credit };
+    if (process.env.PEXELS_KEY) {
+      const { urls, photographers } = await fetchPexelsPhotos(t.query, 8);
+      if (urls.length >= minImages) {
+        const credit = `📷 사진: Pexels${photographers.length ? " (" + photographers.slice(0, 3).join(", ") + " 외)" : ""}`;
+        return { theme: t, urls: urls.slice(0, 9), credit };
+      }
+    }
+    if (process.env.PIXABAY_KEY) {
+      const { urls, photographers } = await fetchPixabayPhotos(t.query, 8);
+      if (urls.length >= minImages) {
+        const credit = `📷 사진: Pixabay${photographers.length ? " (" + photographers.slice(0, 3).join(", ") + " 외)" : ""}`;
+        return { theme: t, urls: urls.slice(0, 9), credit };
+      }
+    }
   }
   return null;
 }

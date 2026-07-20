@@ -171,8 +171,8 @@ async function runCron(forceFeatured = false) {
     }
   }
 
-  // Pexels 테마 회차: 키 있을 때 확률적으로 감성 테마 게시물(스톡 사진, 특정 가게 아님).
-  if (process.env.PEXELS_KEY && Math.random() < 1 / Number(process.env.THEME_EVERY || 6)) {
+  // 스톡 테마 회차: Pexels/Pixabay 키 있을 때 확률적으로 감성 테마 게시물(특정 가게 아님).
+  if ((process.env.PEXELS_KEY || process.env.PIXABAY_KEY) && Math.random() < 1 / Number(process.env.THEME_EVERY || 6)) {
     try {
       const tp = await pickThemePost(MIN_IMAGES);
       if (tp) {
