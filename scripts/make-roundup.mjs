@@ -289,7 +289,7 @@ function engagementLine(theme, count) {
 }
 
 function buildCaption(theme, places) {
-  const keyword = process.env.DM_KEYWORD || "어디야";
+  // 모음집은 공개형 — 상호명이 이미 공개돼 있으므로 "어디야→DM" 유도 문구는 넣지 않음
   const lines = places.map((p, i) => `${i + 1}. ${p.name} (${p.region}) — ${p.desc}`);
   const tags = [...(theme.tags ?? []), "맛집추천", "맛집리스트", "먹스타그램", "저장각", "맛집투어"]
     .map((t) => `#${t}`)
@@ -298,8 +298,7 @@ function buildCaption(theme, places) {
     `🔥 ${theme.title}\n\n` +
     `${lines.join("\n")}\n\n` +
     `💬 ${engagementLine(theme, places.length)}\n\n` +
-    `📌 저장해두고 하나씩 정복해 보세요!\n` +
-    `상세 주소가 궁금하시면 댓글에 "${keyword}" 남기고 팔로우해 주세요. ${places.length}곳 전부 DM으로 보내드릴게요 📩\n\n` +
+    `📌 저장해두고 하나씩 정복해 보세요!\n\n` +
     `${tags}\n\n📷 사진·정보 출처: 한국관광공사 TourAPI`
   );
 }
