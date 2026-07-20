@@ -249,6 +249,69 @@ export function buildReelCaption(category: string, address = ""): string {
   );
 }
 
+/**
+ * 내 사진(직접 촬영) 게시용 캡션 — 상호명 공개, 직접 방문 후기 톤.
+ * TourAPI 출처 라인 없음(내 사진). Gemini 있으면 메모를 자연스럽게 살림.
+ */
+export async function generateMyCaption(input: {
+  name: string;
+  region: string;
+  category: string;
+  note?: string;
+  mapUrl?: string;
+}): Promise<string> {
+  const { name, region, category, note, mapUrl } = input;
+  let body = "";
+
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+      const prompt = `인스타 ${category} 소개 게시글 캡션 본문을 써줘.
+- 상호명: ${name} (${region})
+- 직접 다녀와서 찍은 사진이야
+- 참고 메모: ${note || "(없음 — 분위기 좋게 소개)"}
+규칙: 친근한 존댓말(해요체) 3~4문장, 실제 다녀온 사람 톤, 상호명 자연스럽게 언급, 과장 금지, 이모지 2~3개. 해시태그·안내문구 없이 본문만.`;
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { maxOutputTokens: 700, thinkingConfig: { thinkingBudget: 0 } },
+          }),
+          signal: AbortSignal.timeout(30000),
+        }
+      );
+      const j = await res.json();
+      const t = (j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "").trim();
+      if (t && j.candidates[0].finishReason === "STOP") body = t;
+    } catch {
+      /* 폴백 */
+    }
+  }
+  if (!body) {
+    body = note
+      ? `${note}\n\n직접 다녀온 ${category}, ${name} 다녀왔어요 📸`
+      : `직접 다녀온 ${category} ${name}, 사진으로 남겨봐요 📸 분위기도 좋고 또 가고 싶은 곳이에요.`;
+  }
+
+  const isFood = category === "맛집";
+  const rParts = region.split(/\s+/).filter(Boolean);
+  const regionTags = rParts.flatMap((r) => [`#${r}${isFood ? "맛집" : "여행"}`, `#${r}핫플`]);
+  const baseTags = isFood
+    ? ["#맛집추천", "#먹스타그램", "#맛스타그램", "#직접다녀온맛집", "#내돈내산"]
+    : ["#여행스타그램", "#국내여행", "#여행추천", "#감성여행", "#직접다녀온곳"];
+  const tags = [...new Set([...regionTags, ...baseTags])].slice(0, 12).join(" ");
+
+  return (
+    `${body}\n\n` +
+    `📍 ${name} (${region})\n` +
+    (mapUrl ? `🧭 위치: ${mapUrl}\n` : "") +
+    `\n${tags}`
+  );
+}
+
 /** 주간 베스트 TOP3 게시물 캡션 (장소명 비공개 유지 — 위치는 DM으로) */
 export function buildWeeklyCaption(count: number): string {
   return (

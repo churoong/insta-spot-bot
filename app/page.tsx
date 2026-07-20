@@ -1,5 +1,6 @@
 import { db, initDb } from "@/lib/db";
 import PostActions from "./components/PostActions";
+import UploadForm from "./components/UploadForm";
 import themesData from "@/data/roundup-themes.json";
 
 export const dynamic = "force-dynamic";
@@ -215,6 +216,8 @@ export default async function Home() {
             <Stat label={data.live ? "발행된 게시글" : "생성된 미리보기"} value={data.posts.length} />
             <Stat label="발송된 DM" value={data.dmCount} />
           </div>
+
+          <UploadForm />
 
           {(data as any).cooldownMin > 0 && (
             <div
