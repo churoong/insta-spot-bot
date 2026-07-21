@@ -202,65 +202,92 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
 }
 
 /**
- * 릴스 전용 세로 표지(1080x1920): 음식 사진 풀블리드 + 제목 + 리스트 패널.
- * 4:5 표지를 블러 패딩하던 방식 대신 릴스 규격에 딱 맞게 새로 합성.
+ * 릴스용 표지(1080x1920): 원본 인포그래픽 그리드 스타일 유지(사진+번호+이름+지역칩+한줄소개),
+ * 배경만 음식 사진(어둡고 따뜻한 오버레이)으로 먹음직스럽게. 릴스 규격에 딱 맞음.
  */
 async function composeReelCover(theme, places) {
   const sharp = (await import("sharp")).default;
-  const W = 1080, H = 1920;
+  const W = 1080, H = 1920, HEADER = 210, FOOTER = 110;
+  const rows = Math.ceil(places.length / 2);
+  const CELL_W = 540, CELL_H = Math.floor((H - HEADER - FOOTER) / rows);
+  const PHOTO_W = 250, PAD = 12;
+  const emoji = theme.emoji || "💡";
 
-  // 배경: 음식으로 판별된 사진 우선
+  // 배경: 음식 판별 사진 풀블리드 + 따뜻한 어두운 오버레이 (블러 없음)
   const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
-  const res = await fetch(bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
-  if (!res.ok) throw new Error("릴스 배경 사진 다운로드 실패");
-  const bg = await sharp(Buffer.from(await res.arrayBuffer()))
+  const bgRes = await fetch(bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
+  if (!bgRes.ok) throw new Error("릴스 배경 사진 실패");
+  const bgPhoto = await sharp(Buffer.from(await bgRes.arrayBuffer()))
     .resize(W, H, { fit: "cover" })
-    .modulate({ saturation: 1.15, brightness: 1.02 }) // 살짝 채도 올려 먹음직하게
-    .jpeg({ quality: 88 })
+    .modulate({ saturation: 1.12 })
+    .jpeg({ quality: 86 })
     .toBuffer();
 
-  const titleText = String(theme.titleResolved || "");
-  const ts = titleText.length <= 11 ? 76 : titleText.length <= 14 ? 64 : 54;
+  const cellPos = (i) => {
+    const lastOdd = places.length % 2 === 1 && i === places.length - 1;
+    const col = i % 2, row = Math.floor(i / 2);
+    return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: HEADER + row * CELL_H };
+  };
 
-  // 리스트 패널 (반투명 라운드 박스)
-  const n = places.length;
-  const ROW = 92;
-  const PANEL_W = 940, PANEL_X = (W - PANEL_W) / 2;
-  const PANEL_H = n * ROW + 60;
-  const PANEL_Y = 560;
-  let rows = "";
-  for (let i = 0; i < n; i++) {
-    const p = places[i];
-    const nm = p.name.length > 11 ? p.name.slice(0, 10) + "…" : p.name;
-    const y = PANEL_Y + 66 + i * ROW;
-    rows += `
-      <rect x="${PANEL_X + 36}" y="${y - 34}" width="48" height="48" rx="12" fill="#d92121"/>
-      <text x="${PANEL_X + 60}" y="${y}" font-family="${FONT}" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
-      <text x="${PANEL_X + 104}" y="${y}" font-family="${FONT}" font-size="38" font-weight="800" fill="#ffffff">${esc(nm)}</text>
-      <text x="${PANEL_X + PANEL_W - 40}" y="${y}" font-family="${FONT}" font-size="27" font-weight="600" fill="#ffd9c9" text-anchor="end">${esc(p.region)}</text>`;
+  const photoLayers = [];
+  for (let i = 0; i < places.length; i++) {
+    try {
+      const res = await fetch(places[i].imageUrl, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      const { x, y } = cellPos(i);
+      const resized = await sharp(buf)
+        .resize(PHOTO_W, CELL_H - PAD * 2, { fit: "cover" })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+      photoLayers.push({ input: resized, left: x + CELL_W - PHOTO_W - PAD, top: y + PAD });
+    } catch { /* 사진 실패 시 텍스트만 */ }
   }
 
+  let bgCells = "", textCells = "";
+  for (let i = 0; i < places.length; i++) {
+    const p = places[i];
+    const { x, y } = cellPos(i);
+    const nm = p.name.length > 11 ? p.name.slice(0, 10) + "…" : p.name;
+    const ns = nm.length <= 7 ? 31 : nm.length <= 9 ? 25 : 20;
+    const d1 = (p.desc ?? "").slice(0, 12), d2 = (p.desc ?? "").slice(12, 24);
+    const chipW = p.region.length * 21 + 48;
+    bgCells += `<rect x="${x + 8}" y="${y + 6}" width="${CELL_W - 16}" height="${CELL_H - 12}" rx="16" fill="white" fill-opacity="0.96" stroke="#f1dede" stroke-width="2"/>`;
+    textCells += `
+    <g>
+      <rect x="${x + PAD + 8}" y="${y + PAD + 12}" width="46" height="46" rx="12" fill="#d92121"/>
+      <text x="${x + PAD + 31}" y="${y + PAD + 45}" font-family="${FONT}" font-size="29" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
+      <text x="${x + PAD + 64}" y="${y + PAD + 44}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      <rect x="${x + PAD + 8}" y="${y + PAD + 66}" width="${chipW}" height="36" rx="18" fill="#f6ede7"/>
+      <text x="${x + PAD + 8 + chipW / 2}" y="${y + PAD + 91}" font-family="${FONT}" font-size="21" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(p.region)}</text>
+      ${p.hundred ? `<rect x="${x + PAD + 8 + chipW + 8}" y="${y + PAD + 66}" width="112" height="36" rx="18" fill="#fff3d6" stroke="#e8c66a" stroke-width="1.5"/>
+      <text x="${x + PAD + 8 + chipW + 64}" y="${y + PAD + 91}" font-family="${FONT}" font-size="20" font-weight="800" fill="#9a7419" text-anchor="middle">백년가게</text>` : ""}
+      <text x="${x + PAD + 10}" y="${y + PAD + 140}" font-family="${FONT}" font-size="23" fill="#333">${emoji} ${esc(d1)}</text>
+      ${d2 ? `<text x="${x + PAD + 10}" y="${y + PAD + 172}" font-family="${FONT}" font-size="23" fill="#333">${esc(d2)}</text>` : ""}
+    </g>`;
+  }
+
+  const titleText = String(theme.titleResolved || "");
+  const ts = titleText.length <= 11 ? 72 : titleText.length <= 14 ? 62 : 52;
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#000" stop-opacity="0.75"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
-      </linearGradient>
-      <linearGradient id="bot" x1="0" y1="1" x2="0" y2="0">
-        <stop offset="0" stop-color="#000" stop-opacity="0.8"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    <rect x="0" y="0" width="${W}" height="480" fill="url(#top)"/>
-    <rect x="0" y="${H - 320}" width="${W}" height="320" fill="url(#bot)"/>
-    <text x="${W / 2}" y="180" font-family="${FONT}" font-size="${ts}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(titleText)}</text>
-    <text x="${W / 2}" y="260" font-family="${FONT}" font-size="34" font-weight="700" fill="#ffd9c9" text-anchor="middle">끝까지 보고 저장하세요 🔥</text>
-    <rect x="${PANEL_X}" y="${PANEL_Y}" width="${PANEL_W}" height="${PANEL_H}" rx="28" fill="#000000" fill-opacity="0.52"/>
-    ${rows}
-    <text x="${W / 2}" y="${H - 130}" font-family="${FONT}" font-size="34" font-weight="800" fill="#ffffff" text-anchor="middle">자세한 소개는 피드 게시물에서 📌</text>
-    <text x="${W / 2}" y="${H - 70}" font-family="${FONT}" font-size="27" fill="#c9b8b8" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 토</text>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="0.55"/>
+    <text x="${W / 2}" y="100" font-family="${FONT}" font-size="${ts}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(titleText)}</text>
+    <text x="${W / 2}" y="165" font-family="${FONT}" font-size="30" font-weight="700" fill="#ffd9c9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
+    ${bgCells}
+    <text x="${W / 2}" y="${H - 62}" font-family="${FONT}" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">자세한 소개는 피드 게시물에서 📌</text>
+    <text x="${W / 2}" y="${H - 22}" font-family="${FONT}" font-size="24" fill="#e0cfc4" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 토</text>
   </svg>`;
+  const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
   const out = path.join(TMP, "reel-cover.jpg");
-  await sharp(bg).composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).jpeg({ quality: 88 }).toFile(out);
+  await sharp(bgPhoto)
+    .composite([
+      { input: Buffer.from(svg), left: 0, top: 0 },
+      ...photoLayers,
+      { input: Buffer.from(textSvg), left: 0, top: 0 },
+    ])
+    .jpeg({ quality: 88 })
+    .toFile(out);
   return out;
 }
 
