@@ -201,6 +201,22 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
   }
 }
 
+/** 자극형 제목 템플릿 랜덤 선택 — "가장 맛있는 집" 이미지의 강한 제목 */
+function buildPunchyTitle(theme, n) {
+  const r = theme.region || "전국";
+  const f = theme.food || theme.keyword;
+  const sfx = theme.suffix || "맛집";
+  const pool = [
+    `${r} ${f} ${n}대 ${sfx}`,
+    `${r} ${f} 레전드 ${n}선`,
+    `맛도리 ${f} ${n}선`,
+    `${r} ${f} ${sfx} TOP ${n}`,
+    `놓치면 후회하는 ${f} ${n}선`,
+    `${r}에서 제일 맛있는 ${f} ${n}곳`,
+  ];
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 /** v2 표지 인포그래픽: 레드 배너 + 지역 칩 + 백년가게 배지 + 다크 푸터 */
 async function composeCover(theme, places) {
   const sharp = (await import("sharp")).default;
@@ -218,11 +234,13 @@ async function composeCover(theme, places) {
   };
 
   const photoLayers = [];
+  const cellBufs = {};
   for (let i = 0; i < places.length; i++) {
     try {
       const res = await fetch(places[i].imageUrl, { signal: AbortSignal.timeout(20000) });
       if (!res.ok) continue;
       const buf = Buffer.from(await res.arrayBuffer());
+      cellBufs[i] = buf;
       const { x, y } = cellPos(i);
       const resized = await sharp(buf)
         .resize(PHOTO_W, CELL_H - PAD * 2, { fit: "cover" })
@@ -234,6 +252,29 @@ async function composeCover(theme, places) {
         top: y + PAD,
       });
     } catch { /* 사진 실패 시 텍스트만 */ }
+  }
+
+  // 헤더 양옆 원형 음식 사진 (음식으로 판별된 사진 우선)
+  const D = 128, RING_Y = 26;
+  const headerPickIdx = places
+    .map((p, i) => ({ i, food: !!p.foodPicked }))
+    .filter((v) => cellBufs[v.i])
+    .sort((a, b) => Number(b.food) - Number(a.food))
+    .slice(0, 2)
+    .map((v) => v.i);
+  const circleMask = Buffer.from(
+    `<svg width="${D}" height="${D}"><circle cx="${D / 2}" cy="${D / 2}" r="${D / 2}" fill="#fff"/></svg>`
+  );
+  const headerPos = [{ left: 48 }, { left: W - 48 - D }];
+  for (let k = 0; k < headerPickIdx.length; k++) {
+    try {
+      const circ = await sharp(cellBufs[headerPickIdx[k]])
+        .resize(D, D, { fit: "cover" })
+        .composite([{ input: circleMask, blend: "dest-in" }])
+        .png()
+        .toBuffer();
+      photoLayers.push({ input: circ, left: headerPos[k].left, top: RING_Y });
+    } catch { /* 없어도 무방 */ }
   }
 
   let bgCells = "", textCells = "";
@@ -259,16 +300,22 @@ async function composeCover(theme, places) {
     </g>`;
   }
 
+  const titleText = String(theme.titleResolved || theme.title);
+  const titleSize = titleText.length <= 11 ? 58 : titleText.length <= 14 ? 50 : 43;
   const bgSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${W}" height="${HEADER}" fill="#d92121"/>
-    <text x="${W / 2}" y="78" font-family="${FONT}" font-size="62" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(theme.titleResolved || theme.title)}</text>
-    <text x="${W / 2}" y="138" font-family="${FONT}" font-size="26" font-weight="600" fill="#ffd9d9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
+    <text x="${W / 2}" y="80" font-family="${FONT}" font-size="${titleSize}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(titleText)}</text>
+    <text x="${W / 2}" y="138" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffd9d9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
     ${bgCells}
     <rect x="0" y="${H - FOOTER}" width="${W}" height="${FOOTER}" fill="#2b2323"/>
     <text x="${W / 2}" y="${H - FOOTER + 38}" font-family="${FONT}" font-size="25" font-weight="700" fill="#ffffff" text-anchor="middle">여러분의 추천 맛집도 댓글로 남겨주세요 💬</text>
-    <text x="${W / 2}" y="${H - FOOTER + 68}" font-family="${FONT}" font-size="21" fill="#c9b8b8" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 일 새로운 리스트</text>
+    <text x="${W / 2}" y="${H - FOOTER + 68}" font-family="${FONT}" font-size="21" fill="#c9b8b8" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 토 새로운 리스트</text>
   </svg>`;
-  const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
+  // 헤더 원형 사진 흰 테두리 (사진 위에 그려짐)
+  const rings = headerPickIdx
+    .map((_, k) => `<circle cx="${headerPos[k].left + D / 2}" cy="${RING_Y + D / 2}" r="${D / 2 + 3}" fill="none" stroke="#ffffff" stroke-width="6"/>`)
+    .join("");
+  const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${rings}${textCells}</svg>`;
 
   const out = path.join(TMP, "cover.jpg");
   await sharp({ create: { width: W, height: H, channels: 3, background: "#fdf6f2" } })
@@ -387,15 +434,15 @@ async function main() {
     const cand = ordered[t];
     const got = await collectPlaces(cand);
     console.log(`[${cand.key}] 수집: ${got.length}곳 (목표 ${cand.count})`);
-    if (got.length >= Math.min(5, cand.count)) {
+    if (got.length >= cand.count) {
       theme = cand;
-      places = got;
+      places = got.slice(0, cand.count);
       break;
     }
   }
   if (!theme) throw new Error("수집 가능한 테마 없음");
-  // 제목의 {n}을 실제 수집 수로 치환
-  theme.titleResolved = String(theme.title).replace("{n}", String(places.length));
+  // 자극형 제목 랜덤 생성 ("9대 맛집", "레전드 9선", "맛도리", "TOP 9" 등)
+  theme.titleResolved = buildPunchyTitle(theme, places.length);
   console.log("제목:", theme.titleResolved);
 
   // 백년가게 대조 (배지·캡션용)

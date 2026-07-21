@@ -3,7 +3,7 @@ name: 모음집 자동 발행
 on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
-    - cron: "0 10 * * 0,2,4" # 매주 일·화·목 UTC 10:00 = KST 19:00 (주 3회)
+    - cron: "0 10 * * 2,4,6" # 매주 화·목·토 UTC 10:00 = KST 19:00 (주 3회)
 
 jobs:
   roundup:
