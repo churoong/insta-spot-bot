@@ -434,7 +434,7 @@ async function main() {
     const cand = ordered[t];
     const got = await collectPlaces(cand);
     console.log(`[${cand.key}] 수집: ${got.length}곳 (목표 ${cand.count})`);
-    if (got.length >= cand.count) {
+    if (got.length >= Math.min(5, cand.count)) { // 5곳 이상이면 발행(9곳은 상한)
       theme = cand;
       places = got.slice(0, cand.count);
       break;
