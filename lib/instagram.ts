@@ -121,11 +121,46 @@ export async function publishCarousel(imageUrls: string[], caption: string): Pro
   });
   await waitForContainer(carousel.id);
 
-  // 3) 발행
-  const published = await graphPost(`${igUserId()}/media_publish`, {
-    creation_id: carousel.id,
-  });
-  return String(published.id);
+  // 3) 발행 — IG가 "action blocked" 에러를 돌려주면서 실제로는 발행하는
+  // 오동작이 있어(2026-07 실측), 에러 시 실제 발행 여부를 재확인한다.
+  try {
+    const published = await graphPost(`${igUserId()}/media_publish`, {
+      creation_id: carousel.id,
+    });
+    return String(published.id);
+  } catch (e) {
+    const verified = await verifyRecentPublish(caption);
+    if (verified) {
+      console.log("[publish] 에러 응답이지만 실제 발행 확인됨:", verified);
+      return verified;
+    }
+    throw e;
+  }
+}
+
+/**
+ * media_publish가 에러를 반환했을 때, 방금 실제로 발행됐는지 최근 미디어를 조회해 확인.
+ * 캡션 앞부분이 일치하고 3분 이내 게시물이면 그 media id 반환.
+ */
+async function verifyRecentPublish(caption: string): Promise<string | null> {
+  try {
+    await new Promise((r) => setTimeout(r, 8000)); // 반영 대기
+    const res = await fetch(
+      `${GRAPH}/${igUserId()}/media?fields=id,caption,timestamp&limit=3&access_token=${encodeURIComponent(await getToken())}`,
+      { signal: AbortSignal.timeout(15000) }
+    );
+    const json = await res.json();
+    const head = caption.slice(0, 40);
+    for (const m of json?.data ?? []) {
+      const age = Date.now() - new Date(m.timestamp).getTime();
+      if (age < 3 * 60 * 1000 && String(m.caption ?? "").startsWith(head)) {
+        return String(m.id);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** 이미지 게시: 컨테이너 생성 → 발행. 발행된 media id 반환 */
