@@ -525,7 +525,47 @@ async function main() {
     sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('roundup_idx', ?, datetime('now'))",
     args: [String((chosenIdx + 1) % all.length)],
   });
-  console.log("완료:", theme.title);
+
+  // 표지를 릴스로도 발행 (리스트형 릴스 = 도달·저장 효자). ROUNDUP_REEL=0 으로 끔.
+  if (process.env.ROUNDUP_REEL !== "0") {
+    try {
+      const { publishReel } = await import("../lib/instagram.ts");
+      // 표지(4:5)를 9:16 릴스 캔버스에: 블러 배경 + 중앙 표지, 8초 정지 영상
+      const reelMp4 = path.join(TMP, "cover-reel.mp4");
+      await new Promise((resolve, reject) => {
+        const p = spawn("ffmpeg", [
+          "-y", "-loop", "1", "-i", cover, "-t", "8", "-r", "30",
+          "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+          "-filter_complex",
+          "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20[bg];[0:v]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]",
+          "-map", "[v]", "-map", "1:a",
+          "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
+          "-movflags", "+faststart", reelMp4,
+        ], { stdio: ["ignore", "ignore", "inherit"] });
+        p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
+      });
+      const reelUrl = await uploadPublic(reelMp4);
+      console.log("표지 릴스 업로드:", reelUrl);
+      const reelId = await publishReel(reelUrl, caption);
+      console.log("✅ 표지 릴스 발행:", reelId);
+      await db.execute({
+        sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, ig_media_id, status)
+              VALUES (?, ?, ?, '릴스', ?, ?, ?, 'published')`,
+        args: [
+          `roundup-reel-${theme.key}-${today}`,
+          theme.titleResolved + " (릴스)",
+          places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
+          places[0].imageUrl,
+          caption,
+          reelId,
+        ],
+      });
+    } catch (e) {
+      console.error("표지 릴스 실패(모음집은 정상 발행됨):", String(e).slice(0, 200));
+    }
+  }
+
+  console.log("완료:", theme.titleResolved);
 }
 
 function curlUpload(args) {
