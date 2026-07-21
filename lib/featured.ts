@@ -2,7 +2,7 @@
 // 사실(선정 이력)만 언급하고, 사진·정보는 TourAPI(합법)에서 가져온다.
 // 로고 사용·공식 제휴 암시는 하지 않는다.
 import featuredData from "@/data/featured.json";
-import { fetchImages, type Spot } from "./tourapi";
+import { fetchQuizImages, type Spot } from "./tourapi";
 import { db } from "./db";
 
 export interface FeaturedEntry {
@@ -142,7 +142,7 @@ export async function pickFeatured(): Promise<{ spot: Spot; label: string } | nu
       if (dup.rows.length > 0) continue;
 
       // 인증맛집은 이미지 3장부터 허용 (유명 노포는 사진이 적은 경우가 있음)
-      const imageUrls = await fetchImages(String(hit.contentid), String(hit.firstimage));
+      const imageUrls = await fetchQuizImages(String(hit.contentid), String(hit.firstimage), "맛집");
       if (imageUrls.length < 3) continue;
 
       const spot: Spot = {

@@ -1,6 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { fetchCandidates, fetchOverview, fetchImages, MIN_IMAGES } from "@/lib/tourapi";
+import { fetchCandidates, fetchOverview, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption, generateLandmarkCaption } from "@/lib/caption";
 import { pickWikimediaSpot } from "@/lib/wikimedia";
 import { pickThemePost, buildThemeCaption } from "@/lib/pexels";
@@ -242,7 +242,7 @@ async function runCron(forceFeatured = false) {
       if (dup.rows.length > 0) continue;
 
       // 캐러셀용 이미지 수집 — 최소 장수 미달이면 이 후보는 건너뜀
-      spot.imageUrls = await fetchImages(spot.contentId, spot.imageUrl);
+      spot.imageUrls = await fetchQuizImages(spot.contentId, spot.imageUrl, spot.category);
       if (spot.imageUrls.length < MIN_IMAGES) continue;
 
       spot.overview = await fetchOverview(spot.contentId);

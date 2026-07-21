@@ -24,7 +24,7 @@ function sh(cmd, args) {
 
 async function main() {
   const { db, initDb } = await import("../lib/db.ts");
-  const { fetchCandidates, fetchImages, fetchOverview, MIN_IMAGES } = await import("../lib/tourapi.ts");
+  const { fetchCandidates, fetchQuizImages, fetchOverview, MIN_IMAGES } = await import("../lib/tourapi.ts");
   const { generateCaption, buildReelCaption } = await import("../lib/caption.ts");
   const { publishReel } = await import("../lib/instagram.ts");
   await initDb();
@@ -57,7 +57,7 @@ async function main() {
       for (const s of cands.sort(() => Math.random() - 0.5)) {
         const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id IN (?, ?)", args: [s.contentId, "reel-" + s.contentId] });
         if (dup.rows.length) continue;
-        const imgs = await fetchImages(s.contentId, s.imageUrl);
+        const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
         if (imgs.length < MIN_IMAGES) continue;
         s.imageUrls = imgs;
         s.overview = await fetchOverview(s.contentId);

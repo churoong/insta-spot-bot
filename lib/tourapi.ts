@@ -131,6 +131,9 @@ export async function fetchNearby(
 const BAD_IMG_NAME =
   /(화장실|주차|기저귀|수유|경사로|안내도|안내판|표지판|매표|엘리베이터|승강기|휠체어|점자|유도블록|소화전|진입로|비상|피난|보관함|매표소|안내소)/;
 
+// 퀴즈형(상호 비공개) 게시물에서 정답이 새는 사진 라벨 — 간판·외관류 (맛집 전용)
+const SIGN_LABEL = /(간판|외관|전경|입구|정면|외부|매장 ?앞|점포|건물)/;
+
 export async function fetchImages(
   contentId: string,
   firstImage: string
@@ -156,6 +159,94 @@ export async function fetchImages(
   return [...urls].slice(0, MAX_IMAGES);
 }
 
+/**
+ * 퀴즈형(상호 비공개) 게시물용 이미지 수집 — 간판·상호명 노출 사진 제외.
+ * 1차: imgname 라벨 필터(맛집은 간판·외관류 라벨 제거)
+ * 2차: Gemini 비전으로 간판·상호 글자가 보이는 사진 감지·제외 (키 없으면 생략)
+ * 필터 후에도 원본 순서 유지. 실패 시 안전하게 1차 결과 반환.
+ */
+export async function fetchQuizImages(
+  contentId: string,
+  firstImage: string,
+  category = "맛집"
+): Promise<string[]> {
+  // 후보 수집 (url + 판별용 썸네일)
+  let cands: { url: string; small: string; name: string }[] = [
+    { url: toHttps(firstImage), small: toHttps(firstImage), name: "" },
+  ];
+  try {
+    const items = await call("detailImage2", { contentId, imageYN: "Y", numOfRows: "30" });
+    for (const it of items) {
+      const name = String(it.imgname ?? "");
+      if (name && BAD_IMG_NAME.test(name)) continue;
+      // 맛집은 라벨상 간판·외관류도 미리 제거 (여행지는 전경이 본체라 유지)
+      if (category === "맛집" && name && SIGN_LABEL.test(name)) continue;
+      const url = toHttps(it.originimgurl || it.smallimageurl);
+      if (!url) continue;
+      cands.push({ url, small: toHttps(it.smallimageurl || it.originimgurl), name });
+    }
+  } catch {
+    /* 추가 이미지 실패 시 대표 이미지만 */
+  }
+  cands = cands.filter((v, i, a) => a.findIndex((x) => x.url === v.url) === i).slice(0, 12);
+
+  // 2차: Gemini 비전 간판 감지
+  if (process.env.GEMINI_API_KEY && cands.length > 1) {
+    try {
+      const valid: typeof cands = [];
+      const parts: any[] = [];
+      for (const c of cands) {
+        try {
+          const res = await fetch(c.small, { signal: AbortSignal.timeout(15000) });
+          if (!res.ok) continue;
+          const b = Buffer.from(await res.arrayBuffer());
+          if (b.length > 900_000) continue;
+          valid.push(c);
+          parts.push({ inlineData: { mimeType: "image/jpeg", data: b.toString("base64") } });
+        } catch {
+          /* skip */
+        }
+      }
+      if (valid.length > 1) {
+        const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [
+                    {
+                      text: `사진 ${valid.length}장이야. 가게 간판, 상호명, 현판 등 장소 이름을 읽을 수 있는 글자가 보이는 사진의 번호를 JSON 배열로만 답해 (1번부터). 없으면 []. 예: [1,4]`,
+                    },
+                    ...parts,
+                  ],
+                },
+              ],
+              generationConfig: { maxOutputTokens: 60, thinkingConfig: { thinkingBudget: 0 } },
+            }),
+            signal: AbortSignal.timeout(40000),
+          }
+        );
+        const json = await res.json();
+        const text = json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "";
+        const m = text.match(/\[[\d,\s]*\]/);
+        if (m) {
+          const signed = new Set((JSON.parse(m[0]) as number[]).map((n) => Number(n)));
+          const kept = valid.filter((_, i) => !signed.has(i + 1));
+          // 비전 결과 반영하되, 너무 많이 깎이면(2장 미만) 1차 결과 유지
+          if (kept.length >= 2) return kept.map((c) => c.url).slice(0, MAX_IMAGES);
+        }
+      }
+    } catch {
+      /* 비전 실패 시 1차 결과 */
+    }
+  }
+  return cands.map((c) => c.url).slice(0, MAX_IMAGES);
+}
+
 /** 상호명으로 TourAPI에서 장소+이미지 확보 (카카오 발굴 이름 → 사진 연결용) */
 export async function fetchSpotByName(
   name: string,
@@ -176,7 +267,7 @@ export async function fetchSpotByName(
         (!regionHint || String(it.addr1 ?? "").includes(regionHint.slice(0, 2)))
     );
     if (!hit) return null;
-    const imageUrls = await fetchImages(String(hit.contentid), String(hit.firstimage));
+    const imageUrls = await fetchQuizImages(String(hit.contentid), String(hit.firstimage), "맛집");
     if (imageUrls.length < MIN_IMAGES) return null;
     return {
       contentId: String(hit.contentid),
