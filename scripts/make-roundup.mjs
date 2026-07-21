@@ -126,26 +126,14 @@ async function pickFoodImage(place) {
     }
     if (valid.length <= 1) return;
 
-    const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 건물 외관·간판·내부 전경은 제외. 음식 사진이 없으면 []. 예: [3,1]` },
-              ...parts,
-            ],
-          }],
-          generationConfig: { maxOutputTokens: 60, thinkingConfig: { thinkingBudget: 0 } },
-        }),
-        signal: AbortSignal.timeout(40000),
-      }
-    );
-    const json = await res.json();
-    const text = json?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+    const text =
+      (await geminiCall(
+        [
+          { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 건물 외관·간판·내부 전경은 제외. 음식 사진이 없으면 []. 예: [3,1]` },
+          ...parts,
+        ],
+        60
+      )) ?? "";
     const m = text.match(/\[[\d,\s]*\]/);
     const order = m ? JSON.parse(m[0]) : [];
     const best = order.length ? valid[Number(order[0]) - 1] : null;
@@ -156,15 +144,75 @@ async function pickFoodImage(place) {
   } catch { /* 기존 이미지 유지 */ }
 }
 
-/** Gemini로 한줄평(표지용) + 상세 설명(슬라이드용) 생성 (실패 시 기본 문구) */
-async function makeDescriptions(theme, places) {
-  const fbShort = "현지에서 오래 사랑받아온 곳";
-  const fbDetail = `${theme.keyword} 하나로 오랜 시간 사랑받아온, 믿고 찾아갈 수 있는 곳이에요.`;
-  const fallback = places.map(() => ({ short: fbShort, detail: fbDetail }));
-  if (!process.env.GEMINI_API_KEY) return fallback;
+/**
+ * Gemini 호출 (텍스트/비전 공용). 구모델은 thinkingBudget:0 필요,
+ * 신모델(현 gemini-flash-latest)은 그 옵션에 400 반환(2026-07 실측)
+ * → 400이면 thinkingConfig 없이 토큰 여유를 늘려 재시도, thought 파트 제외.
+ */
+async function geminiCall(parts, maxTokens) {
+  if (!process.env.GEMINI_API_KEY) return null;
+  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
+  const call = async (genCfg) => {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts }], generationConfig: genCfg }),
+        signal: AbortSignal.timeout(40000),
+      }
+    );
+    return res.json();
+  };
   try {
-    const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-    const prompt = `인스타 카드뉴스용 문구를 만들어줘. 주제: "${theme.keyword} 맛집 모음"
+    let j = await call({ maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } });
+    if (j?.error?.code === 400) j = await call({ maxOutputTokens: maxTokens + 2048 });
+    if (j?.error) {
+      console.log("[llm] Gemini 실패:", j.error.code ?? "", String(j.error.message ?? "").slice(0, 80));
+      return null;
+    }
+    const cand = j?.candidates?.[0];
+    const t = (cand?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("") ?? "").trim();
+    if (t && cand?.finishReason === "STOP") return t;
+    if (t && cand?.finishReason) console.log("[llm] Gemini 응답 잘림:", cand.finishReason);
+    return null;
+  } catch (e) {
+    console.log("[llm] Gemini 오류:", String(e).slice(0, 80));
+    return null;
+  }
+}
+
+/** 텍스트 생성 폴백 체인: Gemini → Groq(무료). 모두 실패하면 null. */
+async function llmGenerate(prompt, maxTokens) {
+  const g = await geminiCall([{ text: prompt }], maxTokens);
+  if (g) return g;
+  if (process.env.GROQ_KEY) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_KEY}` },
+        body: JSON.stringify({
+          model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: maxTokens,
+          temperature: 0.8,
+        }),
+        signal: AbortSignal.timeout(40000),
+      });
+      const j = await res.json();
+      const t = (j?.choices?.[0]?.message?.content ?? "").trim();
+      if (t) return t;
+      if (j?.error) console.log("[llm] Groq 실패:", String(j.error.message ?? "").slice(0, 80));
+    } catch (e) {
+      console.log("[llm] Groq 오류:", String(e).slice(0, 80));
+    }
+  }
+  return null;
+}
+
+/** 한줄평(표지용) + 상세 설명(슬라이드용) 생성 — 모든 AI 실패 시 null(모음집 발행 스킵) */
+async function makeDescriptions(theme, places) {
+  const prompt = `인스타 카드뉴스용 문구를 만들어줘. 주제: "${theme.keyword} 맛집 모음"
 식당 목록:
 ${places.map((p, i) => `${i + 1}. ${p.name} (${p.region})`).join("\n")}
 
@@ -174,30 +222,21 @@ ${places.map((p, i) => `${i + 1}. ${p.name} (${p.region})`).join("\n")}
 
 규칙: 상호명 반복 금지, 과장·허위 금지(일반적 묘사만), 지역 특색 살리면 좋음.
 JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 1600, thinkingConfig: { thinkingBudget: 0 } },
-        }),
-        signal: AbortSignal.timeout(40000),
-      }
-    );
-    const json = await res.json();
-    const text = json?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const text = await llmGenerate(prompt, 1600);
+  if (!text) return null;
+  try {
     const m = text.match(/\[[\s\S]*\]/);
-    if (!m) return fallback;
+    if (!m) return null;
     const arr = JSON.parse(m[0]);
-    if (!Array.isArray(arr)) return fallback;
+    if (!Array.isArray(arr) || !arr.some((x) => x?.s && x?.d)) return null;
+    const fbShort = "현지에서 오래 사랑받아온 곳";
+    const fbDetail = `${theme.keyword} 하나로 오랜 시간 사랑받아온, 믿고 찾아갈 수 있는 곳이에요.`;
     return places.map((_, i) => ({
       short: String(arr[i]?.s ?? fbShort).slice(0, 22),
       detail: String(arr[i]?.d ?? fbDetail).slice(0, 48),
     }));
   } catch {
-    return fallback;
+    return null;
   }
 }
 
@@ -275,7 +314,7 @@ async function composeReelCover(theme, places) {
     <text x="${W / 2}" y="165" font-family="${FONT}" font-size="30" font-weight="700" fill="#ffd9c9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
     ${bgCells}
     <text x="${W / 2}" y="${H - 62}" font-family="${FONT}" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">자세한 소개는 피드 게시물에서 📌</text>
-    <text x="${W / 2}" y="${H - 22}" font-family="${FONT}" font-size="24" fill="#e0cfc4" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 토</text>
+    <text x="${W / 2}" y="${H - 22}" font-family="${FONT}" font-size="24" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
   </svg>`;
   const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
@@ -399,7 +438,7 @@ async function composeCover(theme, places) {
     ${bgCells}
     <rect x="0" y="${H - FOOTER}" width="${W}" height="${FOOTER}" fill="#2b2323"/>
     <text x="${W / 2}" y="${H - FOOTER + 38}" font-family="${FONT}" font-size="25" font-weight="700" fill="#ffffff" text-anchor="middle">여러분의 추천 맛집도 댓글로 남겨주세요 💬</text>
-    <text x="${W / 2}" y="${H - FOOTER + 68}" font-family="${FONT}" font-size="21" fill="#c9b8b8" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 토 새로운 리스트</text>
+    <text x="${W / 2}" y="${H - FOOTER + 68}" font-family="${FONT}" font-size="21" fill="#c9b8b8" text-anchor="middle">@${HANDLE}</text>
   </svg>`;
   // 헤더 원형 사진 흰 테두리 (사진 위에 그려짐)
   const rings = headerPickIdx
@@ -540,7 +579,12 @@ async function main() {
   console.log(`백년가게: ${places.filter((p) => p.hundred).length}곳`);
 
   // 한줄평+상세설명 먼저 (비전 호출이 분당 한도를 소모하기 전에)
+  // 모든 AI(Gemini→Groq)가 실패하면 저품질 기본 문구로 내보내지 않고 발행 자체를 건너뜀
   const descs = await makeDescriptions(theme, places);
+  if (!descs) {
+    console.log("⏭️ AI 한도 소진 (Gemini/Groq 모두 실패) — 이번 모음집 발행 건너뜀");
+    return;
+  }
   places.forEach((p, i) => {
     p.desc = descs[i].short;
     p.detail = descs[i].detail;

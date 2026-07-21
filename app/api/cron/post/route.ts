@@ -162,8 +162,9 @@ async function runCron(forceFeatured = false) {
       const f = await pickFeatured();
       if (f) {
         f.spot.overview = await fetchOverview(f.spot.contentId);
-        const { caption } = await generateCaption(f.spot, { featuredBy: f.label });
-        return await publishAndSave(f.spot, caption, f.label);
+        const cap = await generateCaption(f.spot, { featuredBy: f.label });
+        if (!cap) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
+        return await publishAndSave(f.spot, cap.caption, f.label);
       }
       console.log("[featured] 후보 없음 → 일반 발행으로 진행");
     } catch (e) {
@@ -206,6 +207,7 @@ async function runCron(forceFeatured = false) {
         const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [w.spot.contentId] });
         if (dup.rows.length === 0) {
           const caption = await generateLandmarkCaption(w.spot, w.credit);
+          if (!caption) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
           return await publishAndSave(w.spot, caption, null);
         }
       }
@@ -222,8 +224,9 @@ async function runCron(forceFeatured = false) {
       if (ks) {
         const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [ks.contentId] });
         if (dup.rows.length === 0) {
-          const { caption } = await generateCaption(ks);
-          return await publishAndSave(ks, caption, null);
+          const cap = await generateCaption(ks);
+          if (!cap) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
+          return await publishAndSave(ks, cap.caption, null);
         }
       }
     } catch (e) {
@@ -246,8 +249,9 @@ async function runCron(forceFeatured = false) {
       if (spot.imageUrls.length < MIN_IMAGES) continue;
 
       spot.overview = await fetchOverview(spot.contentId);
-      const { caption } = await generateCaption(spot);
-      return await publishAndSave(spot, caption, null);
+      const cap = await generateCaption(spot);
+      if (!cap) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
+      return await publishAndSave(spot, cap.caption, null);
     }
   }
 

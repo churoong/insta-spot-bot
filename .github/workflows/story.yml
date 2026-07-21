@@ -3,7 +3,7 @@ name: 정답 공개 스토리
 on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
-    - cron: "0 2 * * *" # 매일 UTC 02:00 = KST 11:00
+    - cron: "13 1 * * *" # 매일 UTC 01:13 = KST 10:13 목표 (정시 혼잡 회피 + 지연 감안)
 
 jobs:
   story:

@@ -3,7 +3,9 @@ name: 모음집 자동 발행
 on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
-    - cron: "0 10 * * 2,4,6" # 매주 화·목·토 UTC 10:00 = KST 19:00 (주 3회)
+    # 매주 화·목·토. GitHub Actions 무료 스케줄러는 정시(특히 :00)에 혼잡해 수십 분~수 시간 지연됨.
+    # → 어중간한 분 + 이르게 예약해 지연돼도 저녁 시간대(18~20시 KST)에 올라가도록 함.
+    - cron: "23 9 * * 2,4,6" # UTC 09:23 = KST 18:23 목표 (지연 감안 시 저녁 발행)
 
 jobs:
   roundup:
@@ -30,6 +32,8 @@ jobs:
           TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+          GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}

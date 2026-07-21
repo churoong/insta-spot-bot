@@ -3,7 +3,7 @@ name: 릴스 자동 발행
 on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
-    - cron: "0 9 * * 3,6" # 매주 수·토 UTC 09:00 = KST 18:00 (주 2회)
+    - cron: "37 8 * * 3,6" # 매주 수·토 UTC 08:37 = KST 17:37 목표 (정시 혼잡 회피 + 지연 감안)
 
 jobs:
   reel:

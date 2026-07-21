@@ -1,4 +1,5 @@
 import type { Spot } from "./tourapi";
+import { llmText } from "./llm";
 
 const SOURCE_LINE = "📷 사진·정보 출처: 한국관광공사 TourAPI";
 
@@ -12,7 +13,7 @@ function keyword() {
 
 /**
  * 장소명을 숨긴 티저형 캡션 + 해시태그 생성.
- * GEMINI_API_KEY가 있으면 Gemini 무료 등급 사용, 없으면 내장 템플릿 폴백.
+ * Gemini → Groq 폴백 체인 사용. 모두 실패하면 null (발행 건너뜀 — 템플릿 폴백 없음).
  * 규칙: 상호명/정확한 장소명은 본문·해시태그 모두 금지,
  * 댓글 키워드 + 팔로우 → DM 안내 문구 포함, 출처 명시.
  */
@@ -25,21 +26,22 @@ export interface CaptionOpts {
   reveal?: boolean;
 }
 
-export async function generateCaption(spot: Spot, opts: CaptionOpts = {}): Promise<CaptionResult> {
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      return await generateWithGemini(spot, opts);
-    } catch (e) {
-      console.error("Gemini 실패, 템플릿 폴백 사용:", e);
-    }
+/**
+ * 캡션 생성 — Gemini→Groq 폴백 체인. 모든 AI 실패/규칙위반 시 null 반환
+ * → 호출부는 저품질 발행 대신 이번 회차를 건너뜀 (사용자 정책).
+ */
+export async function generateCaption(spot: Spot, opts: CaptionOpts = {}): Promise<CaptionResult | null> {
+  try {
+    return await generateWithGemini(spot, opts);
+  } catch (e) {
+    console.error("[caption] 생성 실패 — 발행 건너뜀 대상:", String(e).slice(0, 120));
+    return null;
   }
-  return generateWithTemplate(spot, opts);
 }
 
-// ===== 1순위: Google Gemini (무료 등급 — 하루 1,500회, 카드 불필요) =====
+// ===== LLM 캡션 생성 (Gemini → Groq 폴백은 lib/llm.ts에서 처리) =====
 
 async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<CaptionResult> {
-  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
   const { sido, gu } = regionHint(spot.address);
   const featuredRule = opts.featuredBy
     ? `\n7. ⭐이 집의 특별한 사실: "${opts.featuredBy}". 이 사실을 첫 문장 훅으로 강렬하게 활용해 (예: "미쉐린 가이드에 이름을 올렸던 그 집..."). 단, 과장하거나 공식 제휴처럼 보이게 하지 말고 사실만 언급. 상호명은 여전히 비밀.`
@@ -65,37 +67,19 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
 
 캡션 본문과 해시태그만 출력해. 설명이나 따옴표 없이 바로 캡션만.`;
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          maxOutputTokens: 1200,
-          // flash-latest는 thinking 모델이라 추론에 토큰을 다 써 캡션이 잘림 → thinking 끔
-          thinkingConfig: { thinkingBudget: 0 },
-        },
-      }),
-      signal: AbortSignal.timeout(30000),
-    }
-  );
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${await res.text()}`);
-  const json = await res.json();
-  const cand = json?.candidates?.[0];
-  const text: string = (cand?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "").trim();
+  const r = await llmText(prompt, { maxTokens: 1200 });
+  if (!r) throw new Error("모든 AI 소진 (Gemini/Groq)");
+  const text = r.text;
 
-  // 안전장치: 응답이 잘렸거나(MAX_TOKENS) 규칙 위반이면 템플릿으로 폴백
-  const truncated = cand?.finishReason && cand.finishReason !== "STOP";
+  // 안전장치: 규칙 위반이면 발행하지 않음 (템플릿 폴백 없음)
   const missingKeyword = !text.includes(keyword());
   const missingHashtag = !text.includes("#");
   const leakedName = text.includes(spot.name);
   // 지역명은 해시태그에는 허용, 본문(첫 해시태그 이전)에는 금지
   const body = text.split("#")[0];
   const leakedLocation = leaksLocation(body, spot.address);
-  if (!text || truncated || missingKeyword || missingHashtag || leakedName || leakedLocation) {
-    return generateWithTemplate(spot, opts);
+  if (!text || missingKeyword || missingHashtag || leakedName || leakedLocation) {
+    throw new Error(`캡션 규칙 위반 (provider=${r.provider}, keyword=${!missingKeyword}, tag=${!missingHashtag}, name누출=${leakedName}, 위치누출=${leakedLocation})`);
   }
 
   return { caption: `${text}\n\n${SOURCE_LINE}` };
@@ -127,43 +111,6 @@ function regionHint(address: string): { sido: string; gu: string } {
   return { sido, gu };
 }
 
-// ===== 2순위: 템플릿 폴백 (LLM 없이 완전 무료·무의존) =====
-
-// 지역명 노출 금지 — 위치는 DM으로만. 오프너에 지역 힌트 없음.
-const FOOD_OPENERS = [
-  "골목 안쪽에 이런 데가 있더라고요 🤫 아는 사람만 조용히 다닌다는 곳이에요.",
-  "우연히 들어갔다가 완전 취향저격이었어요 🍽️ 이런 곳은 아껴두고 싶더라고요.",
-  "요즘 조용히 입소문 타는 중이라는 그 집이에요. 사진 보시면 왜인지 아실 거예요 😋",
-  "그냥 지나치기 아까운 곳이에요. 분위기부터 남다르더라고요 ✨",
-  "저장해두고 꼭 다시 가보려고 아껴둔 곳이에요 📌",
-];
-const TRAVEL_OPENERS = [
-  "이런 데가 숨어있었네요. 사진으로 봐도 공기가 다른 느낌이에요 🌿",
-  "주말에 어디 갈지 고민이시면 여기 어떠세요? 사람도 아직 많이 없어요 📸",
-  "현지인들이 조용히 아껴둔다는 장소예요. 왜 아껴두는지 알 것 같아요 ✨",
-  "무심코 들렀다가 한참 머물렀던 그곳이에요. 이런 뷰는 반칙이죠 🏞️",
-  "다음 나들이 코스에 하나 추가해 보세요. 여기 진짜 저장각이에요 📌",
-];
-// 가끔 붙는 두 번째 문장 (자연스러움 강화)
-const FOOD_LINES = [
-  "메뉴 하나하나 정성이 느껴져서 또 생각날 것 같아요.",
-  "웨이팅 있어도 납득되는 맛이랄까요.",
-  "혼밥이든 모임이든 실패 없을 것 같아요.",
-  "가격도 착해서 더 정드는 집이에요.",
-];
-const TRAVEL_LINES = [
-  "노을 질 때 오면 진짜 예쁠 것 같아요.",
-  "산책하듯 천천히 둘러보기 딱 좋아요.",
-  "사진 찍기도 좋고 멍때리기도 좋고요.",
-  "계절 바뀔 때마다 다른 느낌일 것 같아요.",
-];
-const FOOD_TAGS = ["맛집추천", "숨은맛집", "로컬맛집", "맛스타그램", "먹스타그램", "미식여행", "현지인맛집", "맛집투어", "먹킷리스트", "동네맛집"];
-const TRAVEL_TAGS = ["여행스타그램", "국내여행", "숨은명소", "여행추천", "풍경스타그램", "주말나들이", "감성여행", "사진맛집", "국내여행지", "드라이브코스"];
-
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
 const SIDO_SHORT: Record<string, string> = {
   서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
   광주광역시: "광주", 대전광역시: "대전", 울산광역시: "울산", 세종특별자치시: "세종",
@@ -172,34 +119,6 @@ const SIDO_SHORT: Record<string, string> = {
   전라남도: "전남", 경상북도: "경북", 경상남도: "경남",
   제주특별자치도: "제주", 제주도: "제주",
 };
-function generateWithTemplate(spot: Spot, opts: CaptionOpts = {}): CaptionResult {
-  const isFood = spot.category === "맛집";
-  // 본문에는 지역명 노출 금지 — 오프너는 지역 힌트 없음
-  // 인증맛집이면 사실 훅을 오프너로 사용
-  const opener = opts.featuredBy
-    ? `${opts.featuredBy} 🏅 그런데 어디인지는... 비밀이에요 🤫`
-    : pick(isFood ? FOOD_OPENERS : TRAVEL_OPENERS);
-  const line = pick(isFood ? FOOD_LINES : TRAVEL_LINES);
-
-  // 해시태그에는 지역 태그 포함 (탐색 노출용) + 분위기·감성 태그
-  const { sido, gu } = regionHint(spot.address);
-  const regionTags = [sido, gu]
-    .filter(Boolean)
-    .flatMap((r) => [`${r}${isFood ? "맛집" : "여행"}`, `${r}핫플`]);
-  const tags = [...new Set([...regionTags, ...(isFood ? FOOD_TAGS : TRAVEL_TAGS)])]
-    .slice(0, 12)
-    .map((t) => `#${t.replace(/\s+/g, "")}`)
-    .join(" ");
-
-  const caption =
-    `${opener} ${line}\n\n` +
-    `어디인지 궁금하시면 댓글에 "${keyword()}" 남기고 팔로우해 주세요 🙌\n` +
-    `위치는 DM으로 살짝 보내드릴게요 📩\n\n` +
-    `${tags}\n\n${SOURCE_LINE}`;
-
-  return { caption };
-}
-
 /** 댓글 키워드에 응답하는 DM 본문 (+근처 추천 보너스) */
 export function buildDmText(
   spot: {
@@ -267,34 +186,15 @@ export async function generateMyCaption(input: {
   const { name, region, category, note, mapUrl } = input;
   let body = "";
 
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-      const prompt = `인스타 ${category} 소개 게시글 캡션 본문을 써줘.
+  const prompt = `인스타 ${category} 소개 게시글 캡션 본문을 써줘.
 - 상호명: ${name} (${region})
 - 직접 다녀와서 찍은 사진이야
 - 참고 메모: ${note || "(없음 — 분위기 좋게 소개)"}
 규칙: 친근한 존댓말(해요체) 3~4문장, 실제 다녀온 사람 톤, 상호명 자연스럽게 언급, 과장 금지, 이모지 2~3개. 해시태그·안내문구 없이 본문만.`;
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 700, thinkingConfig: { thinkingBudget: 0 } },
-          }),
-          signal: AbortSignal.timeout(30000),
-        }
-      );
-      const j = await res.json();
-      const t = (j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "").trim();
-      if (t && j.candidates[0].finishReason === "STOP") body = t;
-    } catch {
-      /* 폴백 */
-    }
-  }
+  const r = await llmText(prompt, { maxTokens: 700 });
+  if (r) body = r.text;
   if (!body) {
+    // 내 사진 게시물은 사용자가 쓴 메모가 있으므로 AI 없이도 발행 (사용자 문구 = 저품질 아님)
     body = note
       ? `${note}\n\n직접 다녀온 ${category}, ${name} 다녀왔어요 📸`
       : `직접 다녀온 ${category} ${name}, 사진으로 남겨봐요 📸 분위기도 좋고 또 가고 싶은 곳이에요.`;
@@ -319,33 +219,14 @@ export async function generateMyCaption(input: {
 /**
  * 위키미디어 여행지 게시용 캡션 — 장소명 공개, 여행 소개 톤 + CC 사진 출처 표기.
  */
-export async function generateLandmarkCaption(spot: Spot, credit: string): Promise<string> {
+export async function generateLandmarkCaption(spot: Spot, credit: string): Promise<string | null> {
   const { name, address: region } = spot;
-  let body = "";
-  if (process.env.GEMINI_API_KEY) {
-    try {
-      const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-      const prompt = `인스타 여행 소개 게시글 본문을 써줘.
+  const prompt = `인스타 여행 소개 게시글 본문을 써줘.
 - 장소: ${name} (${region})
 규칙: 친근한 존댓말(해요체) 3~4문장, 이 여행지의 매력·볼거리·분위기를 소개. 장소명 자연스럽게 언급. 과장·허위 금지, 실제로 유명한 곳이니 일반적으로 알려진 특징 위주. 이모지 2~3개. 해시태그·안내문구 없이 본문만.`;
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 700, thinkingConfig: { thinkingBudget: 0 } },
-          }),
-          signal: AbortSignal.timeout(30000),
-        }
-      );
-      const j = await res.json();
-      const t = (j?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "").trim();
-      if (t && j.candidates?.[0]?.finishReason === "STOP") body = t;
-    } catch { /* 폴백 */ }
-  }
-  if (!body) body = `${region}의 대표 여행지 ${name} 🌿 사진만 봐도 한 번쯤 꼭 가보고 싶은 곳이에요. 여행 계획에 담아두세요!`;
+  const r = await llmText(prompt, { maxTokens: 700 });
+  if (!r) return null; // 모든 AI 소진 → 이번 게시물 건너뜀
+  const body = r.text;
 
   const rTags = region.split(/\s+/).filter(Boolean).flatMap((r) => [`#${r}여행`, `#${r}가볼만한곳`]);
   const tags = [...new Set([...rTags, "#국내여행", "#여행스타그램", "#여행에미치다", "#여행추천", "#풍경스타그램", "#여행에미치다"])]

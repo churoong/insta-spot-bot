@@ -1,6 +1,8 @@
 // 한국관광공사 TourAPI (KorService2) — 사진·정보의 합법적 출처.
 // 공공데이터포털 이용약관상 출처 표기("한국관광공사") 조건으로 자유 이용 가능.
 
+import { geminiText } from "./llm";
+
 const BASE = "https://apis.data.go.kr/B551011/KorService2";
 
 // 12=관광지, 39=음식점
@@ -208,30 +210,16 @@ export async function fetchQuizImages(
         }
       }
       if (valid.length > 1) {
-        const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [
-                {
-                  parts: [
-                    {
-                      text: `사진 ${valid.length}장이야. 가게 간판, 상호명, 현판 등 장소 이름을 읽을 수 있는 글자가 보이는 사진의 번호를 JSON 배열로만 답해 (1번부터). 없으면 []. 예: [1,4]`,
-                    },
-                    ...parts,
-                  ],
-                },
-              ],
-              generationConfig: { maxOutputTokens: 60, thinkingConfig: { thinkingBudget: 0 } },
-            }),
-            signal: AbortSignal.timeout(40000),
-          }
-        );
-        const json = await res.json();
-        const text = json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("") ?? "";
+        const text =
+          (await geminiText(
+            [
+              {
+                text: `사진 ${valid.length}장이야. 가게 간판, 상호명, 현판 등 장소 이름을 읽을 수 있는 글자가 보이는 사진의 번호를 JSON 배열로만 답해 (1번부터). 없으면 []. 예: [1,4]`,
+              },
+              ...parts,
+            ],
+            60
+          )) ?? "";
         const m = text.match(/\[[\d,\s]*\]/);
         if (m) {
           const signed = new Set((JSON.parse(m[0]) as number[]).map((n) => Number(n)));
