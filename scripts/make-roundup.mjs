@@ -201,6 +201,69 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
   }
 }
 
+/**
+ * 릴스 전용 세로 표지(1080x1920): 음식 사진 풀블리드 + 제목 + 리스트 패널.
+ * 4:5 표지를 블러 패딩하던 방식 대신 릴스 규격에 딱 맞게 새로 합성.
+ */
+async function composeReelCover(theme, places) {
+  const sharp = (await import("sharp")).default;
+  const W = 1080, H = 1920;
+
+  // 배경: 음식으로 판별된 사진 우선
+  const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
+  const res = await fetch(bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error("릴스 배경 사진 다운로드 실패");
+  const bg = await sharp(Buffer.from(await res.arrayBuffer()))
+    .resize(W, H, { fit: "cover" })
+    .modulate({ saturation: 1.15, brightness: 1.02 }) // 살짝 채도 올려 먹음직하게
+    .jpeg({ quality: 88 })
+    .toBuffer();
+
+  const titleText = String(theme.titleResolved || "");
+  const ts = titleText.length <= 11 ? 76 : titleText.length <= 14 ? 64 : 54;
+
+  // 리스트 패널 (반투명 라운드 박스)
+  const n = places.length;
+  const ROW = 92;
+  const PANEL_W = 940, PANEL_X = (W - PANEL_W) / 2;
+  const PANEL_H = n * ROW + 60;
+  const PANEL_Y = 560;
+  let rows = "";
+  for (let i = 0; i < n; i++) {
+    const p = places[i];
+    const nm = p.name.length > 11 ? p.name.slice(0, 10) + "…" : p.name;
+    const y = PANEL_Y + 66 + i * ROW;
+    rows += `
+      <rect x="${PANEL_X + 36}" y="${y - 34}" width="48" height="48" rx="12" fill="#d92121"/>
+      <text x="${PANEL_X + 60}" y="${y}" font-family="${FONT}" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
+      <text x="${PANEL_X + 104}" y="${y}" font-family="${FONT}" font-size="38" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+      <text x="${PANEL_X + PANEL_W - 40}" y="${y}" font-family="${FONT}" font-size="27" font-weight="600" fill="#ffd9c9" text-anchor="end">${esc(p.region)}</text>`;
+  }
+
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="top" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#000" stop-opacity="0.75"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="bot" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0" stop-color="#000" stop-opacity="0.8"/><stop offset="1" stop-color="#000" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="${W}" height="480" fill="url(#top)"/>
+    <rect x="0" y="${H - 320}" width="${W}" height="320" fill="url(#bot)"/>
+    <text x="${W / 2}" y="180" font-family="${FONT}" font-size="${ts}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(titleText)}</text>
+    <text x="${W / 2}" y="260" font-family="${FONT}" font-size="34" font-weight="700" fill="#ffd9c9" text-anchor="middle">끝까지 보고 저장하세요 🔥</text>
+    <rect x="${PANEL_X}" y="${PANEL_Y}" width="${PANEL_W}" height="${PANEL_H}" rx="28" fill="#000000" fill-opacity="0.52"/>
+    ${rows}
+    <text x="${W / 2}" y="${H - 130}" font-family="${FONT}" font-size="34" font-weight="800" fill="#ffffff" text-anchor="middle">자세한 소개는 피드 게시물에서 📌</text>
+    <text x="${W / 2}" y="${H - 70}" font-family="${FONT}" font-size="27" fill="#c9b8b8" text-anchor="middle">@${HANDLE} · 매주 화 · 목 · 토</text>
+  </svg>`;
+
+  const out = path.join(TMP, "reel-cover.jpg");
+  await sharp(bg).composite([{ input: Buffer.from(svg), left: 0, top: 0 }]).jpeg({ quality: 88 }).toFile(out);
+  return out;
+}
+
 /** 자극형 제목 템플릿 랜덤 선택 — "가장 맛있는 집" 이미지의 강한 제목 */
 function buildPunchyTitle(theme, n) {
   const r = theme.region || "전국";
@@ -477,6 +540,7 @@ async function main() {
 
   if (DRY) {
     fs.copyFileSync(cover, "roundup-preview.jpg");
+    try { fs.copyFileSync(await composeReelCover(theme, places), "roundup-reel-preview.jpg"); } catch (e) { console.error("릴스표지 미리보기 실패:", String(e).slice(0,100)); }
     if (slideFiles[0]) fs.copyFileSync(slideFiles[0], "roundup-slide-preview.jpg");
     console.log("DRY 모드 — 발행 생략. roundup-preview.jpg / roundup-slide-preview.jpg 저장");
     console.log(buildCaption(theme, places));
@@ -530,14 +594,15 @@ async function main() {
   if (process.env.ROUNDUP_REEL !== "0") {
     try {
       const { publishReel } = await import("../lib/instagram.ts");
-      // 표지(4:5)를 9:16 릴스 캔버스에: 블러 배경 + 중앙 표지, 8초 정지 영상
+      // 릴스 전용 세로 표지(1080x1920, 음식 사진 풀블리드) + 잔잔한 줌인 8초
+      const reelCover = await composeReelCover(theme, places);
       const reelMp4 = path.join(TMP, "cover-reel.mp4");
       await new Promise((resolve, reject) => {
         const p = spawn("ffmpeg", [
-          "-y", "-loop", "1", "-i", cover, "-t", "8", "-r", "30",
+          "-y", "-loop", "1", "-i", reelCover, "-t", "8", "-r", "30",
           "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
           "-filter_complex",
-          "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,boxblur=20[bg];[0:v]scale=1080:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,format=yuv420p[v]",
+          "[0:v]scale=1296:2304,zoompan=z='min(zoom+0.00025,1.06)':d=240:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]",
           "-map", "[v]", "-map", "1:a",
           "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
           "-movflags", "+faststart", reelMp4,
