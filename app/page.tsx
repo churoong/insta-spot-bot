@@ -75,6 +75,10 @@ async function loadData() {
     const dms = await db.execute(
       "SELECT COUNT(*) AS n FROM dm_log"
     );
+    // 목록은 최근 50건만 불러오므로(LIMIT 50), 상단 통계용 총계는 별도로 집계
+    const totals = await db.execute(
+      "SELECT SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS pub, SUM(CASE WHEN status='dry_run' THEN 1 ELSE 0 END) AS dry FROM posts"
+    );
     const popular = await db.execute(
       `SELECT place_name, like_count, comment_count,
               (COALESCE(like_count,0) + COALESCE(comment_count,0) * 3) AS score
@@ -146,6 +150,8 @@ async function loadData() {
 
     return {
       posts: posts.rows,
+      publishedCount: Number(totals.rows[0].pub) || 0,
+      dryRunCount: Number(totals.rows[0].dry) || 0,
       dmCount: Number(dms.rows[0].n),
       popular: popular.rows.filter((r: any) => Number(r.score) > 0),
       cooldownMin,
@@ -213,7 +219,7 @@ export default async function Home() {
             </div>
           )}
           <div style={{ display: "flex", gap: 12, margin: "20px 0" }}>
-            <Stat label={data.live ? "발행된 게시글" : "생성된 미리보기"} value={data.posts.length} />
+            <Stat label={data.live ? "발행된 게시글" : "생성된 미리보기"} value={data.live ? data.publishedCount : data.dryRunCount} />
             <Stat label="발송된 DM" value={data.dmCount} />
           </div>
 
