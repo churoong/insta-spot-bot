@@ -49,33 +49,36 @@ export async function llmText(
 }
 
 /**
- * Gemini 호출 (텍스트/비전 공용). 구모델은 thinkingBudget:0으로 thinking을 꺼야
- * 캡션이 안 잘리지만, 신모델(현 gemini-flash-latest)은 이 옵션에 400을 반환
- * (2026-07 실측) → 400이면 thinkingConfig 없이 토큰 여유를 늘려 재시도하고,
- * thought 파트는 걸러서 본문만 취한다.
+ * 사용할 Gemini 모델. thinking 없는 경량 모델(gemini-flash-lite-latest)이 기본:
+ * 빠르고 무료 쿼터가 넉넉하며 카드뉴스 문구·캡션 품질도 충분함.
+ * ⚠️ gemini-flash-latest는 thinking 전용이라 thinkingConfig 없이도 thinking 토큰을
+ * 소모해 긴 출력이 잘리고, thinkingBudget:0으로 끄려 하면 400을 뱉는다(2026-07 실측).
+ * → env에 그 값이 남아 있어도 무시하고 경량 모델로 자동 교정(사용자 env 수정 불필요).
+ */
+export function geminiModel(): string {
+  const m = process.env.GEMINI_MODEL;
+  return m && m !== "gemini-flash-latest" ? m : "gemini-flash-lite-latest";
+}
+
+/**
+ * Gemini 호출 (텍스트/비전 공용). thinkingConfig는 최신 모델들이 400을 반환하므로
+ * 아예 보내지 않는다. thought 파트는 방어적으로 걸러 본문만 취한다.
  */
 export async function geminiText(
   parts: any[],
   maxTokens: number
 ): Promise<string | null> {
-  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-  const call = async (genCfg: any) => {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts }], generationConfig: genCfg }),
-        signal: AbortSignal.timeout(35000),
-      }
-    );
-    return res.json();
-  };
-
-  let j = await call({ maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } });
-  if (j?.error?.code === 400) {
-    j = await call({ maxOutputTokens: maxTokens + 2048 }); // thinking 토큰 여유분
-  }
+  const model = geminiModel();
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
+      signal: AbortSignal.timeout(35000),
+    }
+  );
+  const j = await res.json();
   if (j?.error) {
     console.log("[llm] Gemini 실패:", j.error.code, String(j.error.message ?? "").slice(0, 80));
     return null;

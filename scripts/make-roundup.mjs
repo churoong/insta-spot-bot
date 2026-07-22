@@ -145,28 +145,28 @@ async function pickFoodImage(place) {
 }
 
 /**
- * Gemini 호출 (텍스트/비전 공용). 구모델은 thinkingBudget:0 필요,
- * 신모델(현 gemini-flash-latest)은 그 옵션에 400 반환(2026-07 실측)
- * → 400이면 thinkingConfig 없이 토큰 여유를 늘려 재시도, thought 파트 제외.
+ * Gemini 호출 (텍스트/비전 공용). thinking 없는 경량 모델(gemini-flash-lite-latest) 기본.
+ * gemini-flash-latest는 thinking 전용이라 긴 출력이 잘리고 thinkingBudget:0에 400을
+ * 반환하므로(2026-07 실측), env에 그 값이 있어도 무시하고 경량 모델로 자동 교정.
+ * thinkingConfig는 최신 모델들이 400을 내므로 아예 보내지 않음.
  */
+function geminiModel() {
+  const m = process.env.GEMINI_MODEL;
+  return m && m !== "gemini-flash-latest" ? m : "gemini-flash-lite-latest";
+}
 async function geminiCall(parts, maxTokens) {
   if (!process.env.GEMINI_API_KEY) return null;
-  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
-  const call = async (genCfg) => {
+  try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts }], generationConfig: genCfg }),
+        body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
         signal: AbortSignal.timeout(40000),
       }
     );
-    return res.json();
-  };
-  try {
-    let j = await call({ maxOutputTokens: maxTokens, thinkingConfig: { thinkingBudget: 0 } });
-    if (j?.error?.code === 400) j = await call({ maxOutputTokens: maxTokens + 2048 });
+    const j = await res.json();
     if (j?.error) {
       console.log("[llm] Gemini 실패:", j.error.code ?? "", String(j.error.message ?? "").slice(0, 80));
       return null;
