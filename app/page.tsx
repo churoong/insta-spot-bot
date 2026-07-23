@@ -1,6 +1,7 @@
 import { db, initDb } from "@/lib/db";
 import PostActions from "./components/PostActions";
 import UploadForm from "./components/UploadForm";
+import LeaveGuard from "./components/LeaveGuard";
 import themesData from "@/data/roundup-themes.json";
 
 export const dynamic = "force-dynamic";
@@ -170,6 +171,7 @@ export default async function Home() {
 
   return (
     <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 20px" }}>
+      <LeaveGuard />
       <h1 style={{ fontSize: 24 }}>📍 Insta Spot Bot</h1>
       <p style={{ color: "#9aa0ae" }}>
         한국관광공사 TourAPI 기반 맛집·여행지 인스타그램 자동 포스팅 봇
