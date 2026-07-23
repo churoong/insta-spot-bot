@@ -1,19 +1,19 @@
 {
   "_설명": "모음집(공개형 9선) 테마 로테이션. keyword=TourAPI 검색어, areaCode 없으면 전국. 전 테마 9곳 고정(표지1+상세9=캐러셀 10장). 제목은 스크립트의 자극형 템플릿에서 랜덤 생성(food/suffix 사용).",
   "themes": [
-    { "key": "sundae", "food": "순대국", "keyword": "순대", "region": "전국", "count": 9, "emoji": "🍲", "tags": ["순대국", "순대국밥", "국밥맛집"] },
-    { "key": "dwaeji-busan", "food": "돼지국밥", "keyword": "돼지국밥", "areaCode": 6, "region": "부산", "count": 9, "emoji": "🍲", "tags": ["돼지국밥", "부산맛집", "부산여행"] },
-    { "key": "kalguksu", "food": "칼국수", "keyword": "칼국수", "region": "전국", "count": 9, "emoji": "🍜", "tags": ["칼국수", "칼국수맛집", "면스타그램"] },
-    { "key": "naengmyeon", "food": "냉면", "keyword": "냉면", "region": "전국", "count": 9, "emoji": "🍜", "tags": ["냉면", "냉면맛집", "평양냉면"] },
-    { "key": "gukbap", "food": "국밥", "keyword": "국밥", "region": "전국", "count": 9, "emoji": "🍲", "tags": ["국밥", "국밥맛집", "해장맛집"] },
-    { "key": "makguksu", "food": "막국수", "keyword": "막국수", "region": "전국", "count": 9, "emoji": "🍜", "tags": ["막국수", "막국수맛집", "메밀막국수"] },
-    { "key": "bread", "food": "빵집", "keyword": "빵", "region": "전국", "count": 9, "emoji": "🥐", "suffix": "성지", "tags": ["빵지순례", "빵스타그램", "베이커리카페"] },
-    { "key": "gomtang", "food": "곰탕·설렁탕", "keyword": "곰탕", "region": "전국", "count": 9, "emoji": "🥘", "tags": ["곰탕", "설렁탕", "국물맛집"] },
-    { "key": "milmyeon-busan", "food": "밀면", "keyword": "밀면", "areaCode": 6, "region": "부산", "count": 9, "emoji": "🍜", "tags": ["밀면", "부산밀면", "부산맛집"] },
-    { "key": "mandu", "food": "손만두", "keyword": "만두", "region": "전국", "count": 9, "emoji": "🥟", "tags": ["만두", "손만두", "만두맛집"] },
-    { "key": "chueotang", "food": "추어탕", "keyword": "추어탕", "region": "전국", "count": 9, "emoji": "🥘", "tags": ["추어탕", "보양식", "건강밥상"] },
-    { "key": "heukdwaeji-jeju", "food": "흑돼지", "keyword": "흑돼지", "areaCode": 39, "region": "제주", "count": 9, "emoji": "🥓", "tags": ["제주흑돼지", "제주맛집", "제주여행"] },
-    { "key": "jjamppong", "food": "짬뽕", "keyword": "짬뽕", "region": "전국", "count": 9, "emoji": "🍜", "tags": ["짬뽕", "짬뽕맛집", "중식맛집"] },
-    { "key": "cafe-seoul", "food": "카페", "keyword": "카페", "areaCode": 1, "region": "서울", "count": 9, "emoji": "☕", "suffix": "성지", "tags": ["서울카페", "감성카페", "카페투어"] }
+    { "key": "sundae", "food": "순대국", "keyword": "순대", "region": "전국", "count": 8, "emoji": "🍲", "tags": ["순대국", "순대국밥", "국밥맛집"] },
+    { "key": "dwaeji-busan", "food": "돼지국밥", "keyword": "돼지국밥", "areaCode": 6, "region": "부산", "count": 8, "emoji": "🍲", "tags": ["돼지국밥", "부산맛집", "부산여행"] },
+    { "key": "kalguksu", "food": "칼국수", "keyword": "칼국수", "region": "전국", "count": 8, "emoji": "🍜", "tags": ["칼국수", "칼국수맛집", "면스타그램"] },
+    { "key": "naengmyeon", "food": "냉면", "keyword": "냉면", "region": "전국", "count": 8, "emoji": "🍜", "tags": ["냉면", "냉면맛집", "평양냉면"] },
+    { "key": "gukbap", "food": "국밥", "keyword": "국밥", "region": "전국", "count": 8, "emoji": "🍲", "tags": ["국밥", "국밥맛집", "해장맛집"] },
+    { "key": "makguksu", "food": "막국수", "keyword": "막국수", "region": "전국", "count": 8, "emoji": "🍜", "tags": ["막국수", "막국수맛집", "메밀막국수"] },
+    { "key": "bread", "food": "빵집", "keyword": "빵", "region": "전국", "count": 8, "emoji": "🥐", "suffix": "성지", "tags": ["빵지순례", "빵스타그램", "베이커리카페"] },
+    { "key": "gomtang", "food": "곰탕·설렁탕", "keyword": "곰탕", "region": "전국", "count": 8, "emoji": "🥘", "tags": ["곰탕", "설렁탕", "국물맛집"] },
+    { "key": "milmyeon-busan", "food": "밀면", "keyword": "밀면", "areaCode": 6, "region": "부산", "count": 8, "emoji": "🍜", "tags": ["밀면", "부산밀면", "부산맛집"] },
+    { "key": "mandu", "food": "손만두", "keyword": "만두", "region": "전국", "count": 8, "emoji": "🥟", "tags": ["만두", "손만두", "만두맛집"] },
+    { "key": "chueotang", "food": "추어탕", "keyword": "추어탕", "region": "전국", "count": 8, "emoji": "🥘", "tags": ["추어탕", "보양식", "건강밥상"] },
+    { "key": "heukdwaeji-jeju", "food": "흑돼지", "keyword": "흑돼지", "areaCode": 39, "region": "제주", "count": 8, "emoji": "🥓", "tags": ["제주흑돼지", "제주맛집", "제주여행"] },
+    { "key": "jjamppong", "food": "짬뽕", "keyword": "짬뽕", "region": "전국", "count": 8, "emoji": "🍜", "tags": ["짬뽕", "짬뽕맛집", "중식맛집"] },
+    { "key": "cafe-seoul", "food": "카페", "keyword": "카페", "areaCode": 1, "region": "서울", "count": 8, "emoji": "☕", "suffix": "성지", "tags": ["서울카페", "감성카페", "카페투어"] }
   ]
 }

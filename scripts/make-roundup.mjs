@@ -563,9 +563,11 @@ async function main() {
     const cand = ordered[t];
     const got = await collectPlaces(cand);
     console.log(`[${cand.key}] 수집: ${got.length}곳 (목표 ${cand.count})`);
-    if (got.length >= Math.min(5, cand.count)) { // 5곳 이상이면 발행(9곳은 상한)
+    if (got.length >= Math.min(6, cand.count)) { // 6곳 이상이면 발행(8곳 상한)
       theme = cand;
       places = got.slice(0, cand.count);
+      // 표지 그리드는 2열이라 홀수면 마지막 칸이 혼자 남아 비대칭 → 항상 짝수로 맞춤
+      if (places.length % 2 === 1) places = places.slice(0, -1);
       break;
     }
   }
