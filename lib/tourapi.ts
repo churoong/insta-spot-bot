@@ -220,8 +220,10 @@ export async function fetchQuizImages(
             [
               {
                 text: `가게/장소 사진 ${valid.length}장이야(1번부터). 두 가지를 JSON으로만 답해줘.
-- exclude: 간판·상호명·현판 등 장소 이름 글자가 보이는 사진 번호 배열 (없으면 [])
-- best: ${goodDesc} 사진을 좋은 순서(가장 좋은 게 앞)로 나열한 번호 배열
+- exclude: 아래에 해당하는 사진 번호 배열 (없으면 [])
+  · 간판·상호명·현판 등 장소 이름 글자가 보이는 사진
+  · 흐릿하거나(초점 안 맞음), 너무 어둡거나, 심하게 어수선하거나, 화질이 낮은 사진
+- best: 나머지 중 ${goodDesc} 보기 좋은 사진을 좋은 순서(가장 좋은 게 앞)로 나열한 번호 배열
 형식: {"exclude":[..],"best":[..]}`,
               },
               ...parts,
@@ -238,7 +240,7 @@ export async function fetchQuizImages(
           }
           const excl = new Set((parsed.exclude ?? []).map(Number));
           const bestOrder = (parsed.best ?? []).map(Number).filter((n) => n >= 1 && n <= valid.length);
-          // 간판 제외
+          // 간판·저품질 제외
           const keptIdx = valid.map((_, i) => i + 1).filter((n) => !excl.has(n));
           if (keptIdx.length >= 2) {
             // best 순서를 앞에 두고, 언급 안 된 나머지는 원래 순서로 뒤에 붙임
