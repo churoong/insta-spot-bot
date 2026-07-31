@@ -25,6 +25,10 @@ export interface CaptionOpts {
   sourceLine?: string;
   /** 위치를 공개하는 게시물(여행지 등). true면 본문·해시태그에 장소·지역명 허용, DM 유도 없음 */
   reveal?: boolean;
+  /** 대표 메뉴 (정보 고도화·저장 유발용, 위치 아님) */
+  menu?: string;
+  /** 영업시간 */
+  hours?: string;
 }
 
 /**
@@ -50,6 +54,9 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
   const seoRule = dish
     ? `\n- 검색 노출을 위해 본문에 '${dish}'라는 음식 이름을 자연스럽게 1~2번 넣어줘 (음식 종류이지 위치가 아니니 괜찮아).`
     : "";
+  const menuRule = opts.menu
+    ? `\n- 이 집 대표 메뉴는 "${opts.menu}"야. 본문에 이 메뉴 얘기를 자연스럽게 한 번 녹여줘 (먹어본 듯 맛 묘사). 메뉴명은 위치가 아니니 써도 돼.`
+    : "";
   const prompt = `인스타그램 ${spot.category} 소개 계정의 게시글 '본문'을 한국어로 작성해줘. (해시태그는 넣지 마 — 내가 따로 붙일 거야)
 
 장소 정보(본문에 위치를 드러내지 않기 위한 참고용, 아래 정보로 분위기만 파악):
@@ -64,7 +71,7 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
 3. 자연스럽고 사람 냄새 나는 톤으로 써. 광고 문구 같은 뻔한 표현("인생맛집", "핫플 인정")은 피하고, 실제로 다녀와 본 사람이 소개하듯 3~5문장. 반드시 **친근하지만 정중한 존댓말(해요체)** 로 써. 반말 금지. 이모지는 2~4개만 적당히.
 4. 여러 장의 사진이 함께 올라가는 게시물이야. 자연스러우면 사진 얘기(분위기, 디테일)를 한두 개 녹여도 좋아.
 5. 마지막에 반드시 이 안내를 자연스럽게 포함: 댓글에 "${keyword()}"라고 남기고 팔로우하면 DM으로 위치를 보내준다는 것. (딱딱하지 않게)
-6. ⚠️해시태그(#)는 절대 넣지 마. 본문 문장만 출력해.${seoRule}${featuredRule}
+6. ⚠️해시태그(#)는 절대 넣지 마. 본문 문장만 출력해.${seoRule}${menuRule}${featuredRule}
 
 캡션 본문만 출력해. 설명이나 따옴표 없이 바로 본문만.`;
 
@@ -80,7 +87,14 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
     throw new Error(`캡션 규칙 위반 (provider=${r.provider}, keyword=${!missingKeyword}, name누출=${leakedName}, 위치누출=${leakedLocation})`);
   }
 
-  return { caption: `${body}\n\n${buildHashtags(spot, dish)}\n\n${SOURCE_LINE}` };
+  // 정보 고도화 블록 — 저장 유발(메뉴·영업시간은 위치가 아니라 공개 OK)
+  const infoLines = [
+    opts.menu ? `📋 대표 메뉴 · ${opts.menu}` : "",
+    opts.hours ? `⏰ ${opts.hours}` : "",
+  ].filter(Boolean);
+  const infoBlock = infoLines.length ? `${infoLines.join("\n")}\n\n` : "";
+
+  return { caption: `${body}\n\n${infoBlock}${buildHashtags(spot, dish)}\n\n${SOURCE_LINE}` };
 }
 
 /** 게시물명에서 음식 종류 추출 (SEO 본문·해시태그용) */

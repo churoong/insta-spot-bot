@@ -1,6 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
+import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
@@ -165,7 +165,8 @@ async function runCron(forceFeatured = false) {
       const f = await pickFeatured();
       if (f) {
         f.spot.overview = await fetchOverview(f.spot.contentId);
-        const cap = await generateCaption(f.spot, { featuredBy: f.label });
+        const info = await fetchFoodInfo(f.spot.contentId);
+        const cap = await generateCaption(f.spot, { featuredBy: f.label, menu: info.menu, hours: info.hours });
         if (!cap) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
         return await publishAndSave(f.spot, cap.caption, f.label);
       }
@@ -186,7 +187,8 @@ async function runCron(forceFeatured = false) {
       if (ks) {
         const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [ks.contentId] });
         if (dup.rows.length === 0) {
-          const cap = await generateCaption(ks);
+          const ksInfo = await fetchFoodInfo(ks.contentId);
+          const cap = await generateCaption(ks, { menu: ksInfo.menu, hours: ksInfo.hours });
           if (!cap) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
           return await publishAndSave(ks, cap.caption, null);
         }
@@ -219,7 +221,8 @@ async function runCron(forceFeatured = false) {
       if (spot.imageUrls.length < MIN_IMAGES) continue;
 
       spot.overview = await fetchOverview(spot.contentId);
-      const cap = await generateCaption(spot);
+      const info = await fetchFoodInfo(spot.contentId);
+      const cap = await generateCaption(spot, { menu: info.menu, hours: info.hours });
       if (!cap) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
       return await publishAndSave(spot, cap.caption, null);
     }

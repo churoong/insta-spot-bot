@@ -380,3 +380,31 @@ export async function fetchOverview(contentId: string): Promise<string> {
     return "";
   }
 }
+
+export interface FoodInfo {
+  menu: string; // 대표 메뉴 (없으면 "")
+  hours: string; // 영업시간 (없으면 "")
+}
+
+/** 음식점 상세(detailIntro2)에서 대표메뉴·영업시간 추출 — 캡션 정보 고도화용 */
+export async function fetchFoodInfo(contentId: string): Promise<FoodInfo> {
+  const clean = (s: any) =>
+    String(s ?? "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-z]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  try {
+    const items = await call("detailIntro2", { contentId, contentTypeId: "39" });
+    const it = items[0] ?? {};
+    // 대표메뉴 우선, 없으면 취급메뉴에서 앞부분만
+    const trimJoin = (s: string) =>
+      s.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean).slice(0, 4).join(", ");
+    const menu = trimJoin(clean(it.firstmenu) || clean(it.treatmenu));
+    // 영업시간: 앞머리 불릿(- · •)만 제거 (내부 "10:00 - 22:00" 같은 시간범위 대시는 보존)
+    const hours = clean(it.opentimefood).replace(/^[-·•\s]+/, "").slice(0, 50).trim();
+    return { menu: menu.slice(0, 60), hours };
+  } catch {
+    return { menu: "", hours: "" };
+  }
+}
