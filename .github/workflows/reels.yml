@@ -3,7 +3,7 @@ name: 릴스 자동 발행
 on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
-    - cron: "37 8 * * 3,6" # 매주 수·토 UTC 08:37 = KST 17:37 목표 (정시 혼잡 회피 + 지연 감안)
+    - cron: "37 8 * * 1,3,6" # 매주 월·수·토 UTC 08:37 = KST 17:37 (릴스=신규 도달 핵심이라 주3회로 증편)
 
 jobs:
   reel:
@@ -15,7 +15,7 @@ jobs:
       - name: ffmpeg + 한글 폰트 설치
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-nanum
+          sudo apt-get install -y ffmpeg fonts-nanum fonts-noto-cjk
 
       - uses: actions/setup-node@v4
         with:

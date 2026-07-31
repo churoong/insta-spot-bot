@@ -14,6 +14,32 @@ import os from "node:os";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "reel-"));
 const IG = "https://graph.instagram.com/v23.0";
 const IGID = process.env.IG_USER_ID;
+const FONT = "'Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
+
+// 첫 1~2초에 노출되는 훅 문구 — 이탈 방지·끝까지 보기 유도(도달 핵심). 이모지는 SVG에서
+// 깨질 수 있어 이미지엔 넣지 않음(이모지는 캡션에서만).
+const HOOKS = [
+  "저장 안 하면 후회해요", "현지인만 아는 그 맛", "왜 다들 여기 줄 설까?",
+  "이건 무조건 저장각", "숨은 맛집 찾았어요", "이 맛, 꼭 저장하세요",
+  "끝까지 보면 저장각", "아는 사람만 가는 곳",
+];
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** 첫 프레임에 훅 배너를 합성한 세로 이미지 버퍼 반환 */
+async function composeHook(sharp, imgPath, hook) {
+  const W = 1080, H = 1920;
+  const base = await sharp(imgPath)
+    .resize(W, H, { fit: "cover", position: sharp.strategy.attention })
+    .modulate({ saturation: 1.08, brightness: 1.02 })
+    .toBuffer();
+  const svg = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="45" y="235" width="990" height="160" rx="30" fill="#000" fill-opacity="0.60"/>
+      <text x="${W / 2}" y="340" font-family="${FONT}" font-size="60" font-weight="900" fill="#fff" text-anchor="middle">${esc(hook)}</text>
+    </svg>`
+  );
+  return sharp(base).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 90 }).toBuffer();
+}
 
 function sh(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -85,15 +111,32 @@ async function main() {
   if (files.length < 3) throw new Error(`이미지 부족(${files.length}장)`);
   console.log(`이미지 ${files.length}장 다운로드`);
 
-  // 5) ffmpeg: 각 이미지 2.6초 세로(1080x1920) 클립 → concat + 무음 오디오
+  // 5) ffmpeg 세로(1080x1920) 클립 → concat + 무음 오디오.
+  //    - 첫 클립: 훅 배너 합성 + 정지 2.4초(문구 안정적으로 읽히게)
+  //    - 이후 클립: 잔잔한 줌인 2.0초(정지 슬라이드쇼는 이탈률↑ → 모션으로 리텐션↑)
+  //      지터 방지: 큰 크기로 업스케일 후 zoompan(서브픽셀 이동 매끄럽게)
+  const sharp = (await import("sharp")).default;
+  const hook = HOOKS[Math.floor(Math.random() * HOOKS.length)];
+  console.log("훅:", hook);
   const clips = [];
   for (let i = 0; i < files.length; i++) {
     const out = path.join(TMP, `clip_${i}.mp4`);
-    await sh("ffmpeg", [
-      "-y", "-loop", "1", "-i", files[i], "-t", "2.6", "-r", "30",
-      "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p",
-      "-c:v", "libx264", "-preset", "veryfast", out,
-    ]);
+    if (i === 0) {
+      const hookImg = path.join(TMP, "hook.jpg");
+      fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
+      await sh("ffmpeg", [
+        "-y", "-loop", "1", "-i", hookImg, "-t", "2.4", "-r", "30",
+        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", out,
+      ]);
+    } else {
+      await sh("ffmpeg", [
+        "-y", "-loop", "1", "-i", files[i], "-t", "2.0", "-r", "30",
+        "-vf",
+        "scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0008,1.15)':d=60:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", out,
+      ]);
+    }
     clips.push(out);
   }
   const listFile = path.join(TMP, "list.txt");
