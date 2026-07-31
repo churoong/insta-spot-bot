@@ -83,12 +83,15 @@ export async function fetchCandidates(): Promise<Spot[]> {
   const areaCode = pick(AREA_CODES);
   // 알려진 곳(Q)과 숨은 곳(R)을 반반 섞어, 인증맛집(featured) 외에 숨은 맛집도 꾸준히 발굴.
   const arrange = Math.random() < 0.5 ? "Q" : "R";
+  // 페이지를 깊이 탐색해 상위권 소진 시에도 새 후보 발굴.
+  // 유명 우선(Q)은 상단(1~2p)에서 품질 유지, 숨은 발굴(R)은 더 깊이(1~4p)까지.
+  const pageNo = arrange === "Q" ? pick([1, 1, 2]) : pick([1, 2, 3, 4]);
   const items = await call("areaBasedList2", {
     contentTypeId: String(contentTypeId),
     areaCode: String(areaCode),
     arrange,
     numOfRows: "100",
-    pageNo: "1",
+    pageNo: String(pageNo),
   });
   const mapped = items
     .filter((it: any) => it.firstimage)
