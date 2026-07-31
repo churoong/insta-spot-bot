@@ -42,7 +42,7 @@ export interface NearbySpot {
 }
 
 // 인스타 캐러셀 제약: 2~10장. 게시물당 최소 이 장수는 확보(부족하면 후보 건너뜀).
-export const MIN_IMAGES = 5;
+export const MIN_IMAGES = 3;
 export const MAX_IMAGES = 10;
 
 function toHttps(u: string): string {
@@ -291,9 +291,9 @@ export async function fetchQuizImages(
             [
               {
                 text: `가게/장소 사진 ${valid.length}장이야(1번부터). 두 가지를 JSON으로만 답해줘.
-- exclude: 아래에 해당하는 사진 번호 배열 (없으면 [])
-  · 간판·상호명·현판 등 장소 이름 글자가 보이는 사진
-  · 흐릿하거나(초점 안 맞음), 너무 어둡거나, 심하게 어수선하거나, 화질이 낮은 사진
+- exclude: 간판·상호명·현판·메뉴판 등 '가게 이름 글자'가 크게 보이는 사진 번호 배열
+  (상호·위치가 드러나므로 반드시 제외). 심하게 흐릿하거나 어두운 사진도 포함. 없으면 [].
+  ※ 내부 인테리어·분위기·테이블 사진은 이름 글자만 없으면 제외하지 마.
 - best: 나머지 중 ${goodDesc} 보기 좋은 사진을 좋은 순서(가장 좋은 게 앞)로 나열한 번호 배열
 형식: {"exclude":[..],"best":[..]}`,
               },
@@ -302,29 +302,31 @@ export async function fetchQuizImages(
             200
           )) ?? "";
         const m = text.match(/\{[\s\S]*\}/);
+        let parsed: { exclude?: number[]; best?: number[] } | null = null;
         if (m) {
-          let parsed: { exclude?: number[]; best?: number[] } = {};
           try {
             parsed = JSON.parse(m[0]);
           } catch {
-            /* 파싱 실패 → 아래 폴백 */
+            parsed = null; // 파싱 실패 → 라벨 필터 폴백
           }
+        }
+        if (parsed) {
           const excl = new Set((parsed.exclude ?? []).map(Number));
           const bestOrder = (parsed.best ?? []).map(Number).filter((n) => n >= 1 && n <= valid.length);
-          // 간판·저품질 제외
           const keptIdx = valid.map((_, i) => i + 1).filter((n) => !excl.has(n));
-          if (keptIdx.length >= 2) {
-            // best 순서를 앞에 두고, 언급 안 된 나머지는 원래 순서로 뒤에 붙임
-            const seen = new Set<number>();
-            const ordered: number[] = [];
-            for (const n of bestOrder) if (!excl.has(n) && !seen.has(n)) { ordered.push(n); seen.add(n); }
-            for (const n of keptIdx) if (!seen.has(n)) { ordered.push(n); seen.add(n); }
-            return ordered.map((n) => valid[n - 1].url).slice(0, MAX_IMAGES);
-          }
+          // best 순서를 앞에 두고, 언급 안 된 나머지는 원래 순서로 뒤에 붙임
+          const seen = new Set<number>();
+          const ordered: number[] = [];
+          for (const n of bestOrder) if (!excl.has(n) && !seen.has(n)) { ordered.push(n); seen.add(n); }
+          for (const n of keptIdx) if (!seen.has(n)) { ordered.push(n); seen.add(n); }
+          // ⚠️ 비전이 판정에 성공하면 그 결과를 신뢰 — 제외된 간판을 다시 넣지 않는다.
+          // 좋은 사진이 부족하면 적은 수/빈 배열을 반환 → 상위에서 MIN_IMAGES 미달로 스킵
+          // (간판·상호가 표지로 나가 위치가 노출되는 것보다 발행을 건너뛰는 게 낫다).
+          return ordered.map((n) => valid[n - 1].url).slice(0, MAX_IMAGES);
         }
       }
     } catch {
-      /* 비전 실패 시 1차 결과 */
+      /* 비전 호출 자체 실패 시에만 라벨 필터 결과로 폴백 */
     }
   }
   return cands.map((c) => c.url).slice(0, MAX_IMAGES);
