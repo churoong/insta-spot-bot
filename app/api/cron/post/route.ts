@@ -7,6 +7,7 @@ import { pickThemePost, buildThemeCaption } from "@/lib/pexels";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
 import { findPlace, mapLink, pickKakaoSpot, searchMapUrl } from "@/lib/kakao";
+import { standardizePhotos } from "@/lib/photo";
 
 // Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
 export const maxDuration = 300;
@@ -183,7 +184,8 @@ async function runCron(forceFeatured = false) {
         if (dup.rows.length === 0) {
           const caption = buildThemeCaption(tp.theme, tp.credit);
           const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
-          const mediaId = dryRun ? null : await publishCarousel(tp.urls, caption);
+          const themeUrls = dryRun ? tp.urls : await standardizePhotos(tp.urls);
+          const mediaId = dryRun ? null : await publishCarousel(themeUrls, caption);
           await db.execute({
             sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -277,7 +279,9 @@ async function publishAndSave(
 
   // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
   const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
-  const mediaId = dryRun ? null : await publishCarousel(spot.imageUrls, caption);
+  // 인스타에는 4:5 스마트 크롭 + 은은한 보정본을 올리고, DB(image_urls)에는 원본을 유지.
+  const publishUrls = dryRun ? spot.imageUrls : await standardizePhotos(spot.imageUrls);
+  const mediaId = dryRun ? null : await publishCarousel(publishUrls, caption);
 
   // 새 게시물을 스토리로도 공유 (계정 활동감 유지 — 실패해도 발행에는 영향 없음)
   // STORY_SHARE=0 으로 끌 수 있음
