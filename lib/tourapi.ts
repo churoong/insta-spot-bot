@@ -123,12 +123,19 @@ export async function fetchByFoodKeyword(keyword = pick(FOOD_KEYWORDS)): Promise
 }
 
 /** 검색 결과 아이템 → Spot[] (저작권 필터 + 사진 많은 곳 우선 + 등급 내 셔플) */
+// 음식점(39) 하위분류 중 '식당(식사)'이 아닌 것 — 카페/전통찻집·클럽(바)은 제외해
+// 맛집(밥집) 정체성 유지. (A05020100 한식 / 0200 서양식 / 0300 일식 / 0400 중식 /
+//  0700 이색음식점 은 유지, 0900 카페·전통찻집 / 1000 클럽 은 제외)
+const NON_RESTAURANT_CAT3 = new Set(["A05020900", "A05021000"]);
+
 function rankFoodItems(items: any[], category: string): Spot[] {
   const mapped = items
     .filter((it: any) => it.firstimage)
     // 공공누리 유형 필터: Type1(출처표시), Type3(출처표시+변경금지)만 상업적 이용 가능.
     // Type2/Type4는 상업적 이용 금지라 제외.
     .filter((it: any) => it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3")
+    // 카페·라운지(바)류 제외 — 실제 식당만
+    .filter((it: any) => !NON_RESTAURANT_CAT3.has(it.cat3))
     .map((it: any) => ({
       hasMulti: Boolean(it.firstimage2), // 사진 여러 장(품질 프록시)
       spot: {
