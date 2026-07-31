@@ -39,7 +39,10 @@ async function toneBuffer(url: string): Promise<Buffer> {
 /** 표지 사진에 훅 텍스트 배너 합성. 폰트 없거나 실패하면 원본 그대로(깨짐 방지). */
 async function addHookBanner(photo: Buffer, hook: string): Promise<Buffer> {
   try {
-    if (!fs.existsSync(FONT_PATH)) return photo;
+    if (!fs.existsSync(FONT_PATH)) {
+      console.warn("[photo] 폰트 미검출 → 표지 훅 생략:", FONT_PATH);
+      return photo;
+    }
     const sharp = (await import("sharp")).default;
     // 번들 폰트 파일로 텍스트 렌더(시스템 폰트 불필요)
     const text = await sharp({
