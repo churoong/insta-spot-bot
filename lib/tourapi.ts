@@ -406,7 +406,10 @@ export async function fetchFoodInfo(contentId: string): Promise<FoodInfo> {
     const hours = clean(it.opentimefood)
       .replace(/^[-·•\s]+/, "")
       .replace(/\s*-\s*(?=[가-힣])/g, " · ")
-      .slice(0, 50)
+      // 용어 통일
+      .replace(/준비\s*시간/g, "브레이크타임")
+      .replace(/마지막\s*주문/g, "라스트오더")
+      .slice(0, 60)
       .trim();
     return { menu: menu.slice(0, 60), hours };
   } catch {
