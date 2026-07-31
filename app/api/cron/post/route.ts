@@ -2,7 +2,6 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchOverview, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
-import { pickThemePost, buildThemeCaption } from "@/lib/pexels";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
 import { findPlace, mapLink, pickKakaoSpot, searchMapUrl } from "@/lib/kakao";
@@ -172,34 +171,8 @@ async function runCron(forceFeatured = false) {
     }
   }
 
-  // 스톡 테마 회차: Pexels/Pixabay 키 있을 때 확률적으로 감성 테마 게시물(특정 가게 아님).
-  if ((process.env.PEXELS_KEY || process.env.PIXABAY_KEY) && Math.random() < 1 / Number(process.env.THEME_EVERY || 6)) {
-    try {
-      const tp = await pickThemePost(MIN_IMAGES);
-      if (tp) {
-        const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
-        const cid = `theme-${tp.theme.key}-${today}`;
-        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
-        if (dup.rows.length === 0) {
-          const caption = buildThemeCaption(tp.theme, tp.credit);
-          const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
-          const themeUrls = dryRun ? tp.urls : await standardizePhotos(tp.urls);
-          const mediaId = dryRun ? null : await publishCarousel(themeUrls, caption);
-          await db.execute({
-            sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            args: [cid, tp.theme.title, "", "테마", tp.urls[0], JSON.stringify(tp.urls), caption, mediaId, dryRun ? "dry_run" : "published"],
-          });
-          return { published: !dryRun, dryRun, place: tp.theme.title, images: tp.urls.length, theme: true, mediaId };
-        }
-      }
-    } catch (e) {
-      console.error("[theme] 발행 오류(다음 경로로):", e);
-    }
-  }
-
-  // (여행지·명소 소개 게시물은 제거됨 — 맛집 전문 계정, 2026-07 사용자 결정.
-  //  기존 위키미디어 랜드마크 발행 로직 삭제)
+  // (감성 테마(Pexels/Pixabay 스톡)·여행지·명소 소개 게시물은 모두 제거됨.
+  //  순수 맛집 전문 계정 — 2026-07 사용자 결정)
 
   // 카카오 발굴 회차: 확률적으로 카카오맵으로 "지역+메뉴" 맛집을 발굴(TourAPI 사진 연결).
   // TourAPI 자체 후보와 다른 맛집을 섞어 다양성을 높임. 키 없거나 실패 시 일반 발행.
