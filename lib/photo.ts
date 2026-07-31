@@ -20,8 +20,13 @@ async function processOne(url: string, idx: number): Promise<string> {
   const out = await sharp(input)
     // 피사체(음식 등) 중심으로 4:5 크롭 — attention 전략이 대비·엣지가 강한 영역을 남김
     .resize(W, H, { fit: "cover", position: sharp.strategy.attention })
-    // 은은한 보정: 과하지 않게(채도 +8%, 밝기 +2%) + 약한 선명도
-    .modulate({ saturation: 1.08, brightness: 1.02 })
+    // 계정 톤 프리셋: 피드 색감을 하나로 통일 (은은한 따뜻·리치 톤)
+    //  · modulate: 채도 +10%, 밝기 +2%
+    //  · linear: R 게인↑ / B 게인↓ 로 살짝 따뜻하게, B에 +2 오프셋으로 그림자 살짝 리프트
+    //  · sharpen: 약한 선명도
+    // 과하지 않게 맞춰 "필터 티" 없이 음식·풍경 모두 자연스럽게 통일됨.
+    .modulate({ saturation: 1.1, brightness: 1.02 })
+    .linear([1.05, 1.02, 0.97], [0, 0, 2])
     .sharpen({ sigma: 0.7 })
     .jpeg({ quality: 88, mozjpeg: true })
     .toBuffer();
