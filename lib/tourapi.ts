@@ -401,8 +401,13 @@ export async function fetchFoodInfo(contentId: string): Promise<FoodInfo> {
     const trimJoin = (s: string) =>
       s.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean).slice(0, 4).join(", ");
     const menu = trimJoin(clean(it.firstmenu) || clean(it.treatmenu));
-    // 영업시간: 앞머리 불릿(- · •)만 제거 (내부 "10:00 - 22:00" 같은 시간범위 대시는 보존)
-    const hours = clean(it.opentimefood).replace(/^[-·•\s]+/, "").slice(0, 50).trim();
+    // 영업시간 정리: 앞머리 불릿 제거 + 세그먼트 구분 대시(뒤에 한글이 오는 "-")는
+    // " · "로 바꾸되, 시간범위 대시("10:00 - 22:00", 뒤가 숫자)는 그대로 보존.
+    const hours = clean(it.opentimefood)
+      .replace(/^[-·•\s]+/, "")
+      .replace(/\s*-\s*(?=[가-힣])/g, " · ")
+      .slice(0, 50)
+      .trim();
     return { menu: menu.slice(0, 60), hours };
   } catch {
     return { menu: "", hours: "" };
