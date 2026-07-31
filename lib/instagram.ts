@@ -93,6 +93,35 @@ async function waitForContainer(id: string) {
 }
 
 /**
+ * 컨테이너 발행(media_publish) — IG의 두 가지 알려진 오동작 방어:
+ *  - 2207027 "media not ready": 컨테이너가 FINISHED여도 발행이 잠깐 준비 전일 수 있음 → 재시도
+ *  - 2207051 "action is blocked": 에러를 돌려주면서 실제로는 발행됨 → 최근 미디어로 확인
+ */
+async function publishContainer(creationId: string, verifyCaption?: string): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const published = await graphPost(`${igUserId()}/media_publish`, { creation_id: creationId });
+      return String(published.id);
+    } catch (e) {
+      const msg = String(e);
+      if (/2207027|not ready for publishing|not available/i.test(msg) && attempt < 4) {
+        await new Promise((r) => setTimeout(r, 5000)); // 준비 대기 후 재시도
+        continue;
+      }
+      if (verifyCaption) {
+        const verified = await verifyRecentPublish(verifyCaption);
+        if (verified) {
+          console.log("[publish] 에러 응답이지만 실제 발행 확인됨:", verified);
+          return verified;
+        }
+      }
+      throw e;
+    }
+  }
+  throw new Error("발행 재시도 초과");
+}
+
+/**
  * 캐러셀(여러 장) 게시: 각 이미지 자식 컨테이너 → 캐러셀 컨테이너 → 발행.
  * 이미지가 1장이면 단일 이미지로 게시.
  */
@@ -121,21 +150,8 @@ export async function publishCarousel(imageUrls: string[], caption: string): Pro
   });
   await waitForContainer(carousel.id);
 
-  // 3) 발행 — IG가 "action blocked" 에러를 돌려주면서 실제로는 발행하는
-  // 오동작이 있어(2026-07 실측), 에러 시 실제 발행 여부를 재확인한다.
-  try {
-    const published = await graphPost(`${igUserId()}/media_publish`, {
-      creation_id: carousel.id,
-    });
-    return String(published.id);
-  } catch (e) {
-    const verified = await verifyRecentPublish(caption);
-    if (verified) {
-      console.log("[publish] 에러 응답이지만 실제 발행 확인됨:", verified);
-      return verified;
-    }
-    throw e;
-  }
+  // 3) 발행 (준비 안 됨 재시도 + 가짜 차단 검증은 publishContainer가 처리)
+  return publishContainer(String(carousel.id), caption);
 }
 
 /**
@@ -173,10 +189,7 @@ export async function publishImage(imageUrl: string, caption: string): Promise<s
   // 컨테이너 처리 대기 (이미지 다운로드/검증에 몇 초 걸릴 수 있음)
   await waitForContainer(String(container.id));
 
-  const published = await graphPost(`${igUserId()}/media_publish`, {
-    creation_id: container.id,
-  });
-  return String(published.id);
+  return publishContainer(String(container.id), caption);
 }
 
 /**
@@ -204,10 +217,7 @@ export async function publishReel(videoUrl: string, caption: string): Promise<st
     await new Promise((r) => setTimeout(r, 3000));
   }
 
-  const published = await graphPost(`${igUserId()}/media_publish`, {
-    creation_id: id,
-  });
-  return String(published.id);
+  return publishContainer(id, caption);
 }
 
 /** 댓글에 대한 비공개 답장(Private Reply) — 댓글 작성자에게 DM 발송 */
@@ -230,10 +240,7 @@ export async function publishStory(imageUrl: string): Promise<string> {
     media_type: "STORIES",
   });
   await waitForContainer(String(container.id));
-  const published = await graphPost(`${igUserId()}/media_publish`, {
-    creation_id: container.id,
-  });
-  return String(published.id);
+  return publishContainer(String(container.id));
 }
 
 /** 팔로워 수 조회 (주간 리포트용) */
