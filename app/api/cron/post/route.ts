@@ -267,8 +267,9 @@ async function publishAndSave(
   // STORY_SHARE=0 으로 끌 수 있음
   if (!dryRun && process.env.STORY_SHARE !== "0") {
     try {
-      // 원본을 그대로 올리면 스토리(9:16)에서 크기가 이상해짐 → 9:16 이미지로 합성해 발행
-      await publishStory(await storyImage(spot.imageUrl));
+      // 스토리도 음식 우선 정렬된 첫 사진 사용(대표사진 spot.imageUrl은 간판일 수 있어
+      // 상호·위치가 노출됨). 원본 비율이면 크기가 이상하므로 9:16으로 합성해 발행.
+      await publishStory(await storyImage(spot.imageUrls[0] || spot.imageUrl));
     } catch (e) {
       console.error("[story] 공유 실패(무시):", String(e).slice(0, 150));
     }
