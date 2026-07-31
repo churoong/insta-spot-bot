@@ -11,6 +11,13 @@ import { pickPerformingKeyword } from "@/lib/performance";
 // Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
 export const maxDuration = 300;
 
+// 캐러셀 표지 훅 문구 — 이모지 없이(번들 한글 폰트엔 이모지 글리프 없음). 저장·정지 유도.
+const COVER_HOOKS = [
+  "저장 안 하면 후회해요", "현지인만 아는 그 맛", "여기 진짜 맛집이에요",
+  "이건 무조건 저장각", "숨은 맛집 찾았어요", "아는 사람만 가는 곳",
+  "줄 서서 먹는 그 집", "이 맛, 꼭 저장하세요",
+];
+
 // 외부 크론(cron-job.org 등)이 호출:
 // GET /api/cron/post  (Authorization: Bearer $CRON_SECRET)
 //
@@ -251,7 +258,9 @@ async function publishAndSave(
   // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
   const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
   // 인스타에는 4:5 스마트 크롭 + 은은한 보정본을 올리고, DB(image_urls)에는 원본을 유지.
-  const publishUrls = dryRun ? spot.imageUrls : await standardizePhotos(spot.imageUrls);
+  // 표지(첫 사진)엔 스크롤 정지·저장을 유도하는 훅 텍스트를 얹는다.
+  const hook = COVER_HOOKS[Math.floor(Math.random() * COVER_HOOKS.length)];
+  const publishUrls = dryRun ? spot.imageUrls : await standardizePhotos(spot.imageUrls, { hook });
   const mediaId = dryRun ? null : await publishCarousel(publishUrls, caption);
 
   // 새 게시물을 스토리로도 공유 (계정 활동감 유지 — 실패해도 발행에는 영향 없음)
