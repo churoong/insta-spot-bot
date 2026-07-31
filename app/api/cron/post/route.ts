@@ -1,6 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { fetchCandidates, fetchOverview, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
+import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
@@ -192,11 +192,13 @@ async function runCron(forceFeatured = false) {
     }
   }
 
-  // 아직 안 올린 장소 찾기 (최대 3번 다른 지역 시도)
+  // 아직 안 올린 맛집 찾기 (최대 3번 시도).
+  // 회차마다 후보 소스를 반반 랜덤: 유명 음식 키워드 발굴(searchKeyword2)로 그 음식의
+  // 이름난 집을 정조준하거나, 지역 기반(areaBasedList2)으로 폭넓게 발굴.
   for (let attempt = 0; attempt < 3; attempt++) {
-    // fetchCandidates가 이미 품질순(사진 여러 장 우선, 등급 내 셔플)으로 정렬해 반환하므로
+    // 두 소스 모두 이미 품질순(사진 여러 장 우선, 등급 내 셔플)으로 정렬해 반환하므로
     // 여기서 다시 셔플하지 않고 순서대로 사용한다.
-    const candidates = await fetchCandidates();
+    const candidates = Math.random() < 0.5 ? await fetchByFoodKeyword() : await fetchCandidates();
     for (const spot of candidates) {
       const dup = await db.execute({
         sql: "SELECT 1 FROM posts WHERE content_id = ?",

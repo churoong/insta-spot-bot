@@ -93,6 +93,38 @@ export async function fetchCandidates(): Promise<Spot[]> {
     numOfRows: "100",
     pageNo: String(pageNo),
   });
+  return rankFoodItems(items, contentTypeId === 39 ? "맛집" : "여행지");
+}
+
+// 유명 음식 키워드 — 그 음식으로 이름난 집을 정조준해 발굴(searchKeyword2).
+const FOOD_KEYWORDS = [
+  "돼지국밥", "순대국밥", "평양냉면", "함흥냉면", "밀면", "막국수", "칼국수", "콩국수",
+  "물회", "곰탕", "설렁탕", "갈비탕", "삼계탕", "추어탕", "해장국", "감자탕", "부대찌개",
+  "아귀찜", "낙지볶음", "쭈꾸미", "보쌈", "족발", "곱창", "막창", "갈비", "불고기",
+  "삼겹살", "장어구이", "물회", "회", "초밥", "짬뽕", "탕수육", "돈까스", "떡볶이",
+  "만두", "한정식", "백반", "국밥", "육회", "매운탕", "짜장면", "냉면", "쌀국수",
+];
+
+/**
+ * 유명 음식명으로 그 음식의 맛집을 발굴(searchKeyword2).
+ * 지역 무작위 나열보다 "그 음식으로 이름난 집"을 정조준하므로 콘텐츠 적합도가 높음.
+ * fetchCandidates와 동일한 품질 정렬(사진 여러 장 우선)을 적용해 Spot[] 반환.
+ */
+export async function fetchByFoodKeyword(): Promise<Spot[]> {
+  const keyword = pick(FOOD_KEYWORDS);
+  const items = await call("searchKeyword2", {
+    keyword,
+    contentTypeId: "39",
+    arrange: pick(["Q", "R"]), // 알려진 곳(Q)·숨은 곳(R) 섞기
+    numOfRows: "50",
+    pageNo: "1",
+  });
+  console.log(`[keyword] "${keyword}" 후보 ${items.length}건`);
+  return rankFoodItems(items, "맛집");
+}
+
+/** 검색 결과 아이템 → Spot[] (저작권 필터 + 사진 많은 곳 우선 + 등급 내 셔플) */
+function rankFoodItems(items: any[], category: string): Spot[] {
   const mapped = items
     .filter((it: any) => it.firstimage)
     // 공공누리 유형 필터: Type1(출처표시), Type3(출처표시+변경금지)만 상업적 이용 가능.
@@ -104,7 +136,7 @@ export async function fetchCandidates(): Promise<Spot[]> {
         contentId: String(it.contentid),
         name: it.title,
         address: [it.addr1, it.addr2].filter(Boolean).join(" "),
-        category: contentTypeId === 39 ? "맛집" : "여행지",
+        category,
         imageUrl: toHttps(it.firstimage),
         imageUrls: [toHttps(it.firstimage)],
         overview: "",
