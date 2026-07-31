@@ -57,14 +57,17 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ accepted: true });
 }
 
-/** 크론 실행 기록 + 행동차단 감지 시 발행 쿨다운 설정 */
+/** 크론 실행 기록 + (진짜) API 요청 한도 감지 시에만 짧게 발행 백오프 */
 async function clog(note: string) {
   try {
     await initDb();
     await db.execute({ sql: "INSERT INTO cron_log (note) VALUES (?)", args: [note.slice(0, 500)] });
-    // 인스타 행동차단/발행제한 신호면 일정 시간 발행 중단 (계정 회복 시간 확보)
-    if (/2207051|action is blocked|request limit reached|행동이 차단/i.test(note)) {
-      const hours = Number(process.env.PUBLISH_COOLDOWN_HOURS || 24);
+    // ⚠️ "action is blocked"(code 4, subcode 2207051)은 가짜 신호 — 에러를 돌려주면서도
+    //   실제로는 발행이 완료됨(verifyRecentPublish가 성공 처리). 따라서 쿨다운을 걸지 않는다.
+    //   진짜로 백오프가 필요한 건 앱 API 요청 한도(rate limit)뿐이고, 이건 보통 1시간 내
+    //   리셋되므로 짧게만 쉰다(과거 24h 고정은 발행을 과하게 멈췄음).
+    if (/request limit reached/i.test(note)) {
+      const hours = Number(process.env.PUBLISH_COOLDOWN_HOURS || 1);
       await db.execute({
         sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('publish_cooldown_until', datetime('now', ?), datetime('now'))",
         args: [`+${hours} hours`],
@@ -97,8 +100,8 @@ async function runCron(forceFeatured = false) {
     return { skipped: true, reason: `KST 심야(${kstHour}시) — 발행 쉬는 시간` };
   }
 
-  // 발행 쿨다운: 행동차단이 감지되면 clog가 설정. 그 시각까지 발행 시도 자체를 쉼
-  // — 실패 반복(컨테이너 생성 후 발행 거부)이 차단을 연장시키므로 계정을 조용히 둠.
+  // 발행 쿨다운: 진짜 API 요청 한도(rate limit)가 감지되면 clog가 짧게 설정.
+  // 그 시각까지 발행 시도를 쉬어 한도 초과 호출을 줄임.
   try {
     const cd = await db.execute("SELECT value FROM config WHERE key='publish_cooldown_until'");
     if (cd.rows.length > 0) {
@@ -106,7 +109,7 @@ async function runCron(forceFeatured = false) {
       if (Date.now() < until) {
         return {
           skipped: true,
-          reason: `발행 쿨다운 (인스타 행동차단 회복 대기, ${Math.round((until - Date.now()) / 60000)}분 남음)`,
+          reason: `발행 쿨다운 (API 요청 한도 회복 대기, ${Math.round((until - Date.now()) / 60000)}분 남음)`,
         };
       }
     }
