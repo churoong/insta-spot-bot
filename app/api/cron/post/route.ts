@@ -6,6 +6,7 @@ import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetc
 import { pickFeatured } from "@/lib/featured";
 import { findPlace, mapLink, pickKakaoSpot, searchMapUrl } from "@/lib/kakao";
 import { standardizePhotos } from "@/lib/photo";
+import { pickPerformingKeyword } from "@/lib/performance";
 
 // Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
 export const maxDuration = 300;
@@ -198,7 +199,11 @@ async function runCron(forceFeatured = false) {
   for (let attempt = 0; attempt < 3; attempt++) {
     // 두 소스 모두 이미 품질순(사진 여러 장 우선, 등급 내 셔플)으로 정렬해 반환하므로
     // 여기서 다시 셔플하지 않고 순서대로 사용한다.
-    const candidates = Math.random() < 0.5 ? await fetchByFoodKeyword() : await fetchCandidates();
+    // 키워드 발굴은 반응 좋은 음식에 가중치를 줘 성과가 좋은 종류를 더 자주 발굴.
+    const candidates =
+      Math.random() < 0.5
+        ? await fetchByFoodKeyword(await pickPerformingKeyword())
+        : await fetchCandidates();
     for (const spot of candidates) {
       const dup = await db.execute({
         sql: "SELECT 1 FROM posts WHERE content_id = ?",

@@ -97,7 +97,7 @@ export async function fetchCandidates(): Promise<Spot[]> {
 }
 
 // 유명 음식 키워드 — 그 음식으로 이름난 집을 정조준해 발굴(searchKeyword2).
-const FOOD_KEYWORDS = [
+export const FOOD_KEYWORDS = [
   "돼지국밥", "순대국밥", "평양냉면", "함흥냉면", "밀면", "막국수", "칼국수", "콩국수",
   "물회", "곰탕", "설렁탕", "갈비탕", "삼계탕", "추어탕", "해장국", "감자탕", "부대찌개",
   "아귀찜", "낙지볶음", "쭈꾸미", "보쌈", "족발", "곱창", "막창", "갈비", "불고기",
@@ -110,8 +110,7 @@ const FOOD_KEYWORDS = [
  * 지역 무작위 나열보다 "그 음식으로 이름난 집"을 정조준하므로 콘텐츠 적합도가 높음.
  * fetchCandidates와 동일한 품질 정렬(사진 여러 장 우선)을 적용해 Spot[] 반환.
  */
-export async function fetchByFoodKeyword(): Promise<Spot[]> {
-  const keyword = pick(FOOD_KEYWORDS);
+export async function fetchByFoodKeyword(keyword = pick(FOOD_KEYWORDS)): Promise<Spot[]> {
   const items = await call("searchKeyword2", {
     keyword,
     contentTypeId: "39",
