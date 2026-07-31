@@ -162,10 +162,11 @@ export async function fetchImages(
 }
 
 /**
- * 퀴즈형(상호 비공개) 게시물용 이미지 수집 — 간판·상호명 노출 사진 제외.
+ * 퀴즈형(상호 비공개) 게시물용 이미지 수집 — 간판 제외 + 좋은 사진 앞으로 정렬.
  * 1차: imgname 라벨 필터(맛집은 간판·외관류 라벨 제거)
- * 2차: Gemini 비전으로 간판·상호 글자가 보이는 사진 감지·제외 (키 없으면 생략)
- * 필터 후에도 원본 순서 유지. 실패 시 안전하게 1차 결과 반환.
+ * 2차: Gemini 비전 한 번으로 ①간판·상호 글자 사진 제외 ②가장 먹음직/멋진 사진 순서로
+ *      재정렬 → 인스타 썸네일(첫 사진)이 항상 제일 좋은 컷이 되게 함. (키 없으면 생략)
+ * 실패 시 안전하게 1차(라벨 필터) 결과 반환.
  */
 export async function fetchQuizImages(
   contentId: string,
@@ -210,22 +211,43 @@ export async function fetchQuizImages(
         }
       }
       if (valid.length > 1) {
+        const goodDesc =
+          category === "맛집"
+            ? "음식·요리가 크고 먹음직스럽게 나온"
+            : "풍경·볼거리가 시원하게 잘 담긴";
         const text =
           (await geminiText(
             [
               {
-                text: `사진 ${valid.length}장이야. 가게 간판, 상호명, 현판 등 장소 이름을 읽을 수 있는 글자가 보이는 사진의 번호를 JSON 배열로만 답해 (1번부터). 없으면 []. 예: [1,4]`,
+                text: `가게/장소 사진 ${valid.length}장이야(1번부터). 두 가지를 JSON으로만 답해줘.
+- exclude: 간판·상호명·현판 등 장소 이름 글자가 보이는 사진 번호 배열 (없으면 [])
+- best: ${goodDesc} 사진을 좋은 순서(가장 좋은 게 앞)로 나열한 번호 배열
+형식: {"exclude":[..],"best":[..]}`,
               },
               ...parts,
             ],
-            60
+            200
           )) ?? "";
-        const m = text.match(/\[[\d,\s]*\]/);
+        const m = text.match(/\{[\s\S]*\}/);
         if (m) {
-          const signed = new Set((JSON.parse(m[0]) as number[]).map((n) => Number(n)));
-          const kept = valid.filter((_, i) => !signed.has(i + 1));
-          // 비전 결과 반영하되, 너무 많이 깎이면(2장 미만) 1차 결과 유지
-          if (kept.length >= 2) return kept.map((c) => c.url).slice(0, MAX_IMAGES);
+          let parsed: { exclude?: number[]; best?: number[] } = {};
+          try {
+            parsed = JSON.parse(m[0]);
+          } catch {
+            /* 파싱 실패 → 아래 폴백 */
+          }
+          const excl = new Set((parsed.exclude ?? []).map(Number));
+          const bestOrder = (parsed.best ?? []).map(Number).filter((n) => n >= 1 && n <= valid.length);
+          // 간판 제외
+          const keptIdx = valid.map((_, i) => i + 1).filter((n) => !excl.has(n));
+          if (keptIdx.length >= 2) {
+            // best 순서를 앞에 두고, 언급 안 된 나머지는 원래 순서로 뒤에 붙임
+            const seen = new Set<number>();
+            const ordered: number[] = [];
+            for (const n of bestOrder) if (!excl.has(n) && !seen.has(n)) { ordered.push(n); seen.add(n); }
+            for (const n of keptIdx) if (!seen.has(n)) { ordered.push(n); seen.add(n); }
+            return ordered.map((n) => valid[n - 1].url).slice(0, MAX_IMAGES);
+          }
         }
       }
     } catch {
