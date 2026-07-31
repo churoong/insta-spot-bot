@@ -1,4 +1,5 @@
 import type { Spot } from "./tourapi";
+import { FOOD_KEYWORDS } from "./tourapi";
 import { llmText } from "./llm";
 
 const SOURCE_LINE = "📷 사진·정보 출처: 한국관광공사 TourAPI";
@@ -42,14 +43,14 @@ export async function generateCaption(spot: Spot, opts: CaptionOpts = {}): Promi
 // ===== LLM 캡션 생성 (Gemini → Groq 폴백은 lib/llm.ts에서 처리) =====
 
 async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<CaptionResult> {
-  const { sido, gu } = regionHint(spot.address);
+  const dish = dishOf(spot.name); // 음식 종류(검색 노출·해시태그용). 위치가 아니므로 본문 사용 OK.
   const featuredRule = opts.featuredBy
-    ? `\n7. ⭐이 집의 특별한 사실: "${opts.featuredBy}". 이 사실을 첫 문장 훅으로 강렬하게 활용해 (예: "미쉐린 가이드에 이름을 올렸던 그 집..."). 단, 과장하거나 공식 제휴처럼 보이게 하지 말고 사실만 언급. 상호명은 여전히 비밀.`
+    ? `\n- ⭐이 집의 특별한 사실: "${opts.featuredBy}". 이 사실을 첫 문장 훅으로 강렬하게 활용해 (예: "미쉐린 가이드에 이름을 올렸던 그 집..."). 단, 과장하거나 공식 제휴처럼 보이게 하지 말고 사실만 언급. 상호명은 여전히 비밀.`
     : "";
-  const regionTagGuide = sido
-    ? `지역 해시태그 2~4개를 반드시 포함해 (예: #${sido}${spot.category === "맛집" ? "맛집" : "여행"}${gu ? `, #${gu}${spot.category === "맛집" ? "맛집" : "여행"}, #${gu}핫플` : ""}). 단, 지역명은 해시태그에만 쓰고 본문에는 절대 쓰지 마.`
-    : `지역 해시태그는 생략해.`;
-  const prompt = `인스타그램 ${spot.category} 소개 계정의 게시글 캡션을 한국어로 작성해줘.
+  const seoRule = dish
+    ? `\n- 검색 노출을 위해 본문에 '${dish}'라는 음식 이름을 자연스럽게 1~2번 넣어줘 (음식 종류이지 위치가 아니니 괜찮아).`
+    : "";
+  const prompt = `인스타그램 ${spot.category} 소개 계정의 게시글 '본문'을 한국어로 작성해줘. (해시태그는 넣지 마 — 내가 따로 붙일 거야)
 
 장소 정보(본문에 위치를 드러내지 않기 위한 참고용, 아래 정보로 분위기만 파악):
 - 이름: ${spot.name} (절대 캡션에 쓰지 말 것!)
@@ -58,31 +59,61 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
 - 설명: ${spot.overview || "(설명 없음 — 사진 분위기로 작성)"}
 
 작성 규칙:
-1. 장소의 정확한 이름/상호명은 본문과 해시태그 어디에도 절대 넣지 마. 궁금증을 유발하는 티저 스타일로.
-2. ⭐본문(해시태그 제외)에는 위치를 추측할 수 있는 어떤 힌트도 넣지 마. 시/도/시군구/동 등 지역명, 유명 거리·랜드마크·역 이름 전부 금지. 정확한 위치는 비밀이고 오직 DM으로만 알려줄 거야.
+1. 장소의 정확한 이름/상호명은 절대 넣지 마. 궁금증을 유발하는 티저 스타일로.
+2. ⭐본문에는 위치를 추측할 수 있는 어떤 힌트도 넣지 마. 시/도/시군구/동 등 지역명, 유명 거리·랜드마크·역 이름 전부 금지. 정확한 위치는 비밀이고 오직 DM으로만 알려줄 거야.
 3. 자연스럽고 사람 냄새 나는 톤으로 써. 광고 문구 같은 뻔한 표현("인생맛집", "핫플 인정")은 피하고, 실제로 다녀와 본 사람이 소개하듯 3~5문장. 반드시 **친근하지만 정중한 존댓말(해요체)** 로 써. 반말 금지. 이모지는 2~4개만 적당히.
 4. 여러 장의 사진이 함께 올라가는 게시물이야. 자연스러우면 사진 얘기(분위기, 디테일)를 한두 개 녹여도 좋아.
 5. 마지막에 반드시 이 안내를 자연스럽게 포함: 댓글에 "${keyword()}"라고 남기고 팔로우하면 DM으로 위치를 보내준다는 것. (딱딱하지 않게)
-6. 해시태그는 줄바꿈 후 8~12개: 분위기·음식종류·감성 키워드 위주. ${regionTagGuide} 상호명·정확한 장소명 해시태그는 절대 금지.${featuredRule}
+6. ⚠️해시태그(#)는 절대 넣지 마. 본문 문장만 출력해.${seoRule}${featuredRule}
 
-캡션 본문과 해시태그만 출력해. 설명이나 따옴표 없이 바로 캡션만.`;
+캡션 본문만 출력해. 설명이나 따옴표 없이 바로 본문만.`;
 
-  const r = await llmText(prompt, { maxTokens: 1200 });
+  const r = await llmText(prompt, { maxTokens: 1000 });
   if (!r) throw new Error("모든 AI 소진 (Gemini/Groq)");
-  const text = r.text;
+  const body = r.text.replace(/#[^\s#]+/g, "").trim(); // 혹시 나온 해시태그는 제거(내가 붙임)
 
   // 안전장치: 규칙 위반이면 발행하지 않음 (템플릿 폴백 없음)
-  const missingKeyword = !text.includes(keyword());
-  const missingHashtag = !text.includes("#");
-  const leakedName = text.includes(spot.name);
-  // 지역명은 해시태그에는 허용, 본문(첫 해시태그 이전)에는 금지
-  const body = text.split("#")[0];
+  const missingKeyword = !body.includes(keyword());
+  const leakedName = body.includes(spot.name);
   const leakedLocation = leaksLocation(body, spot.address);
-  if (!text || missingKeyword || missingHashtag || leakedName || leakedLocation) {
-    throw new Error(`캡션 규칙 위반 (provider=${r.provider}, keyword=${!missingKeyword}, tag=${!missingHashtag}, name누출=${leakedName}, 위치누출=${leakedLocation})`);
+  if (!body || missingKeyword || leakedName || leakedLocation) {
+    throw new Error(`캡션 규칙 위반 (provider=${r.provider}, keyword=${!missingKeyword}, name누출=${leakedName}, 위치누출=${leakedLocation})`);
   }
 
-  return { caption: `${text}\n\n${SOURCE_LINE}` };
+  return { caption: `${body}\n\n${buildHashtags(spot, dish)}\n\n${SOURCE_LINE}` };
+}
+
+/** 게시물명에서 음식 종류 추출 (SEO 본문·해시태그용) */
+function dishOf(placeName: string): string | null {
+  for (const kw of FOOD_KEYWORDS) if (placeName.includes(kw)) return kw;
+  return null;
+}
+
+/**
+ * 해시태그 전략 — 도달·검색 노출 최적화.
+ * 초대형 태그(#맛집)에 묻히지 않게 지역·음식·상황을 조합한 중간 규모/니치 태그 위주.
+ */
+function buildHashtags(spot: Spot, dish: string | null): string {
+  const { sido, gu } = regionHint(spot.address);
+  const tags: string[] = [];
+  // 지역 (탐색·검색 유입)
+  if (sido) {
+    tags.push(`${sido}맛집`);
+    if (gu) tags.push(`${gu}맛집`, `${gu}핫플`);
+    tags.push(`${sido}맛집투어`, `${sido}가볼만한곳`);
+  }
+  // 음식 종류 (SEO — 검색이 캡션·태그를 인덱싱)
+  if (dish) tags.push(dish, `${dish}맛집`, `${dish}추천`);
+  // 큐레이션: 중간 규모 니치 + 상황 태그
+  tags.push(
+    "맛집추천", "숨은맛집", "로컬맛집", "맛집탐방", "맛스타그램", "먹스타그램",
+    "오늘뭐먹지", "먹킷리스트", "존맛탱", "국내맛집", "맛집저장", "여기어때"
+  );
+  // 중복 제거 + 개수 제한(15) + # 접두
+  return [...new Set(tags)]
+    .slice(0, 15)
+    .map((t) => `#${t.replace(/\s+/g, "")}`)
+    .join(" ");
 }
 
 /** 본문에 주소의 지역명(시/도/구/동/거리)이 새어나갔는지 검사 */
