@@ -7,7 +7,20 @@ const BASE = "https://apis.data.go.kr/B551011/KorService2";
 
 // 12=관광지, 39=음식점
 const CONTENT_TYPES = [12, 39, 39]; // 맛집 비중을 높게
-const AREA_CODES = [1, 2, 3, 4, 5, 6, 7, 8, 31, 32, 33, 34, 35, 36, 37, 38, 39];
+// 지역 가중치: 대도시·관광·미식 관심이 높은 곳에 더 자주 배정(인지도 높은 식당·수요 집중).
+// 전국 다양성은 유지하되 서울·부산·제주·경기 등을 더 자주 뽑음.
+// (1서울 2인천 3대전 4대구 5광주 6부산 7울산 8세종 31경기 32강원 33충북 34충남 35경북 36경남 37전북 38전남 39제주)
+const AREA_CODES = [
+  1, 1, 1, 1, // 서울
+  6, 6, 6, // 부산
+  39, 39, 39, // 제주
+  31, 31, // 경기
+  2, 2, // 인천
+  4, 4, // 대구
+  3, 5, 7, // 대전 광주 울산
+  32, 33, 34, 35, 36, 37, 38, // 각 도 1회
+  8, // 세종
+];
 
 export interface Spot {
   contentId: string;
@@ -57,33 +70,48 @@ async function call(endpoint: string, params: Record<string, string>) {
   return Array.isArray(items) ? items : items ? [items] : [];
 }
 
-/** 대표 이미지가 있는 장소 후보 목록을 무작위 지역/유형에서 가져온다. */
+/**
+ * 대표 이미지가 있는 장소 후보 목록.
+ * - 지역은 가중 랜덤(대도시·미식 지역 우선), 유형은 맛집 비중 높게.
+ * - arrange="Q"(최근 수정순): TourAPI가 계속 관리하는 항목 = 인지도 높은 곳이
+ *   앞에 나오는 경향(생성일순 R은 무명 신규 등록이 섞임).
+ * - firstimage2(2번째 대표사진)가 있는 곳 = 사진이 여러 장인 잘 문서화된 곳을 앞으로.
+ *   같은 등급 안에서는 셔플해 다양성 유지. (호출부는 이 순서대로 골라 씀)
+ */
 export async function fetchCandidates(): Promise<Spot[]> {
   const contentTypeId = pick(CONTENT_TYPES);
   const areaCode = pick(AREA_CODES);
   const items = await call("areaBasedList2", {
     contentTypeId: String(contentTypeId),
     areaCode: String(areaCode),
-    arrange: "R", // 생성일순 + 대표이미지 있는 항목만
-    numOfRows: "50",
+    arrange: "Q", // 최근 수정순(관리되는 알려진 곳 우선) + 대표이미지 있는 항목만
+    numOfRows: "100",
     pageNo: "1",
   });
-  return items
+  const mapped = items
     .filter((it: any) => it.firstimage)
     // 공공누리 유형 필터: Type1(출처표시), Type3(출처표시+변경금지)만 상업적 이용 가능.
     // Type2/Type4는 상업적 이용 금지라 제외.
     .filter((it: any) => it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3")
     .map((it: any) => ({
-      contentId: String(it.contentid),
-      name: it.title,
-      address: [it.addr1, it.addr2].filter(Boolean).join(" "),
-      category: contentTypeId === 39 ? "맛집" : "여행지",
-      imageUrl: toHttps(it.firstimage),
-      imageUrls: [toHttps(it.firstimage)],
-      overview: "",
-      mapx: it.mapx ? String(it.mapx) : undefined,
-      mapy: it.mapy ? String(it.mapy) : undefined,
+      hasMulti: Boolean(it.firstimage2), // 사진 여러 장(품질 프록시)
+      spot: {
+        contentId: String(it.contentid),
+        name: it.title,
+        address: [it.addr1, it.addr2].filter(Boolean).join(" "),
+        category: contentTypeId === 39 ? "맛집" : "여행지",
+        imageUrl: toHttps(it.firstimage),
+        imageUrls: [toHttps(it.firstimage)],
+        overview: "",
+        mapx: it.mapx ? String(it.mapx) : undefined,
+        mapy: it.mapy ? String(it.mapy) : undefined,
+      } as Spot,
     }));
+  // 사진 여러 장인 곳을 앞으로, 각 등급 안에서는 셔플(다양성)
+  const shuffle = <T,>(a: T[]) => a.sort(() => Math.random() - 0.5);
+  const multi = shuffle(mapped.filter((m) => m.hasMulti)).map((m) => m.spot);
+  const single = shuffle(mapped.filter((m) => !m.hasMulti)).map((m) => m.spot);
+  return [...multi, ...single];
 }
 
 /**

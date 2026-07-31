@@ -238,8 +238,10 @@ async function runCron(forceFeatured = false) {
 
   // 아직 안 올린 장소 찾기 (최대 3번 다른 지역 시도)
   for (let attempt = 0; attempt < 3; attempt++) {
+    // fetchCandidates가 이미 품질순(사진 여러 장 우선, 등급 내 셔플)으로 정렬해 반환하므로
+    // 여기서 다시 셔플하지 않고 순서대로 사용한다.
     const candidates = await fetchCandidates();
-    for (const spot of candidates.sort(() => Math.random() - 0.5)) {
+    for (const spot of candidates) {
       const dup = await db.execute({
         sql: "SELECT 1 FROM posts WHERE content_id = ?",
         args: [spot.contentId],
