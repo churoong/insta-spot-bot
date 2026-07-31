@@ -5,7 +5,7 @@ import { generateCaption } from "@/lib/caption";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
 import { findPlace, mapLink, pickKakaoSpot, searchMapUrl } from "@/lib/kakao";
-import { standardizePhotos } from "@/lib/photo";
+import { standardizePhotos, storyImage } from "@/lib/photo";
 import { pickPerformingKeyword } from "@/lib/performance";
 
 // Fluid compute 기준 Hobby 최대 300초 — 발행+인증맛집 탐색이 60초를 넘는 경우 대비
@@ -267,7 +267,8 @@ async function publishAndSave(
   // STORY_SHARE=0 으로 끌 수 있음
   if (!dryRun && process.env.STORY_SHARE !== "0") {
     try {
-      await publishStory(spot.imageUrl);
+      // 원본을 그대로 올리면 스토리(9:16)에서 크기가 이상해짐 → 9:16 이미지로 합성해 발행
+      await publishStory(await storyImage(spot.imageUrl));
     } catch (e) {
       console.error("[story] 공유 실패(무시):", String(e).slice(0, 150));
     }

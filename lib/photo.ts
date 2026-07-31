@@ -79,6 +79,40 @@ async function addHookBanner(photo: Buffer, hook: string): Promise<Buffer> {
 }
 
 /**
+ * 스토리용 9:16(1080x1920) 이미지 생성·업로드.
+ * 원본 비율이 제각각이라 그냥 올리면 스토리에서 크기가 이상해짐 →
+ * 꽉 채운 블러 배경 위에 사진을 비율 유지로 중앙 배치(레터박스 대신 감성 블러).
+ */
+export async function storyImage(url: string): Promise<string> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error(`다운로드 실패 HTTP ${res.status}`);
+  const input = Buffer.from(await res.arrayBuffer());
+  const sharp = (await import("sharp")).default;
+  const SW = 1080, SH = 1920;
+  // 배경: 꽉 채운 블러 + 살짝 어둡게
+  const bg = await sharp(input).resize(SW, SH, { fit: "cover" }).blur(28).modulate({ brightness: 0.78 }).toBuffer();
+  // 전경: 폭·높이 안에 비율 유지로 축소 + 계정 톤 프리셋
+  const fg = await sharp(input)
+    .resize(SW - 80, SH - 360, { fit: "inside" })
+    .modulate({ saturation: 1.1, brightness: 1.02 })
+    .linear([1.05, 1.02, 0.97], [0, 0, 2])
+    .sharpen({ sigma: 0.7 })
+    .toBuffer();
+  const fm = await sharp(fg).metadata();
+  const out = await sharp(bg)
+    .composite([
+      {
+        input: fg,
+        top: Math.round((SH - (fm.height ?? SH)) / 2),
+        left: Math.round((SW - (fm.width ?? SW)) / 2),
+      },
+    ])
+    .jpeg({ quality: 88, mozjpeg: true })
+    .toBuffer();
+  return uploadPublicImage(out, "story");
+}
+
+/**
  * 사진 URL 배열을 표준화·업로드해 새 공개 URL 배열로 반환.
  * opts.hook 이 있으면 첫 사진(표지)에 훅 배너를 합성한다.
  * 실패한 항목은 원본 URL을 그대로 사용(발행 자체는 이어짐).
