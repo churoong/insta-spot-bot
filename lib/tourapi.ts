@@ -5,8 +5,8 @@ import { geminiText } from "./llm";
 
 const BASE = "https://apis.data.go.kr/B551011/KorService2";
 
-// 12=관광지, 39=음식점
-const CONTENT_TYPES = [12, 39, 39]; // 맛집 비중을 높게
+// 39=음식점. 맛집 전문 계정 — 관광지(12)는 제외(2026-07 사용자 결정).
+const CONTENT_TYPES = [39];
 // 지역 가중치: 대도시·관광·미식 관심이 높은 곳에 더 자주 배정(인지도 높은 식당·수요 집중).
 // 전국 다양성은 유지하되 서울·부산·제주·경기 등을 더 자주 뽑음.
 // (1서울 2인천 3대전 4대구 5광주 6부산 7울산 8세종 31경기 32강원 33충북 34충남 35경북 36경남 37전북 38전남 39제주)
@@ -73,18 +73,20 @@ async function call(endpoint: string, params: Record<string, string>) {
 /**
  * 대표 이미지가 있는 장소 후보 목록.
  * - 지역은 가중 랜덤(대도시·미식 지역 우선), 유형은 맛집 비중 높게.
- * - arrange="Q"(최근 수정순): TourAPI가 계속 관리하는 항목 = 인지도 높은 곳이
- *   앞에 나오는 경향(생성일순 R은 무명 신규 등록이 섞임).
+ * - 검증된 맛집 + 숨은 맛집을 함께 노출하려고 정렬을 매번 섞음:
+ *   Q(최근 수정순)=TourAPI가 관리하는 알려진 곳 / R(생성일순)=덜 알려진 신규·숨은 곳.
  * - firstimage2(2번째 대표사진)가 있는 곳 = 사진이 여러 장인 잘 문서화된 곳을 앞으로.
  *   같은 등급 안에서는 셔플해 다양성 유지. (호출부는 이 순서대로 골라 씀)
  */
 export async function fetchCandidates(): Promise<Spot[]> {
   const contentTypeId = pick(CONTENT_TYPES);
   const areaCode = pick(AREA_CODES);
+  // 알려진 곳(Q)과 숨은 곳(R)을 반반 섞어, 인증맛집(featured) 외에 숨은 맛집도 꾸준히 발굴.
+  const arrange = Math.random() < 0.5 ? "Q" : "R";
   const items = await call("areaBasedList2", {
     contentTypeId: String(contentTypeId),
     areaCode: String(areaCode),
-    arrange: "Q", // 최근 수정순(관리되는 알려진 곳 우선) + 대표이미지 있는 항목만
+    arrange,
     numOfRows: "100",
     pageNo: "1",
   });

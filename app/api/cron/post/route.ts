@@ -1,8 +1,7 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchOverview, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
-import { generateCaption, generateLandmarkCaption } from "@/lib/caption";
-import { pickWikimediaSpot } from "@/lib/wikimedia";
+import { generateCaption } from "@/lib/caption";
 import { pickThemePost, buildThemeCaption } from "@/lib/pexels";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
@@ -199,24 +198,8 @@ async function runCron(forceFeatured = false) {
     }
   }
 
-  // 위키미디어 여행지 회차: 확률적으로 유명 여행지를 CC 사진으로 발행(위치 공개형).
-  // WIKI_EVERY(기본 5)분의 1 확률. 실패 시 다음 경로로.
-  const WIKI_PROB = 1 / Number(process.env.WIKI_EVERY || 5);
-  if (Math.random() < WIKI_PROB) {
-    try {
-      const w = await pickWikimediaSpot(MIN_IMAGES);
-      if (w) {
-        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [w.spot.contentId] });
-        if (dup.rows.length === 0) {
-          const caption = await generateLandmarkCaption(w.spot, w.credit);
-          if (!caption) return { skipped: true, reason: "AI 한도 소진 — 이번 회차 발행 건너뜀" };
-          return await publishAndSave(w.spot, caption, null);
-        }
-      }
-    } catch (e) {
-      console.error("[wikimedia] 발행 오류(다음 경로로):", e);
-    }
-  }
+  // (여행지·명소 소개 게시물은 제거됨 — 맛집 전문 계정, 2026-07 사용자 결정.
+  //  기존 위키미디어 랜드마크 발행 로직 삭제)
 
   // 카카오 발굴 회차: 확률적으로 카카오맵으로 "지역+메뉴" 맛집을 발굴(TourAPI 사진 연결).
   // TourAPI 자체 후보와 다른 맛집을 섞어 다양성을 높임. 키 없거나 실패 시 일반 발행.
