@@ -675,7 +675,11 @@ async function main() {
           "-y", "-loop", "1", "-i", reelCover, "-t", "8", "-r", "30",
           "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
           "-filter_complex",
-          "[0:v]scale=1296:2304,zoompan=z='min(zoom+0.00025,1.06)':d=240:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]",
+          // 지터(흔들림) 방지: 작은 입력에서 zoompan을 돌리면 줌·팬 위치가 매 프레임
+          // 정수 픽셀로 반올림돼 이미지가 미세하게 떨린다. 입력을 3배(3240x5760)로 먼저
+          // 키운 뒤 줌하면 한 픽셀 이동이 출력에선 1/3픽셀이라 매끄럽게 이어진다.
+          // 줌 폭도 잔잔하게(8초에 약 1.0→1.06) 낮춰 글자 왜곡을 줄인다.
+          "[0:v]scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.00025,1.20)':d=240:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]",
           "-map", "[v]", "-map", "1:a",
           "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
           "-movflags", "+faststart", reelMp4,
