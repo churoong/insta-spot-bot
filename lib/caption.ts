@@ -23,8 +23,6 @@ export interface CaptionOpts {
   featuredBy?: string;
   /** 사진 출처 라인 교체 (예: 위키미디어 CC 크레딧). 없으면 TourAPI 출처. */
   sourceLine?: string;
-  /** 위치를 공개하는 게시물(여행지 등). true면 본문·해시태그에 장소·지역명 허용, DM 유도 없음 */
-  reveal?: boolean;
   /** 대표 메뉴 (정보 고도화·저장 유발용, 위치 아님) */
   menu?: string;
   /** 영업시간 */
@@ -81,7 +79,12 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
 
   // 안전장치: 규칙 위반이면 발행하지 않음 (템플릿 폴백 없음)
   const missingKeyword = !body.includes(keyword());
-  const leakedName = body.includes(spot.name);
+  // 상호명은 대괄호·공백 제거 후 비교 — "홍길동막국수[본점]"의 본체 "홍길동막국수"가
+  // 본문에 나와도 잡아냄 (정확일치만 하면 브랜치·괄호 표기를 놓침).
+  const nameCore = spot.name.replace(/\[[^\]]*\]/g, "").replace(/\s+/g, "");
+  const leakedName =
+    body.includes(spot.name) ||
+    (nameCore.length >= 2 && body.replace(/\s+/g, "").includes(nameCore));
   const leakedLocation = leaksLocation(body, spot.address);
   if (!body || missingKeyword || leakedName || leakedLocation) {
     throw new Error(`캡션 규칙 위반 (provider=${r.provider}, keyword=${!missingKeyword}, name누출=${leakedName}, 위치누출=${leakedLocation})`);
@@ -152,7 +155,11 @@ function regionHint(address: string): { sido: string; gu: string } {
   const parts = (address ?? "").split(/\s+/);
   const sido = SIDO_SHORT[parts[0] ?? ""] ?? "";
   if (!sido) return { sido: "", gu: "" };
-  const gu = /(구|시|군)$/.test(parts[1] ?? "") ? parts[1] : "";
+  let gu = /(구|시|군)$/.test(parts[1] ?? "") ? (parts[1] as string) : "";
+  // 해시태그 탐색량을 위해 접미사 제거(강남구→강남). 단 제거 후 1글자가 되면(중구→중)
+  // 모호해지므로 원형 유지.
+  const guBase = gu.replace(/(구|시|군)$/, "");
+  if (guBase.length >= 2) gu = guBase;
   return { sido, gu };
 }
 

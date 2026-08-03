@@ -94,6 +94,7 @@ async function main() {
 function curlUpload(args) {
   return new Promise((resolve, reject) => {
     const p = spawn("curl", ["-s", "--max-time", "120", ...args]);
+    p.on("error", reject); // spawn 실패 시 Promise가 안 끝나는 것 방지
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`curl exit ${code}`))));

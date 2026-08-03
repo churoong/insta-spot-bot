@@ -44,6 +44,7 @@ async function composeHook(sharp, imgPath, hook) {
 function sh(cmd, args) {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: ["ignore", "inherit", "inherit"] });
+    p.on("error", reject); // spawn 자체 실패(ENOENT 등) — 없으면 Promise가 영원히 안 끝남
     p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exit ${code}`))));
   });
 }
@@ -101,12 +102,17 @@ async function main() {
   const urls = subject.imageUrls.slice(0, 8);
   const files = [];
   for (let i = 0; i < urls.length; i++) {
-    const res = await fetch(urls[i], { signal: AbortSignal.timeout(20000) });
-    if (!res.ok) continue;
-    const buf = Buffer.from(await res.arrayBuffer());
-    const f = path.join(TMP, `img_${i}.jpg`);
-    fs.writeFileSync(f, buf);
-    files.push(f);
+    try {
+      const res = await fetch(urls[i], { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) continue;
+      const buf = Buffer.from(await res.arrayBuffer());
+      const f = path.join(TMP, `img_${i}.jpg`);
+      fs.writeFileSync(f, buf);
+      files.push(f);
+    } catch (e) {
+      // 한 장 실패로 릴스 전체를 중단하지 않음 (네트워크·타임아웃)
+      console.error(`이미지 ${i} 다운로드 실패(건너뜀):`, String(e).slice(0, 80));
+    }
   }
   if (files.length < 3) throw new Error(`이미지 부족(${files.length}장)`);
   console.log(`이미지 ${files.length}장 다운로드`);
@@ -175,6 +181,7 @@ async function main() {
 function curlUpload(args) {
   return new Promise((resolve, reject) => {
     const p = spawn("curl", ["-s", "--max-time", "120", ...args]);
+    p.on("error", reject); // spawn 실패 시 Promise가 안 끝나는 것 방지
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`curl exit ${code}`))));

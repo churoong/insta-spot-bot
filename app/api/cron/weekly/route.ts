@@ -32,9 +32,11 @@ export async function GET(req: NextRequest) {
 async function runWeekly(dry: boolean) {
   await initDb();
 
-  // 이번 주 식별자 (중복 발행 방지)
+  // 이번 주 식별자 (중복 발행 방지) — ISO 주차 + ISO 주-연도 사용
+  // (연말 ISO 1주차가 다음 해로 넘어갈 때 달력연도를 쓰면 ID가 충돌/누락됨)
   const now = new Date();
-  const weekId = `weekly-${now.getUTCFullYear()}-${getWeek(now)}`;
+  const iso = isoWeek(now);
+  const weekId = `weekly-${iso.year}-${iso.week}`;
   const dup = await db.execute({
     sql: "SELECT 1 FROM posts WHERE content_id = ?",
     args: [weekId],
@@ -60,7 +62,10 @@ async function runWeekly(dry: boolean) {
   }
 
   const rows = top.rows as any[];
-  const images = rows.map((r) => String(r.image_url)).filter(Boolean);
+  const images = rows.map((r) => String(r.image_url)).filter((u) => u && u !== "null");
+  if (images.length === 0) {
+    return { skipped: true, reason: "TOP 게시물에 사용할 이미지가 없음" };
+  }
   const caption = buildWeeklyCaption(rows.length);
 
   // DM 응답용: 웹훅의 buildDmText가 place_name/address를 그대로 출력하므로
@@ -112,11 +117,13 @@ async function runWeekly(dry: boolean) {
   };
 }
 
-/** ISO 주차 번호 */
-function getWeek(d: Date): number {
+/** ISO 8601 주차 + 주-연도 (목요일 기준으로 해가 결정됨) */
+function isoWeek(d: Date): { year: number; week: number } {
   const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const dayNum = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum); // 그 주의 목요일로 이동
+  const isoYear = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return { year: isoYear, week };
 }

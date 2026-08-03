@@ -27,19 +27,23 @@ export async function POST(req: NextRequest) {
   const notes: string[] = [];
   const log = (n: string) => notes.push(n);
 
-  // 서명 검증 (요청이 진짜 Meta에서 왔는지) — 검증 실패 시 차단
+  // 서명 검증 (요청이 진짜 Meta에서 왔는지) — 검증 실패 시 차단.
+  // 시크릿이 설정돼 있지 않으면 '빈 키 HMAC'을 공격자가 계산해 위조할 수 있으므로
+  // fail-closed: 시크릿이 없으면 무조건 차단한다.
   const sig = req.headers.get("x-hub-signature-256") ?? "";
+  const secret = process.env.META_APP_SECRET ?? "";
   let sigOk = false;
-  try {
-    const expected =
-      "sha256=" +
-      crypto.createHmac("sha256", process.env.META_APP_SECRET ?? "").update(raw).digest("hex");
-    sigOk =
-      !!sig &&
-      sig.length === expected.length &&
-      crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
-  } catch {
-    /* 시크릿 없거나 형식 오류 */
+  if (secret) {
+    try {
+      const expected =
+        "sha256=" + crypto.createHmac("sha256", secret).update(raw).digest("hex");
+      sigOk =
+        !!sig &&
+        sig.length === expected.length &&
+        crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+    } catch {
+      /* 형식 오류 → sigOk 유지(false) */
+    }
   }
   if (!sigOk) {
     return NextResponse.json({ error: "bad signature" }, { status: 403 });

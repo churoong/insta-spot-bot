@@ -638,23 +638,36 @@ async function main() {
 
   const slides = [coverUrl, ...slideUrls];
   const caption = buildCaption(theme, places);
+
+  // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커를 먼저 기록.
+  // 발행 성공 후 기록/포인터 갱신이 실패해 Actions가 재시도해도 재발행하지 않게 함.
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const cid = `roundup-${theme.key}-${today}`;
+  const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
+  if (dup.rows.length) {
+    console.log("오늘 이미 발행된 테마 — 스킵:", cid);
+    return;
+  }
+  const insertArgs = [
+    cid,
+    theme.titleResolved,
+    places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
+    "모음집",
+    places[0].imageUrl,
+    JSON.stringify(slides),
+    caption,
+  ];
+  await db.execute({
+    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'publishing')`,
+    args: insertArgs,
+  });
+
   const mediaId = await publishCarousel(slides, caption);
   console.log("✅ 모음집 발행 완료! media id:", mediaId);
-
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   await db.execute({
-    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
-    args: [
-      `roundup-${theme.key}-${today}`,
-      theme.titleResolved,
-      places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
-      "모음집",
-      places[0].imageUrl,
-      JSON.stringify(slides),
-      caption,
-      mediaId,
-    ],
+    sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
+    args: [mediaId, cid],
   });
   // 포인터는 "선택된 테마의 원래 위치 + 1"로 이동 (계절 스킵돼도 로테이션 유지)
   const chosenIdx = all.findIndex((t) => t.key === theme.key);
@@ -684,6 +697,7 @@ async function main() {
           "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
           "-movflags", "+faststart", reelMp4,
         ], { stdio: ["ignore", "ignore", "inherit"] });
+        p.on("error", reject); // spawn 실패 시 Promise가 안 끝나는 것 방지
         p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
       });
       const reelUrl = await uploadPublic(reelMp4);
@@ -713,6 +727,7 @@ async function main() {
 function curlUpload(args) {
   return new Promise((resolve, reject) => {
     const p = spawn("curl", ["-s", "--max-time", "120", ...args]);
+    p.on("error", reject); // spawn 실패 시 Promise가 안 끝나는 것 방지
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`curl exit ${code}`))));

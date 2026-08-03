@@ -259,6 +259,21 @@ async function publishAndSave(
 
   // Meta 토큰이 아직 없으면 드라이런: 캡션·이미지만 저장하고 실제 업로드는 건너뜀.
   const dryRun = !process.env.IG_ACCESS_TOKEN || !process.env.IG_USER_ID;
+
+  // 중복발행 방지: 실제 발행 '전에' dedup 마커(status='publishing')를 먼저 기록한다.
+  // 발행이 성공했는데 이후 기록이 실패하거나(가짜 차단 검증 미스 등) 프로세스가
+  // 죽어도, content_id 행이 이미 있어 다음 크론이 같은 곳을 재발행하지 않는다.
+  if (!dryRun) {
+    await db.execute({
+      sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, status, mapx, mapy, featured_by, map_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'publishing', ?, ?, ?, ?)`,
+      args: [
+        spot.contentId, spot.name, spot.address, spot.category, spot.imageUrl,
+        JSON.stringify(spot.imageUrls), caption, spot.mapx ?? null, spot.mapy ?? null, featuredBy, mapUrl,
+      ],
+    });
+  }
+
   // 인스타에는 4:5 스마트 크롭 + 은은한 보정본을 올리고, DB(image_urls)에는 원본을 유지.
   // 표지(첫 사진)엔 스크롤 정지·저장을 유도하는 훅 텍스트를 얹는다.
   const hook = COVER_HOOKS[Math.floor(Math.random() * COVER_HOOKS.length)];
@@ -266,36 +281,31 @@ async function publishAndSave(
   const mediaId = dryRun ? null : await publishCarousel(publishUrls, caption);
 
   // 새 게시물을 스토리로도 공유 (계정 활동감 유지 — 실패해도 발행에는 영향 없음)
-  // STORY_SHARE=0 으로 끌 수 있음
   if (!dryRun && process.env.STORY_SHARE !== "0") {
     try {
-      // 스토리도 음식 우선 정렬된 첫 사진 사용(대표사진 spot.imageUrl은 간판일 수 있어
-      // 상호·위치가 노출됨). 원본 비율이면 크기가 이상하므로 9:16으로 합성해 발행.
+      // 스토리도 음식 우선 정렬된 첫 사진 사용. 원본 비율이면 크기가 이상하므로 9:16 합성.
       await publishStory(await storyImage(spot.imageUrls[0] || spot.imageUrl));
     } catch (e) {
       console.error("[story] 공유 실패(무시):", String(e).slice(0, 150));
     }
   }
 
-  await db.execute({
-    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy, featured_by, map_url)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [
-      spot.contentId,
-      spot.name,
-      spot.address,
-      spot.category,
-      spot.imageUrl,
-      JSON.stringify(spot.imageUrls),
-      caption,
-      mediaId,
-      dryRun ? "dry_run" : "published",
-      spot.mapx ?? null,
-      spot.mapy ?? null,
-      featuredBy,
-      mapUrl,
-    ],
-  });
+  if (dryRun) {
+    await db.execute({
+      sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status, mapx, mapy, featured_by, map_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'dry_run', ?, ?, ?, ?)`,
+      args: [
+        spot.contentId, spot.name, spot.address, spot.category, spot.imageUrl,
+        JSON.stringify(spot.imageUrls), caption, null, spot.mapx ?? null, spot.mapy ?? null, featuredBy, mapUrl,
+      ],
+    });
+  } else {
+    // 발행 성공 → 마커를 완료 상태로 갱신
+    await db.execute({
+      sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
+      args: [mediaId, spot.contentId],
+    });
+  }
 
   return {
     published: !dryRun,

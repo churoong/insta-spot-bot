@@ -81,7 +81,8 @@ async function graphPost(path: string, body: Record<string, unknown>) {
 async function waitForContainer(id: string) {
   for (let i = 0; i < 15; i++) {
     const status = await fetch(
-      `${GRAPH}/${id}?fields=status_code&access_token=${await getToken()}`
+      `${GRAPH}/${id}?fields=status_code&access_token=${await getToken()}`,
+      { signal: AbortSignal.timeout(15000) }
     ).then((r) => r.json());
     if (status.status_code === "FINISHED") return;
     if (status.status_code === "ERROR") {
@@ -208,7 +209,8 @@ export async function publishReel(videoUrl: string, caption: string): Promise<st
   const id = String(container.id);
   for (let i = 0; i < 80; i++) {
     const status = await fetch(
-      `${GRAPH}/${id}?fields=status_code,status&access_token=${encodeURIComponent(await getToken())}`
+      `${GRAPH}/${id}?fields=status_code,status&access_token=${encodeURIComponent(await getToken())}`,
+      { signal: AbortSignal.timeout(15000) }
     ).then((r) => r.json());
     if (status.status_code === "FINISHED") break;
     if (status.status_code === "ERROR") {
