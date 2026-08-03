@@ -6,9 +6,54 @@
 //   BALANCE_DRY=1 이면 발행 없이 balance-preview.jpg 만 생성.
 
 import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
 
 const DRY = process.env.BALANCE_DRY === "1";
 const FONT = "'Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "balance-"));
+
+function sh(cmd, args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(cmd, args, { stdio: ["ignore", "ignore", "inherit"] });
+    p.on("error", reject);
+    p.on("close", (c) => (c === 0 ? resolve() : reject(new Error(`${cmd} exit ${c}`))));
+  });
+}
+function curlUpload(args) {
+  return new Promise((resolve, reject) => {
+    const p = spawn("curl", ["-s", "--max-time", "120", ...args]);
+    p.on("error", reject);
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", (c) => (c === 0 ? resolve(out.trim()) : reject(new Error(`curl exit ${c}`))));
+  });
+}
+/** 영상 공개 URL 업로드 (Vercel Blob → tmpfiles → catbox) */
+async function uploadVideo(filePath) {
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      const { put } = await import("@vercel/blob");
+      const res = await put(`balance/${Date.now()}.mp4`, fs.readFileSync(filePath), {
+        access: "public", contentType: "video/mp4", token: process.env.BLOB_READ_WRITE_TOKEN,
+      });
+      return res.url;
+    } catch (e) { console.error("Blob 실패, 폴백:", String(e).slice(0, 120)); }
+  }
+  try {
+    const out = await curlUpload(["-F", `file=@${filePath}`, "https://tmpfiles.org/api/v1/upload"]);
+    const page = JSON.parse(out)?.data?.url?.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    if (page) {
+      const html = await fetch(page, { signal: AbortSignal.timeout(20000) }).then((r) => r.text());
+      const m = html.match(/href="(https:\/\/tmpfiles\.org\/dl\/[^"]+\.mp4)"/);
+      if (m) return m[1];
+    }
+  } catch (e) { console.error("tmpfiles 실패, 폴백:", String(e).slice(0, 120)); }
+  const out = await curlUpload(["-F", "reqtype=fileupload", "-F", "userhash=", "-F", `fileToUpload=@${filePath}`, "https://catbox.moe/user/api.php"]);
+  if (out.startsWith("http")) return out;
+  throw new Error("영상 업로드 실패: " + out.slice(0, 150));
+}
 
 // 두 음식 모두 TourAPI 검색 결과가 충분한(≥14건) 조합만 — 사진 신뢰도 확보
 const MATCHUPS = [
@@ -75,10 +120,10 @@ async function tonePhoto(sharp, url, w, h) {
     .toBuffer();
 }
 
-/** 1080x1350 상/하 2분할 + 가운데 VS 뱃지 + 음식명 라벨 합성 */
+/** 1080x1920(9:16 릴스) 상/하 2분할 + 가운데 VS 뱃지 + 음식명 라벨 합성 */
 async function compose(aName, bName, aUrl, bUrl) {
   const sharp = (await import("sharp")).default;
-  const W = 1080, H = 1350, GAP = 20;
+  const W = 1080, H = 1920, GAP = 20;
   const PH = Math.floor((H - GAP) / 2); // 위/아래 사진 높이
   const top = await tonePhoto(sharp, aUrl, W, PH);
   const bot = await tonePhoto(sharp, bUrl, W, H - PH - GAP);
@@ -115,8 +160,7 @@ function caption(a, b) {
 
 async function main() {
   const { db, initDb } = await import("../lib/db.ts");
-  const { publishImage } = await import("../lib/instagram.ts");
-  const { uploadPublicImage } = await import("../lib/upload.ts");
+  const { publishReel } = await import("../lib/instagram.ts");
   await initDb();
 
   // 발행 쿨다운(행동차단 회복) 중이면 쉼
@@ -144,22 +188,39 @@ async function main() {
       continue;
     }
     const img = await compose(a, b, aUrl, bUrl);
+    const cap = caption(a, b);
 
     if (DRY) {
       fs.writeFileSync("balance-preview.jpg", img);
       console.log(`DRY — ${a} vs ${b} → balance-preview.jpg`);
-      console.log(caption(a, b));
+      console.log(cap);
       return;
     }
 
-    const url = await uploadPublicImage(img, "balance");
-    const cap = caption(a, b);
-    const mediaId = await publishImage(url, cap);
-    console.log(`✅ 밸런스 발행: ${a} vs ${b} (media ${mediaId})`);
+    // VS 카드(9:16)를 정지 8초 릴스로 렌더 (텍스트가 많아 줌 없이 안정적으로)
+    const imgFile = path.join(TMP, "vs.jpg");
+    fs.writeFileSync(imgFile, img);
+    const mp4 = path.join(TMP, "vs.mp4");
+    await sh("ffmpeg", [
+      "-y", "-loop", "1", "-i", imgFile, "-t", "8", "-r", "30",
+      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-vf", "scale=1080:1920,format=yuv420p",
+      "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
+      "-movflags", "+faststart", mp4,
+    ]);
+
+    // 발행 전 dedup 마커 → 발행 → 완료 갱신
     await db.execute({
-      sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, ig_media_id, status)
-            VALUES (?, ?, ?, '밸런스', ?, ?, ?, 'published')`,
-      args: [cid, `${a} vs ${b}`, "", url, cap, mediaId],
+      sql: `INSERT INTO posts (content_id, place_name, address, category, caption, status)
+            VALUES (?, ?, '', '밸런스', ?, 'publishing')`,
+      args: [cid, `${a} vs ${b}`, cap],
+    });
+    const url = await uploadVideo(mp4);
+    const mediaId = await publishReel(url, cap);
+    console.log(`✅ 밸런스 릴스 발행: ${a} vs ${b} (media ${mediaId})`);
+    await db.execute({
+      sql: `UPDATE posts SET ig_media_id = ?, image_url = ?, status = 'published' WHERE content_id = ?`,
+      args: [mediaId, url, cid],
     });
     return;
   }

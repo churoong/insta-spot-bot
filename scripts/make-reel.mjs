@@ -51,52 +51,38 @@ function sh(cmd, args) {
 
 async function main() {
   const { db, initDb } = await import("../lib/db.ts");
-  const { fetchCandidates, fetchQuizImages, fetchOverview, MIN_IMAGES } = await import("../lib/tourapi.ts");
-  const { generateCaption, buildReelCaption } = await import("../lib/caption.ts");
+  const { fetchCandidates, fetchByFoodKeyword, fetchQuizImages, fetchOverview, fetchFoodInfo } = await import("../lib/tourapi.ts");
+  const { generateCaption } = await import("../lib/caption.ts");
+  const { pickPerformingKeyword } = await import("../lib/performance.ts");
   const { publishReel } = await import("../lib/instagram.ts");
   await initDb();
 
-  // 1) 대상 선정: 지난 14일 인기(좋아요+댓글×3) 1위 중 아직 릴스 안 만든 곳 우선
+  // 대상 선정: 아직 릴스로 안 만든 새 맛집을 발굴(음식 사진 1장 이상).
+  // 키워드(성과 가중)/지역 발굴을 반반 섞어 씀. (전 게시물이 릴스이므로 이게 주 발행)
   let subject = null;
-  const pop = await db.execute(
-    `SELECT content_id, place_name, address, category, image_urls,
-            (COALESCE(like_count,0)+COALESCE(comment_count,0)*3) AS score
-     FROM posts
-     WHERE status='published' AND category NOT IN ('주간베스트','릴스')
-       AND created_at >= datetime('now','-14 days')
-       AND NOT EXISTS (SELECT 1 FROM posts p2 WHERE p2.content_id = 'reel-' || posts.content_id)
-     ORDER BY score DESC, id DESC LIMIT 1`
-  );
-  if (pop.rows.length && Number(pop.rows[0].score) > 0) {
-    const r = pop.rows[0];
-    let imgs = [];
-    try { imgs = JSON.parse(r.image_urls || "[]"); } catch {}
-    if (imgs.length >= 3) {
-      subject = { contentId: String(r.content_id), name: r.place_name, address: r.address, category: r.category, imageUrls: imgs, overview: "" };
-      console.log("인기글 기반 릴스:", r.place_name, `(score ${r.score})`);
+  outer: for (let a = 0; a < 4; a++) {
+    const cands = Math.random() < 0.5
+      ? await fetchByFoodKeyword(await pickPerformingKeyword())
+      : await fetchCandidates();
+    for (const s of cands) {
+      const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id IN (?, ?)", args: [s.contentId, "reel-" + s.contentId] });
+      if (dup.rows.length) continue;
+      const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
+      if (imgs.length < 1) continue; // 음식 사진이 없으면 스킵
+      s.imageUrls = imgs;
+      s.overview = await fetchOverview(s.contentId);
+      subject = s;
+      break outer;
     }
   }
+  if (!subject) throw new Error("릴스 대상 맛집을 찾지 못함");
 
-  // 2) 인기글이 없으면 신선한 장소 선정
-  if (!subject) {
-    outer: for (let a = 0; a < 4; a++) {
-      const cands = await fetchCandidates();
-      for (const s of cands.sort(() => Math.random() - 0.5)) {
-        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id IN (?, ?)", args: [s.contentId, "reel-" + s.contentId] });
-        if (dup.rows.length) continue;
-        const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
-        if (imgs.length < MIN_IMAGES) continue;
-        s.imageUrls = imgs;
-        s.overview = await fetchOverview(s.contentId);
-        subject = s;
-        break outer;
-      }
-    }
-  }
-  if (!subject) throw new Error("릴스 대상 장소를 찾지 못함");
-
-  // 3) 캡션: 릴스 전용 훅 + 지역 해시태그 (본문 위치 비공개)
-  const caption = buildReelCaption(subject.category, subject.address);
+  // 캡션: 캐러셀과 동일한 풍부한 캡션(위치 숨김 + 메뉴·영업시간 + SEO 해시태그 + DM 유도).
+  // 모든 AI 소진 시 null → 저품질 발행 대신 스킵.
+  const info = await fetchFoodInfo(subject.contentId);
+  const cap = await generateCaption(subject, { menu: info.menu, hours: info.hours });
+  if (!cap) { console.log("⏭️ AI 한도 소진 — 릴스 스킵"); return; }
+  const caption = cap.caption;
 
   // 4) 이미지 다운로드 (최대 8장)
   const urls = subject.imageUrls.slice(0, 8);
@@ -114,34 +100,42 @@ async function main() {
       console.error(`이미지 ${i} 다운로드 실패(건너뜀):`, String(e).slice(0, 80));
     }
   }
-  if (files.length < 3) throw new Error(`이미지 부족(${files.length}장)`);
+  if (files.length < 1) throw new Error("음식 이미지 없음");
   console.log(`이미지 ${files.length}장 다운로드`);
 
   // 5) ffmpeg 세로(1080x1920) 클립 → concat + 무음 오디오.
-  //    - 첫 클립: 훅 배너 합성 + 정지 2.4초(문구 안정적으로 읽히게)
-  //    - 이후 클립: 잔잔한 줌인 2.0초(정지 슬라이드쇼는 이탈률↑ → 모션으로 리텐션↑)
-  //      지터 방지: 큰 크기로 업스케일 후 zoompan(서브픽셀 이동 매끄럽게)
+  //    - 첫 클립: 훅 배너 합성. 사진이 1장뿐이면 그 한 장에 잔잔한 줌(5.5초).
+  //      여러 장이면 훅 정지 2.4초 + 나머지 줌인 2.0초씩(모션으로 리텐션↑).
+  //    - 지터 방지: 큰 크기로 업스케일 후 zoompan(서브픽셀 이동 매끄럽게)
   const sharp = (await import("sharp")).default;
   const hook = HOOKS[Math.floor(Math.random() * HOOKS.length)];
   console.log("훅:", hook);
+  const single = files.length === 1;
+  // 잔잔한 줌 클립 (초 단위 길이)
+  const zoomClip = (inFile, out, secs) =>
+    sh("ffmpeg", [
+      "-y", "-loop", "1", "-i", inFile, "-t", String(secs), "-r", "30",
+      "-vf",
+      `scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0006,1.15)':d=${Math.round(secs * 30)}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p`,
+      "-c:v", "libx264", "-preset", "veryfast", out,
+    ]);
   const clips = [];
+  const hookImg = path.join(TMP, "hook.jpg");
+  fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
   for (let i = 0; i < files.length; i++) {
     const out = path.join(TMP, `clip_${i}.mp4`);
-    if (i === 0) {
-      const hookImg = path.join(TMP, "hook.jpg");
-      fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
+    if (i === 0 && single) {
+      // 한 장뿐: 훅 얹은 사진을 5.5초 줌
+      await zoomClip(hookImg, out, 5.5);
+    } else if (i === 0) {
+      // 훅 정지 컷 (문구 안정적으로 읽히게)
       await sh("ffmpeg", [
         "-y", "-loop", "1", "-i", hookImg, "-t", "2.4", "-r", "30",
         "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p",
         "-c:v", "libx264", "-preset", "veryfast", out,
       ]);
     } else {
-      await sh("ffmpeg", [
-        "-y", "-loop", "1", "-i", files[i], "-t", "2.0", "-r", "30",
-        "-vf",
-        "scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0008,1.15)':d=60:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p",
-        "-c:v", "libx264", "-preset", "veryfast", out,
-      ]);
+      await zoomClip(files[i], out, 2.0);
     }
     clips.push(out);
   }
@@ -161,18 +155,27 @@ async function main() {
   const videoUrl = await uploadPublic(reel);
   console.log("업로드 URL:", videoUrl);
 
-  // 7) 릴스 발행
+  // 7) 중복발행 방지: 발행 '전에' dedup 마커 기록. DM용 위치정보(mapx/mapy/map_url)도 저장
+  //    (웹훅 '어디야' → place_name/address/map_url로 DM 발송).
+  const { searchMapUrl } = await import("../lib/kakao.ts");
+  const cid = "reel-" + subject.contentId;
+  const region = String(subject.address ?? "").split(/\s+/).slice(0, 2).join(" ");
+  const mapUrl = searchMapUrl(subject.name, region);
+  await db.execute({
+    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, status, mapx, mapy, map_url)
+          VALUES (?, ?, ?, '릴스', ?, ?, ?, 'publishing', ?, ?, ?)`,
+    args: [
+      cid, subject.name, subject.address, urls[0], JSON.stringify(urls), caption,
+      subject.mapx ?? null, subject.mapy ?? null, mapUrl,
+    ],
+  });
+
+  // 8) 릴스 발행 → 성공 시 완료 상태로 갱신
   const mediaId = await publishReel(videoUrl, caption);
   console.log("✅ 릴스 발행 완료! media id:", mediaId);
-
-  // 8) Turso 기록 (dedup용 reel-<contentId>)
   await db.execute({
-    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, ig_media_id, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'published')`,
-    args: [
-      "reel-" + subject.contentId, subject.name, subject.address, "릴스",
-      urls[0], JSON.stringify(urls), caption, mediaId,
-    ],
+    sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
+    args: [mediaId, cid],
   });
   console.log("완료:", subject.name);
 }

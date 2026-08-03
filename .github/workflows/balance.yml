@@ -13,10 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 폰트 설치 (한글 텍스트 합성용)
+      - name: 폰트 + ffmpeg 설치 (한글 텍스트 합성 + VS 릴스 렌더용)
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk fonts-nanum
+          sudo apt-get install -y fonts-noto-cjk fonts-nanum ffmpeg
 
       - uses: actions/setup-node@v4
         with:

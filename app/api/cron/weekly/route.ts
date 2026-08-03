@@ -45,6 +45,12 @@ async function runWeekly(dry: boolean) {
     return { skipped: true, reason: "이번 주 베스트는 이미 발행됨" };
   }
 
+  // 릴스 전용 모드: 주간 베스트는 캐러셀이라 Vercel(ffmpeg 없음)에서 릴스로 못 만듦.
+  // 릴스 전용 정책에선 발행하지 않는다. FEED_CAROUSEL=1 로 다시 켤 수 있음.
+  if (process.env.FEED_CAROUSEL !== "1") {
+    return { skipped: true, reason: "릴스 전용 모드 — 주간 캐러셀 발행 안 함" };
+  }
+
   // 지난 7일 발행 게시물 중 반응(좋아요 + 댓글×3) TOP3 선정
   const top = await db.execute(
     `SELECT place_name, address, category, image_url,

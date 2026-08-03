@@ -534,7 +534,6 @@ function buildCaption(theme, places) {
 
 async function main() {
   const { db, initDb } = await import("../lib/db.ts");
-  const { publishCarousel } = await import("../lib/instagram.ts");
   const themesData = JSON.parse(
     fs.readFileSync(new URL("../data/roundup-themes.json", import.meta.url), "utf8")
   );
@@ -599,48 +598,19 @@ async function main() {
   }
   console.log(`음식 사진 교체: ${places.filter((p) => p.foodPicked).length}/${places.length}곳`);
 
-  // 표지 + 이름표 슬라이드 합성
-  const cover = await composeCover(theme, places);
-  const slideFiles = [];
-  for (let i = 0; i < Math.min(9, places.length); i++) {
-    try {
-      slideFiles.push(await composeSlide(places[i], i + 1));
-    } catch (e) {
-      console.error(`슬라이드 ${i + 1} 합성 실패(원본 사진 사용):`, String(e).slice(0, 100));
-      slideFiles.push(null);
-    }
-  }
+  // 릴스 전용 모드: 리스트형 세로 표지(1080x1920)를 만들어 '릴스'로 발행한다.
+  // (캐러셀·슬라이드는 더 이상 만들지 않음)
+  const caption = buildCaption(theme, places);
+  const reelCover = await composeReelCover(theme, places);
 
   if (DRY) {
-    fs.copyFileSync(cover, "roundup-preview.jpg");
-    try { fs.copyFileSync(await composeReelCover(theme, places), "roundup-reel-preview.jpg"); } catch (e) { console.error("릴스표지 미리보기 실패:", String(e).slice(0,100)); }
-    if (slideFiles[0]) fs.copyFileSync(slideFiles[0], "roundup-slide-preview.jpg");
-    console.log("DRY 모드 — 발행 생략. roundup-preview.jpg / roundup-slide-preview.jpg 저장");
-    console.log(buildCaption(theme, places));
+    fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
+    console.log("DRY 모드 — 발행 생략. roundup-reel-preview.jpg 저장");
+    console.log(caption);
     return;
   }
 
-  // 업로드: 표지 + 슬라이드 (합성 실패분은 원본 URL)
-  const coverUrl = await uploadPublic(cover);
-  console.log("표지 URL:", coverUrl);
-  const slideUrls = [];
-  for (let i = 0; i < slideFiles.length; i++) {
-    if (slideFiles[i]) {
-      try {
-        slideUrls.push(await uploadPublic(slideFiles[i]));
-        continue;
-      } catch (e) {
-        console.error(`슬라이드 ${i + 1} 업로드 실패(원본 사용):`, String(e).slice(0, 100));
-      }
-    }
-    slideUrls.push(places[i].imageUrl);
-  }
-
-  const slides = [coverUrl, ...slideUrls];
-  const caption = buildCaption(theme, places);
-
-  // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커를 먼저 기록.
-  // 발행 성공 후 기록/포인터 갱신이 실패해 Actions가 재시도해도 재발행하지 않게 함.
+  // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커 선기록.
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const cid = `roundup-${theme.key}-${today}`;
   const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
@@ -648,78 +618,50 @@ async function main() {
     console.log("오늘 이미 발행된 테마 — 스킵:", cid);
     return;
   }
-  const insertArgs = [
-    cid,
-    theme.titleResolved,
-    places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
-    "모음집",
-    places[0].imageUrl,
-    JSON.stringify(slides),
-    caption,
-  ];
   await db.execute({
-    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'publishing')`,
-    args: insertArgs,
+    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status)
+          VALUES (?, ?, ?, '모음집', ?, ?, 'publishing')`,
+    args: [
+      cid,
+      theme.titleResolved,
+      places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
+      places[0].imageUrl,
+      caption,
+    ],
   });
 
-  const mediaId = await publishCarousel(slides, caption);
-  console.log("✅ 모음집 발행 완료! media id:", mediaId);
+  // 리스트 표지 → 잔잔한 줌인 8초 세로 릴스 렌더
+  const reelMp4 = path.join(TMP, "roundup-reel.mp4");
+  await new Promise((resolve, reject) => {
+    const p = spawn("ffmpeg", [
+      "-y", "-loop", "1", "-i", reelCover, "-t", "8", "-r", "30",
+      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-filter_complex",
+      "[0:v]scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.00025,1.20)':d=240:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]",
+      "-map", "[v]", "-map", "1:a",
+      "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
+      "-movflags", "+faststart", reelMp4,
+    ], { stdio: ["ignore", "ignore", "inherit"] });
+    p.on("error", reject);
+    p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
+  });
+
+  const reelUrl = await uploadPublic(reelMp4);
+  console.log("모음집 릴스 업로드:", reelUrl);
+  const { publishReel } = await import("../lib/instagram.ts");
+  const mediaId = await publishReel(reelUrl, caption);
+  console.log("✅ 모음집 릴스 발행:", mediaId);
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
     args: [mediaId, cid],
   });
-  // 포인터는 "선택된 테마의 원래 위치 + 1"로 이동 (계절 스킵돼도 로테이션 유지)
+
+  // 포인터 이동 (계절 스킵돼도 로테이션 유지)
   const chosenIdx = all.findIndex((t) => t.key === theme.key);
   await db.execute({
     sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('roundup_idx', ?, datetime('now'))",
     args: [String((chosenIdx + 1) % all.length)],
   });
-
-  // 표지를 릴스로도 발행 (리스트형 릴스 = 도달·저장 효자). ROUNDUP_REEL=0 으로 끔.
-  if (process.env.ROUNDUP_REEL !== "0") {
-    try {
-      const { publishReel } = await import("../lib/instagram.ts");
-      // 릴스 전용 세로 표지(1080x1920, 음식 사진 풀블리드) + 잔잔한 줌인 8초
-      const reelCover = await composeReelCover(theme, places);
-      const reelMp4 = path.join(TMP, "cover-reel.mp4");
-      await new Promise((resolve, reject) => {
-        const p = spawn("ffmpeg", [
-          "-y", "-loop", "1", "-i", reelCover, "-t", "8", "-r", "30",
-          "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-          "-filter_complex",
-          // 지터(흔들림) 방지: 작은 입력에서 zoompan을 돌리면 줌·팬 위치가 매 프레임
-          // 정수 픽셀로 반올림돼 이미지가 미세하게 떨린다. 입력을 3배(3240x5760)로 먼저
-          // 키운 뒤 줌하면 한 픽셀 이동이 출력에선 1/3픽셀이라 매끄럽게 이어진다.
-          // 줌 폭도 잔잔하게(8초에 약 1.0→1.06) 낮춰 글자 왜곡을 줄인다.
-          "[0:v]scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.00025,1.20)':d=240:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]",
-          "-map", "[v]", "-map", "1:a",
-          "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
-          "-movflags", "+faststart", reelMp4,
-        ], { stdio: ["ignore", "ignore", "inherit"] });
-        p.on("error", reject); // spawn 실패 시 Promise가 안 끝나는 것 방지
-        p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
-      });
-      const reelUrl = await uploadPublic(reelMp4);
-      console.log("표지 릴스 업로드:", reelUrl);
-      const reelId = await publishReel(reelUrl, caption);
-      console.log("✅ 표지 릴스 발행:", reelId);
-      await db.execute({
-        sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, ig_media_id, status)
-              VALUES (?, ?, ?, '릴스', ?, ?, ?, 'published')`,
-        args: [
-          `roundup-reel-${theme.key}-${today}`,
-          theme.titleResolved + " (릴스)",
-          places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
-          places[0].imageUrl,
-          caption,
-          reelId,
-        ],
-      });
-    } catch (e) {
-      console.error("표지 릴스 실패(모음집은 정상 발행됨):", String(e).slice(0, 200));
-    }
-  }
 
   console.log("완료:", theme.titleResolved);
 }

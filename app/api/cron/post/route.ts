@@ -154,6 +154,15 @@ async function runCron(forceFeatured = false) {
     }
   }
 
+  // 🎬 릴스 전용 모드(2026-07 사용자 결정): 모든 피드 게시물을 릴스로만 발행한다.
+  // 릴스는 영상 인코딩(ffmpeg)이 필요해 Vercel 서버리스에서 만들 수 없으므로,
+  // 피드 발행은 GitHub Actions의 릴스 파이프라인(scripts/make-reel.mjs)이 담당한다.
+  // 이 Vercel 크론은 유지보수(토큰 갱신·반응 수집·팔로워 스냅샷)만 수행하고 캐러셀은
+  // 발행하지 않는다. FEED_CAROUSEL=1 로 캐러셀 발행을 다시 켤 수 있음.
+  if (process.env.FEED_CAROUSEL !== "1") {
+    return { skipped: true, reason: "릴스 전용 모드 — 캐러셀 발행 안 함(피드는 Actions 릴스)" };
+  }
+
   // 일일 발행 한도 체크 (Graph API 한도 50/일, 기본 24/일)
   // dry_run(미리보기)은 실제 인스타 발행이 아니므로 제외
   const limit = Number(process.env.POSTS_PER_DAY_LIMIT || 24);
