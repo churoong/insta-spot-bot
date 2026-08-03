@@ -1,6 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetchQuizImages, MIN_IMAGES } from "@/lib/tourapi";
+import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetchQuizImages } from "@/lib/tourapi";
 import { generateCaption } from "@/lib/caption";
 import { publishCarousel, publishStory, maybeRefreshToken, fetchEngagement, fetchFollowers } from "@/lib/instagram";
 import { pickFeatured } from "@/lib/featured";
@@ -223,9 +223,11 @@ async function runCron(forceFeatured = false) {
       });
       if (dup.rows.length > 0) continue;
 
-      // 캐러셀용 이미지 수집 — 최소 장수 미달이면 이 후보는 건너뜀
+      // 음식 사진만 수집(간판·내부·외관 제외). 음식 사진이 0장이면 이 후보는 건너뜀.
+      // 1장이면 단일 이미지, 2장 이상이면 캐러셀로 발행(TourAPI 식당은 순수 음식
+      // 사진이 1장뿐인 곳이 많아 최소 3장을 요구하면 대부분 스킵됨).
       spot.imageUrls = await fetchQuizImages(spot.contentId, spot.imageUrl, spot.category);
-      if (spot.imageUrls.length < MIN_IMAGES) continue;
+      if (spot.imageUrls.length < 1) continue;
 
       spot.overview = await fetchOverview(spot.contentId);
       const info = await fetchFoodInfo(spot.contentId);

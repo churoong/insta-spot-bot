@@ -282,27 +282,15 @@ export async function fetchQuizImages(
         }
       }
       if (valid.length > 1) {
-        const goodDesc =
-          category === "맛집"
-            ? "음식·요리가 크고 먹음직스럽게 나온"
-            : "풍경·볼거리가 시원하게 잘 담긴";
-        const text =
-          (await geminiText(
-            [
-              {
-                text: `가게/장소 사진 ${valid.length}장이야(1번부터). 두 가지를 JSON으로만 답해줘.
-- exclude: 간판·상호명·현판·메뉴판 등 '가게 이름 글자'가 크게 보이는 사진 번호 배열
-  (상호·위치가 드러나므로 반드시 제외). 심하게 흐릿하거나 어두운 사진도 포함. 없으면 [].
-  ※ 내부 인테리어·분위기·테이블 사진은 이름 글자만 없으면 제외하지 마.
-- best: 나머지 중 ${goodDesc} 보기 좋은 사진을 좋은 순서(가장 좋은 게 앞)로 나열한 번호 배열
-형식: {"exclude":[..],"best":[..]}`,
-              },
-              ...parts,
-            ],
-            200
-          )) ?? "";
+        // 맛집: 오직 '음식(요리)' 사진만. 간판·내부·외관·메뉴판·사람은 전부 제외.
+        // 여행지(현재 미사용): 풍경 위주.
+        const isFood = category === "맛집";
+        const promptText = isFood
+          ? `가게 사진 ${valid.length}장이야(1번부터). 음식(요리·메뉴)이 접시나 그릇에 담겨 먹음직스럽게 보이는 사진의 번호만 골라, 제일 먹음직스러운 순서로 JSON 배열로 답해. ⚠️간판·상호·메뉴판·건물 외관·내부 인테리어·테이블·사람 사진은 음식이 조금 보여도 전부 제외. 음식이 주인공인 사진만. 없으면 []. 형식: {"food":[..]}`
+          : `장소 사진 ${valid.length}장이야(1번부터). 풍경·볼거리가 멋지게 담긴 사진 번호만 좋은 순서로. 없으면 []. 형식: {"food":[..]}`;
+        const text = (await geminiText([{ text: promptText }, ...parts], 200)) ?? "";
         const m = text.match(/\{[\s\S]*\}/);
-        let parsed: { exclude?: number[]; best?: number[] } | null = null;
+        let parsed: { food?: number[] } | null = null;
         if (m) {
           try {
             parsed = JSON.parse(m[0]);
@@ -311,24 +299,29 @@ export async function fetchQuizImages(
           }
         }
         if (parsed) {
-          const excl = new Set((parsed.exclude ?? []).map(Number));
-          const bestOrder = (parsed.best ?? []).map(Number).filter((n) => n >= 1 && n <= valid.length);
-          const keptIdx = valid.map((_, i) => i + 1).filter((n) => !excl.has(n));
-          // best 순서를 앞에 두고, 언급 안 된 나머지는 원래 순서로 뒤에 붙임
+          // ⚠️ 비전이 판정에 성공하면 그 결과를 신뢰 — 음식으로 지목된 사진만 사용.
+          // (음식이 부족하면 빈/소수 반환 → 상위에서 MIN_IMAGES 미달로 스킵. 간판·내부
+          //  사진이 표지로 나가거나 위치가 노출되는 것보다 발행을 건너뛰는 게 낫다.)
+          const foodOrder = (parsed.food ?? [])
+            .map(Number)
+            .filter((n) => n >= 1 && n <= valid.length);
           const seen = new Set<number>();
           const ordered: number[] = [];
-          for (const n of bestOrder) if (!excl.has(n) && !seen.has(n)) { ordered.push(n); seen.add(n); }
-          for (const n of keptIdx) if (!seen.has(n)) { ordered.push(n); seen.add(n); }
-          // ⚠️ 비전이 판정에 성공하면 그 결과를 신뢰 — 제외된 간판을 다시 넣지 않는다.
-          // 좋은 사진이 부족하면 적은 수/빈 배열을 반환 → 상위에서 MIN_IMAGES 미달로 스킵
-          // (간판·상호가 표지로 나가 위치가 노출되는 것보다 발행을 건너뛰는 게 낫다).
+          for (const n of foodOrder) if (!seen.has(n)) { ordered.push(n); seen.add(n); }
           return ordered.map((n) => valid[n - 1].url).slice(0, MAX_IMAGES);
         }
       }
     } catch {
-      /* 비전 호출 자체 실패 시에만 라벨 필터 결과로 폴백 */
+      /* 비전 호출 실패 → 아래에서 빈 배열 반환(발행 스킵) */
     }
   }
+  // 비전이 음식 사진을 확인하지 못했으면(키 없음·호출 실패·이미지 부족) 빈 배열 반환.
+  // 원본(간판·내부 포함)을 표지로 내보내면 위치가 노출되므로 발행을 건너뛰는 게 안전하다.
+  if (process.env.GEMINI_API_KEY) {
+    console.warn("[quiz] 비전 음식 판별 실패 → 이미지 없음 처리(발행 스킵):", contentId);
+    return [];
+  }
+  // (키 자체가 없는 개발 환경에서만) 라벨 필터 결과로 폴백
   return cands.map((c) => c.url).slice(0, MAX_IMAGES);
 }
 
