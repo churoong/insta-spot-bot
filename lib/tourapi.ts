@@ -414,16 +414,23 @@ export async function fetchFoodInfo(contentId: string): Promise<FoodInfo> {
     const trimJoin = (s: string) =>
       s.split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean).slice(0, 4).join(", ");
     const menu = trimJoin(clean(it.firstmenu) || clean(it.treatmenu));
-    // 영업시간 정리: 앞머리 불릿 제거 + 세그먼트 구분 대시(뒤에 한글이 오는 "-")는
-    // " · "로 바꾸되, 시간범위 대시("10:00 - 22:00", 뒤가 숫자)는 그대로 보존.
-    const hours = clean(it.opentimefood)
+    // 영업시간 정리
+    //  - "[평일]-" 같은 대괄호 표기를 평범한 텍스트로 풀고
+    //  - 세그먼트 구분 대시(뒤에 한글)는 " · "로. 시간범위 대시("10:00 - 22:00")는 보존
+    //  - 길면 중간에서 잘리지 않게 마지막 완전한 구분점까지만 남김
+    let hours = clean(it.opentimefood)
+      .replace(/\[([^\]]+)\]\s*-?\s*/g, " $1 ") // [평일]- → 평일
       .replace(/^[-·•\s]+/, "")
       .replace(/\s*-\s*(?=[가-힣])/g, " · ")
-      // 용어 통일
       .replace(/준비\s*시간/g, "브레이크타임")
       .replace(/마지막\s*주문/g, "라스트오더")
-      .slice(0, 60)
+      .replace(/\s+/g, " ")
       .trim();
+    if (hours.length > 60) {
+      const cut = hours.slice(0, 60);
+      const sep = cut.lastIndexOf(" · ");
+      hours = (sep > 20 ? cut.slice(0, sep) : cut).trim();
+    }
     return { menu: menu.slice(0, 60), hours };
   } catch {
     return { menu: "", hours: "" };
