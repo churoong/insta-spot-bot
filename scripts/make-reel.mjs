@@ -59,20 +59,33 @@ async function main() {
 
   // 대상 선정: 아직 릴스로 안 만든 새 맛집을 발굴(음식 사진 1장 이상).
   // 키워드(성과 가중)/지역 발굴을 반반 섞어 씀. (전 게시물이 릴스이므로 이게 주 발행)
+  // TourAPI가 순간적으로 죽어도(연결 타임아웃 등) 회차를 통째로 날리지 않도록
+  // 시도마다 예외를 삼키고 다음 소스로 넘어간다.
   let subject = null;
-  outer: for (let a = 0; a < 4; a++) {
-    const cands = Math.random() < 0.5
-      ? await fetchByFoodKeyword(await pickPerformingKeyword())
-      : await fetchCandidates();
+  outer: for (let a = 0; a < 5; a++) {
+    let cands = [];
+    try {
+      cands = Math.random() < 0.5
+        ? await fetchByFoodKeyword(await pickPerformingKeyword())
+        : await fetchCandidates();
+    } catch (e) {
+      console.error(`후보 수집 실패(시도 ${a + 1}):`, String(e).slice(0, 120));
+      await new Promise((r) => setTimeout(r, 3000));
+      continue;
+    }
     for (const s of cands) {
-      const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id IN (?, ?)", args: [s.contentId, "reel-" + s.contentId] });
-      if (dup.rows.length) continue;
-      const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
-      if (imgs.length < 1) continue; // 음식 사진이 없으면 스킵
-      s.imageUrls = imgs;
-      s.overview = await fetchOverview(s.contentId);
-      subject = s;
-      break outer;
+      try {
+        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id IN (?, ?)", args: [s.contentId, "reel-" + s.contentId] });
+        if (dup.rows.length) continue;
+        const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
+        if (imgs.length < 1) continue; // 음식 사진이 없으면 스킵
+        s.imageUrls = imgs;
+        s.overview = await fetchOverview(s.contentId);
+        subject = s;
+        break outer;
+      } catch (e) {
+        console.error(`후보 처리 실패(건너뜀) ${s.name}:`, String(e).slice(0, 100));
+      }
     }
   }
   if (!subject) throw new Error("릴스 대상 맛집을 찾지 못함");

@@ -53,6 +53,11 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+/**
+ * TourAPI 호출 — 일시적 네트워크 오류(연결 타임아웃·5xx)에 재시도.
+ * data.go.kr가 종종 순간적으로 연결을 거부하는데, 재시도가 없으면 그 한 번의 실패로
+ * 발행 job 전체가 죽는다(2026-08 실측: ConnectTimeoutError로 릴스 발행 중단).
+ */
 async function call(endpoint: string, params: Record<string, string>) {
   const qs = new URLSearchParams({
     serviceKey: process.env.TOUR_API_KEY!,
@@ -61,13 +66,26 @@ async function call(endpoint: string, params: Record<string, string>) {
     _type: "json",
     ...params,
   });
-  const res = await fetch(`${BASE}/${endpoint}?${qs}`, {
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!res.ok) throw new Error(`TourAPI ${endpoint} HTTP ${res.status}`);
-  const json = await res.json();
-  const items = json?.response?.body?.items?.item;
-  return Array.isArray(items) ? items : items ? [items] : [];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${BASE}/${endpoint}?${qs}`, {
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.status >= 500) throw new Error(`TourAPI ${endpoint} HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`TourAPI ${endpoint} HTTP ${res.status}`);
+      const json = await res.json();
+      const items = json?.response?.body?.items?.item;
+      return Array.isArray(items) ? items : items ? [items] : [];
+    } catch (e) {
+      lastErr = e;
+      if (attempt < 2) {
+        console.log(`[tourapi] ${endpoint} 실패(재시도 ${attempt + 1}/2):`, String(e).slice(0, 80));
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastErr;
 }
 
 /**
