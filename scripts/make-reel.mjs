@@ -156,24 +156,44 @@ async function main() {
 
   // ⚠️ 사진을 ffmpeg에서 9:16으로 강제 스케일하면 가로 사진(대부분의 음식 사진)이
   //    위아래로 쭉 늘어나 왜곡된다. 반드시 sharp로 '왜곡 없는' 세로 프레임을 먼저
-  //    만든 뒤 ffmpeg는 줌만 주게 한다.
-  const zoomClip = (inFile, out, secs) =>
-    sh("ffmpeg", [
-      "-y", "-loop", "1", "-i", inFile, "-t", String(secs), "-r", "30",
-      "-vf",
-      // 입력이 이미 1080x1920이므로 3배 업스케일은 비율 그대로(지터 방지 목적만)
-      `scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0006,1.15)':d=${Math.round(secs * 30)}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p`,
-      "-c:v", "libx264", "-preset", "veryfast", out,
-    ]);
+  //    만든 뒤 ffmpeg는 줌·팬만 주게 한다.
+  //
+  // 켄번즈 모션 4종을 번갈아 써서 "같은 줌만 반복"하는 기계적인 느낌을 줄인다.
+  // (입력이 이미 1080x1920이므로 3배 업스케일은 비율 그대로 — 지터 방지 목적)
+  const MOTIONS = [
+    (d) => `zoompan=z='min(zoom+0.0006,1.14)':d=${d}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`, // 줌인
+    (d) => `zoompan=z='if(lte(on,1),1.14,max(zoom-0.0006,1.0))':d=${d}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'`, // 줌아웃
+    (d) => `zoompan=z='min(zoom+0.0005,1.12)':d=${d}:x='(iw-iw/zoom)*on/${d}':y='ih/2-(ih/zoom/2)'`, // 줌인+좌→우
+    (d) => `zoompan=z='min(zoom+0.0005,1.12)':d=${d}:x='iw/2-(iw/zoom/2)':y='(ih-ih/zoom)*on/${d}'`, // 줌인+위→아래
+  ];
+  const zoomClip = async (inFile, out, secs, motionIdx = 0) => {
+    const d = Math.round(secs * 30);
+    const vf = `scale=3240:5760:flags=lanczos,${MOTIONS[motionIdx % MOTIONS.length](d)}:s=1080x1920:fps=30,format=yuv420p`;
+    try {
+      await sh("ffmpeg", [
+        "-y", "-loop", "1", "-i", inFile, "-t", String(secs), "-r", "30",
+        "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", out,
+      ]);
+    } catch (e) {
+      // 모션 표현식 문제 시에도 발행이 죽지 않게 정지 컷으로 폴백
+      console.error("모션 렌더 실패 → 정지 컷 사용:", String(e).slice(0, 100));
+      await sh("ffmpeg", [
+        "-y", "-loop", "1", "-i", inFile, "-t", String(secs), "-r", "30",
+        "-vf", "scale=1080:1920,format=yuv420p", "-c:v", "libx264", "-preset", "veryfast", out,
+      ]);
+    }
+  };
 
   const clips = [];
   const hookImg = path.join(TMP, "hook.jpg");
   fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
+  // 모션 순서를 섞어 매 릴스가 같은 패턴으로 보이지 않게 함
+  const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
   for (let i = 0; i < files.length; i++) {
     const out = path.join(TMP, `clip_${i}.mp4`);
     if (i === 0 && single) {
-      // 한 장뿐: 훅 얹은 사진(이미 1080x1920)을 5.5초 줌
-      await zoomClip(hookImg, out, 5.5);
+      // 한 장뿐: 훅 얹은 사진(이미 1080x1920)을 잔잔히 줌
+      await zoomClip(hookImg, out, 5.5, order[0]);
     } else if (i === 0) {
       // 훅 정지 컷 (문구 안정적으로 읽히게)
       await sh("ffmpeg", [
@@ -184,7 +204,9 @@ async function main() {
     } else {
       const frame = path.join(TMP, `frame_${i}.jpg`);
       await toVerticalFrame(sharp, files[i], frame); // 왜곡 없는 세로 프레임
-      await zoomClip(frame, out, 2.0);
+      // 길이도 살짝 다르게(1.8~2.3초) — 일정 간격 컷은 기계적으로 보임
+      const secs = Math.round((1.8 + Math.random() * 0.5) * 10) / 10;
+      await zoomClip(frame, out, secs, order[i % order.length]);
     }
     clips.push(out);
   }
