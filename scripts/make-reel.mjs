@@ -25,13 +25,47 @@ const HOOKS = [
 ];
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const RW = 1080, RH = 1920; // 릴스 규격 9:16
+
+/**
+ * 원본 사진 → 왜곡 없는 1080x1920 세로 프레임 버퍼.
+ *  - 세로·정사각에 가까우면 음식 중심 스마트 크롭으로 꽉 채움
+ *  - 가로로 긴 사진은 꽉 채우면 위아래가 심하게 잘리므로, 흐린 배경 위에
+ *    원본 비율 그대로 얹는다 (늘어남·찌그러짐 없음)
+ * 계정 톤 프리셋도 함께 적용해 피드와 색감을 통일한다.
+ */
+async function verticalFrameBuffer(sharp, imgPath) {
+  const meta = await sharp(imgPath).metadata();
+  const ar = (meta.width || 1) / (meta.height || 1);
+  const tone = (p) =>
+    p.modulate({ saturation: 1.1, brightness: 1.02 }).linear([1.05, 1.02, 0.97], [0, 0, 2]).sharpen({ sigma: 0.7 });
+
+  if (ar <= 1.5) {
+    // 꽉 채워도 피사체가 살아있는 비율 — 스마트 크롭(왜곡 없음)
+    return tone(sharp(imgPath).resize(RW, RH, { fit: "cover", position: sharp.strategy.attention }))
+      .jpeg({ quality: 92 })
+      .toBuffer();
+  }
+  // 가로로 긴 사진 — 흐린 배경 + 비율 유지 배치
+  const bg = await sharp(imgPath).resize(RW, RH, { fit: "cover" }).blur(30).modulate({ brightness: 0.78 }).toBuffer();
+  const fg = await tone(sharp(imgPath).resize(RW, null, { fit: "inside" })).toBuffer();
+  const fm = await sharp(fg).metadata();
+  return sharp(bg)
+    .composite([{ input: fg, top: Math.round((RH - (fm.height || RH)) / 2), left: 0 }])
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
+/** 왜곡 없는 세로 프레임을 파일로 저장 */
+async function toVerticalFrame(sharp, inFile, outFile) {
+  const fs2 = await import("node:fs");
+  fs2.default.writeFileSync(outFile, await verticalFrameBuffer(sharp, inFile));
+}
+
 /** 첫 프레임에 훅 배너를 합성한 세로 이미지 버퍼 반환 */
 async function composeHook(sharp, imgPath, hook) {
-  const W = 1080, H = 1920;
-  const base = await sharp(imgPath)
-    .resize(W, H, { fit: "cover", position: sharp.strategy.attention })
-    .modulate({ saturation: 1.08, brightness: 1.02 })
-    .toBuffer();
+  const W = RW, H = RH;
+  const base = await verticalFrameBuffer(sharp, imgPath); // 왜곡 없는 세로 프레임 재사용
   const svg = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <rect x="45" y="235" width="990" height="160" rx="30" fill="#000" fill-opacity="0.60"/>
@@ -119,31 +153,38 @@ async function main() {
   const hook = HOOKS[Math.floor(Math.random() * HOOKS.length)];
   console.log("훅:", hook);
   const single = files.length === 1;
-  // 잔잔한 줌 클립 (초 단위 길이)
+
+  // ⚠️ 사진을 ffmpeg에서 9:16으로 강제 스케일하면 가로 사진(대부분의 음식 사진)이
+  //    위아래로 쭉 늘어나 왜곡된다. 반드시 sharp로 '왜곡 없는' 세로 프레임을 먼저
+  //    만든 뒤 ffmpeg는 줌만 주게 한다.
   const zoomClip = (inFile, out, secs) =>
     sh("ffmpeg", [
       "-y", "-loop", "1", "-i", inFile, "-t", String(secs), "-r", "30",
       "-vf",
+      // 입력이 이미 1080x1920이므로 3배 업스케일은 비율 그대로(지터 방지 목적만)
       `scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0006,1.15)':d=${Math.round(secs * 30)}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p`,
       "-c:v", "libx264", "-preset", "veryfast", out,
     ]);
+
   const clips = [];
   const hookImg = path.join(TMP, "hook.jpg");
   fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
   for (let i = 0; i < files.length; i++) {
     const out = path.join(TMP, `clip_${i}.mp4`);
     if (i === 0 && single) {
-      // 한 장뿐: 훅 얹은 사진을 5.5초 줌
+      // 한 장뿐: 훅 얹은 사진(이미 1080x1920)을 5.5초 줌
       await zoomClip(hookImg, out, 5.5);
     } else if (i === 0) {
       // 훅 정지 컷 (문구 안정적으로 읽히게)
       await sh("ffmpeg", [
         "-y", "-loop", "1", "-i", hookImg, "-t", "2.4", "-r", "30",
-        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p",
+        "-vf", "scale=1080:1920,format=yuv420p", // 이미 9:16이라 비율 변화 없음
         "-c:v", "libx264", "-preset", "veryfast", out,
       ]);
     } else {
-      await zoomClip(files[i], out, 2.0);
+      const frame = path.join(TMP, `frame_${i}.jpg`);
+      await toVerticalFrame(sharp, files[i], frame); // 왜곡 없는 세로 프레임
+      await zoomClip(frame, out, 2.0);
     }
     clips.push(out);
   }
