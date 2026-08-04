@@ -88,6 +88,28 @@ async function main() {
   const { publishReel } = await import("../lib/instagram.ts");
   await initDb();
 
+  // 발행 간격 가드 — GitHub Actions 스케줄은 자주 누락되므로(실측: 하루 4회 중 1회만
+  // 실행) 스케줄을 촘촘히 걸어두고, 최근에 이미 발행했으면 여기서 조용히 종료한다.
+  // 이러면 누락된 회차는 다음 스케줄이 자연히 커버하고 과다 발행도 막힌다.
+  const gapMin = Number(process.env.MIN_GAP_MIN || 150);
+  const recent = await db.execute({
+    sql: `SELECT created_at FROM posts
+          WHERE status IN ('published','publishing') AND created_at >= datetime('now', ?)
+          ORDER BY id DESC LIMIT 1`,
+    args: [`-${gapMin} minutes`],
+  });
+  if (recent.rows.length > 0) {
+    console.log(`⏭️ 최근 ${gapMin}분 내 발행됨 — 이번 회차 건너뜀`);
+    return;
+  }
+
+  // 심야(KST 00~07)에는 발행하지 않음
+  const kstHour = (new Date().getUTCHours() + 9) % 24;
+  if (process.env.QUIET_HOURS_OFF !== "1" && kstHour < 8) {
+    console.log(`⏭️ KST 심야(${kstHour}시) — 발행 건너뜀`);
+    return;
+  }
+
   // 대상 선정은 Vercel의 /api/reel-candidate 가 담당한다.
   // ⚠️ data.go.kr(TourAPI)이 GitHub Actions 러너 IP를 간헐적으로 차단해(2026-08 실측)
   //    Actions에서 직접 수집하면 발행이 통째로 멈춘다. Vercel에서는 정상 접근되므로
