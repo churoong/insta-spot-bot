@@ -39,6 +39,32 @@ export async function GET(req: NextRequest) {
       { status: 200 }
     );
   }
+
+  // ?diag=1 → 토큰 권한 어디서 막히는지 단계별 진단 (fine-grained 토큰은 권한 부족 시 404를 냄)
+  if (req.nextUrl.searchParams.get("diag") === "1") {
+    const hdr = {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    };
+    const probe = async (url: string) => {
+      try {
+        const r = await fetch(url, { headers: hdr, signal: AbortSignal.timeout(15000) });
+        return r.status;
+      } catch (e) {
+        return String(e).slice(0, 60);
+      }
+    };
+    return NextResponse.json({
+      repo,
+      tokenPrefix: token.slice(0, 8) + "…", // 형식 확인용 (github_pat_ / ghp_)
+      "GET /user": await probe("https://api.github.com/user"),
+      "GET /repos/{repo}": await probe(`https://api.github.com/repos/${repo}`),
+      "GET /actions/workflows": await probe(`https://api.github.com/repos/${repo}/actions/workflows`),
+      힌트: "저장소 200인데 workflows 404면 Actions 권한 없음. 저장소도 404면 repository 선택 누락.",
+    });
+  }
+
   const force = req.nextUrl.searchParams.get("force") === "1"; // 테스트용 즉시 실행
 
   try {
