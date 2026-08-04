@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
       `${origin}/api/image?url=${encodeURIComponent(u)}&name=r${i}`;
 
     // 아직 릴스로 안 만든 새 맛집 발굴 (음식 사진 1장 이상)
+    let capFails = 0; // 캡션 생성 실패 횟수(규칙 위반·AI 한도 등)
     for (let attempt = 0; attempt < 5; attempt++) {
       let cands: Awaited<ReturnType<typeof fetchCandidates>> = [];
       try {
@@ -61,7 +62,14 @@ export async function GET(req: NextRequest) {
           const info = await fetchFoodInfo(s.contentId);
           const cap = await generateCaption(s, { menu: info.menu, hours: info.hours });
           if (!cap) {
-            return NextResponse.json({ skipped: true, reason: "AI 한도 소진" });
+            // 캡션 실패 원인은 다양(AI 한도·규칙 위반 등). 한 곳 실패로 포기하지 않고
+            // 다음 후보를 시도하되, 연속 실패가 많으면 AI 문제로 보고 중단한다.
+            capFails++;
+            console.error(`[reel-candidate] 캡션 생성 실패(${capFails}) ${s.name}`);
+            if (capFails >= 4) {
+              return NextResponse.json({ skipped: true, reason: "캡션 생성 연속 실패(AI 한도 또는 규칙 위반)" });
+            }
+            continue;
           }
 
           const region = String(s.address ?? "").split(/\s+/).slice(0, 2).join(" ");
