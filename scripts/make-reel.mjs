@@ -51,51 +51,46 @@ function sh(cmd, args) {
 
 async function main() {
   const { db, initDb } = await import("../lib/db.ts");
-  const { fetchCandidates, fetchByFoodKeyword, fetchQuizImages, fetchOverview, fetchFoodInfo } = await import("../lib/tourapi.ts");
-  const { generateCaption } = await import("../lib/caption.ts");
-  const { pickPerformingKeyword } = await import("../lib/performance.ts");
   const { publishReel } = await import("../lib/instagram.ts");
   await initDb();
 
-  // 대상 선정: 아직 릴스로 안 만든 새 맛집을 발굴(음식 사진 1장 이상).
-  // 키워드(성과 가중)/지역 발굴을 반반 섞어 씀. (전 게시물이 릴스이므로 이게 주 발행)
-  // TourAPI가 순간적으로 죽어도(연결 타임아웃 등) 회차를 통째로 날리지 않도록
-  // 시도마다 예외를 삼키고 다음 소스로 넘어간다.
-  let subject = null;
-  outer: for (let a = 0; a < 5; a++) {
-    let cands = [];
+  // 대상 선정은 Vercel의 /api/reel-candidate 가 담당한다.
+  // ⚠️ data.go.kr(TourAPI)이 GitHub Actions 러너 IP를 간헐적으로 차단해(2026-08 실측)
+  //    Actions에서 직접 수집하면 발행이 통째로 멈춘다. Vercel에서는 정상 접근되므로
+  //    데이터 수집·캡션 생성은 Vercel, 영상 렌더·발행은 Actions로 역할을 분리.
+  const base = (process.env.APP_BASE_URL || "https://insta-spot-bot.vercel.app").replace(/\/$/, "");
+  let data = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      cands = Math.random() < 0.5
-        ? await fetchByFoodKeyword(await pickPerformingKeyword())
-        : await fetchCandidates();
+      const r = await fetch(`${base}/api/reel-candidate`, {
+        headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
+        signal: AbortSignal.timeout(290000),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(`후보 API HTTP ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
+      if (j.skipped) { console.log("⏭️ 스킵:", j.reason); return; }
+      data = j;
+      break;
     } catch (e) {
-      console.error(`후보 수집 실패(시도 ${a + 1}):`, String(e).slice(0, 120));
-      await new Promise((r) => setTimeout(r, 3000));
-      continue;
-    }
-    for (const s of cands) {
-      try {
-        const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id IN (?, ?)", args: [s.contentId, "reel-" + s.contentId] });
-        if (dup.rows.length) continue;
-        const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
-        if (imgs.length < 1) continue; // 음식 사진이 없으면 스킵
-        s.imageUrls = imgs;
-        s.overview = await fetchOverview(s.contentId);
-        subject = s;
-        break outer;
-      } catch (e) {
-        console.error(`후보 처리 실패(건너뜀) ${s.name}:`, String(e).slice(0, 100));
-      }
+      console.error(`후보 API 실패(시도 ${attempt + 1}/3):`, String(e).slice(0, 150));
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 5000));
     }
   }
-  if (!subject) throw new Error("릴스 대상 맛집을 찾지 못함");
+  if (!data) throw new Error("릴스 후보를 받지 못함 (Vercel 후보 API 응답 없음)");
 
-  // 캡션: 캐러셀과 동일한 풍부한 캡션(위치 숨김 + 메뉴·영업시간 + SEO 해시태그 + DM 유도).
-  // 모든 AI 소진 시 null → 저품질 발행 대신 스킵.
-  const info = await fetchFoodInfo(subject.contentId);
-  const cap = await generateCaption(subject, { menu: info.menu, hours: info.hours });
-  if (!cap) { console.log("⏭️ AI 한도 소진 — 릴스 스킵"); return; }
-  const caption = cap.caption;
+  const subject = {
+    contentId: data.contentId,
+    name: data.name,
+    address: data.address,
+    category: data.category,
+    imageUrls: data.imageUrls, // 프록시 URL(다운로드용)
+    mapx: data.mapx,
+    mapy: data.mapy,
+    mapUrl: data.mapUrl,
+  };
+  const originalUrls = data.originalUrls || data.imageUrls; // DB 기록용
+  const caption = data.caption;
+  console.log("릴스 대상:", subject.name, `(사진 ${subject.imageUrls.length}장)`);
 
   // 4) 이미지 다운로드 (최대 8장)
   const urls = subject.imageUrls.slice(0, 8);
@@ -170,16 +165,14 @@ async function main() {
 
   // 7) 중복발행 방지: 발행 '전에' dedup 마커 기록. DM용 위치정보(mapx/mapy/map_url)도 저장
   //    (웹훅 '어디야' → place_name/address/map_url로 DM 발송).
-  const { searchMapUrl } = await import("../lib/kakao.ts");
+  //    이미지는 '원본' URL로 저장(대시보드 갤러리는 프록시 아닌 원본을 씀).
   const cid = "reel-" + subject.contentId;
-  const region = String(subject.address ?? "").split(/\s+/).slice(0, 2).join(" ");
-  const mapUrl = searchMapUrl(subject.name, region);
   await db.execute({
     sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, status, mapx, mapy, map_url)
           VALUES (?, ?, ?, '릴스', ?, ?, ?, 'publishing', ?, ?, ?)`,
     args: [
-      cid, subject.name, subject.address, urls[0], JSON.stringify(urls), caption,
-      subject.mapx ?? null, subject.mapy ?? null, mapUrl,
+      cid, subject.name, subject.address, originalUrls[0], JSON.stringify(originalUrls), caption,
+      subject.mapx ?? null, subject.mapy ?? null, subject.mapUrl ?? null,
     ],
   });
 

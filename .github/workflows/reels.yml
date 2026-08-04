@@ -37,3 +37,6 @@ jobs:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          # 후보 수집은 Vercel(/api/reel-candidate)이 담당 — TourAPI가 Actions IP를 차단하므로
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_BASE_URL: ${{ secrets.APP_BASE_URL }}
