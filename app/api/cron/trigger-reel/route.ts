@@ -111,8 +111,13 @@ export async function GET(req: NextRequest) {
     );
     if (res.status !== 204) {
       const body = await res.text();
+      // GitHub은 권한 부족 시 필요/보유 권한을 헤더로 알려준다 — 원인 특정에 사용
       return NextResponse.json(
-        { error: `workflow_dispatch 실패 HTTP ${res.status}: ${body.slice(0, 200)}` },
+        {
+          error: `workflow_dispatch 실패 HTTP ${res.status}: ${body.slice(0, 200)}`,
+          필요권한: res.headers.get("x-accepted-github-permissions"),
+          토큰권한: res.headers.get("x-oauth-scopes"),
+        },
         { status: 500 }
       );
     }
