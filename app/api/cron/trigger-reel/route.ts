@@ -22,36 +22,50 @@ export async function GET(req: NextRequest) {
 
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;
+
+  // ?check=1 → 환경변수 설정 상태만 확인 (값은 노출하지 않음)
+  if (req.nextUrl.searchParams.get("check") === "1") {
+    return NextResponse.json({
+      GITHUB_TOKEN: Boolean(token),
+      GITHUB_REPO: repo ?? null,
+      GROQ_KEY: Boolean(process.env.GROQ_KEY),
+      GEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY),
+    });
+  }
+
   if (!token || !repo) {
     return NextResponse.json(
       { skipped: true, reason: "GITHUB_TOKEN/GITHUB_REPO 미설정 — 트리거 비활성" },
       { status: 200 }
     );
   }
+  const force = req.nextUrl.searchParams.get("force") === "1"; // 테스트용 즉시 실행
 
   try {
     await initDb();
 
     // 심야(KST 00~07)에는 발행하지 않음
     const kstHour = (new Date().getUTCHours() + 9) % 24;
-    if (process.env.QUIET_HOURS_OFF !== "1" && kstHour < 8) {
+    if (!force && process.env.QUIET_HOURS_OFF !== "1" && kstHour < 8) {
       return NextResponse.json({ skipped: true, reason: `KST 심야(${kstHour}시) — 트리거 안 함` });
     }
 
     // 최근 발행 간격 확인 (외부 크론이 자주 호출해도 과다 발행되지 않게)
     const gapMin = Number(process.env.MIN_GAP_MIN || 150);
-    const recent = await db.execute({
-      sql: `SELECT created_at FROM posts
-            WHERE status IN ('published','publishing')
-              AND created_at >= datetime('now', ?)
-            ORDER BY id DESC LIMIT 1`,
-      args: [`-${gapMin} minutes`],
-    });
-    if (recent.rows.length > 0) {
-      return NextResponse.json({
-        skipped: true,
-        reason: `최근 ${gapMin}분 내 발행됨 — 트리거 안 함`,
+    if (!force) {
+      const recent = await db.execute({
+        sql: `SELECT created_at FROM posts
+              WHERE status IN ('published','publishing')
+                AND created_at >= datetime('now', ?)
+              ORDER BY id DESC LIMIT 1`,
+        args: [`-${gapMin} minutes`],
       });
+      if (recent.rows.length > 0) {
+        return NextResponse.json({
+          skipped: true,
+          reason: `최근 ${gapMin}분 내 발행됨 — 트리거 안 함`,
+        });
+      }
     }
 
     // GitHub Actions 워크플로 실행
