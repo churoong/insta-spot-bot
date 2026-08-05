@@ -55,8 +55,10 @@ export async function GET(req: NextRequest) {
           });
           if (dup.rows.length) continue;
 
+          // 음식 사진이 없어도 발행 가능(디자인 카드로 대체)하지만, 사진이 있는 곳을
+          // 우선하기 위해 앞쪽 후보에서는 사진 있는 곳만 고르고, 뒤로 갈수록 허용한다.
           const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
-          if (imgs.length < 1) continue; // 음식 사진 없으면 다음 후보
+          if (imgs.length < 1 && attempt < 2) continue;
 
           s.overview = await fetchOverview(s.contentId);
           const info = await fetchFoodInfo(s.contentId);
@@ -91,6 +93,7 @@ export async function GET(req: NextRequest) {
             caption: cap.caption,
             narration: narration ?? [],
             hook: hook ?? null,
+            menu: info.menu || null, // 사진 없을 때 디자인 카드에 표시
             mapx: s.mapx ?? null,
             mapy: s.mapy ?? null,
             mapUrl: searchMapUrl(s.name, region),

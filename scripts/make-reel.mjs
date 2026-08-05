@@ -151,6 +151,62 @@ async function verticalFrameBuffer(sharp, imgPath) {
 
 
 /**
+ * 디자인 카드 — 사진 없이 타이포그래피만으로 만드는 프레임.
+ * 쓸 만한 음식 사진이 없을 때 사용한다(사진 퀄리티가 콘텐츠 품질을 깎지 않게).
+ * 다크 그라데이션 + 계정 공통 색으로 브랜드 일관성도 얻는다.
+ */
+async function designCardBuffer(sharp, { badge, eyebrow, title, sub, note }) {
+  const titleLines = wrapText(title, 8, 2);
+  const tSize = titleLines.length >= 2 ? 116 : 132;
+  const tLineH = Math.round(tSize * 1.22);
+  const baseY = 760;
+  const svg = Buffer.from(
+    `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#17110d"/><stop offset="100%" stop-color="#3d2418"/>
+        </linearGradient>
+      </defs>
+      <rect width="${RW}" height="${RH}" fill="url(#bg)"/>
+      ${badge
+        ? `<circle cx="${RW / 2}" cy="470" r="86" fill="#e23b3b"/>
+           <text x="${RW / 2}" y="502" font-family="${FONT}" font-size="86" font-weight="900" fill="#fff" text-anchor="middle">${esc(badge)}</text>`
+        : ""}
+      ${eyebrow
+        ? `<text x="${RW / 2}" y="640" font-family="${FONT}" font-size="50" font-weight="700" fill="#ffb86b" text-anchor="middle">${esc(eyebrow)}</text>`
+        : ""}
+      ${titleLines
+        .map(
+          (l, i) =>
+            `<text x="${RW / 2}" y="${baseY + i * tLineH}" font-family="${FONT}" font-size="${tSize}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(l)}</text>`
+        )
+        .join("")}
+      <rect x="${RW / 2 - 300}" y="${baseY + titleLines.length * tLineH - 30}" width="600" height="4" fill="#ffb86b"/>
+      ${sub
+        ? `<text x="${RW / 2}" y="${baseY + titleLines.length * tLineH + 80}" font-family="${FONT}" font-size="46" font-weight="600" fill="#e6ded8" text-anchor="middle">${esc(sub)}</text>`
+        : ""}
+      ${note
+        ? `<text x="${RW / 2}" y="${baseY + titleLines.length * tLineH + 150}" font-family="${FONT}" font-size="44" font-weight="600" fill="#b9aca4" text-anchor="middle">${esc(note)}</text>`
+        : ""}
+    </svg>`
+  );
+  return sharp(svg).jpeg({ quality: 92 }).toBuffer();
+}
+
+/** 글자수 기준 줄바꿈 */
+function wrapText(text, per, maxLines) {
+  const words = String(text ?? "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > per && cur) { lines.push(cur.trim()); cur = w; }
+    else cur = (cur + " " + w).trim();
+  }
+  if (cur) lines.push(cur);
+  return lines.slice(0, maxLines);
+}
+
+/**
  * 텍스트 훅 카드 — 릴스 첫 화면. 사진이 아니라 '문구'가 주인공이 되게 만든다.
  * 배경은 그 가게 음식 사진을 크게 어둡히고, 큰 글씨를 중앙에 올린다.
  * (사진 퀄리티가 평범해도 첫 화면 임팩트가 유지되는 게 목적)
@@ -297,8 +353,9 @@ async function main() {
       console.error(`이미지 ${i} 다운로드 실패(건너뜀):`, String(e).slice(0, 80));
     }
   }
-  if (files.length < 1) throw new Error("음식 이미지 없음");
-  console.log(`이미지 ${files.length}장 다운로드`);
+  // 사진이 하나도 없어도 발행한다 — 디자인 카드(타이포)로 대체.
+  // 사진 퀄리티가 콘텐츠 품질을 깎느니, 깔끔한 카드가 낫다.
+  console.log(files.length ? `이미지 ${files.length}장 다운로드` : "사진 없음 — 디자인 카드로 구성");
 
   // 5) ffmpeg 세로(1080x1920) 클립 → concat + 무음 오디오.
   //    - 첫 클립: 훅 배너 합성. 사진이 1장뿐이면 그 한 장에 잔잔한 줌(5.5초).
@@ -385,8 +442,15 @@ async function main() {
     .filter(Boolean)
     .join(" · ")
     .slice(0, 28);
+  const region = (subject.address || "").split(/\s+/).slice(0, 2).join(" ");
+  // 사진이 있으면 사진 배경 훅 카드, 없으면 디자인 카드에 훅 문구를 얹는다
   const hookImg = path.join(TMP, "hook.jpg");
-  fs.writeFileSync(hookImg, await composeHookCard(sharp, files[0], hook, subText));
+  fs.writeFileSync(
+    hookImg,
+    files.length
+      ? await composeHookCard(sharp, files[0], hook, subText)
+      : await designCardBuffer(sharp, { eyebrow: region, title: hook, sub: subject.name })
+  );
   // 모션 순서를 섞어 매 릴스가 같은 패턴으로 보이지 않게 함
   const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
 
@@ -395,11 +459,22 @@ async function main() {
     const line = script[i] || "";
     const secs = Math.min(cutSecs[i], 12);
 
-    // 첫 컷은 훅 카드(자막 없이 훅 문구만 보이게), 이후는 사진 + 자막
-    const srcFile = files[Math.min(i, files.length - 1)];
-    let frameBuf =
-      i === 0 ? fs.readFileSync(hookImg) : await verticalFrameBuffer(sharp, srcFile);
-    if (i > 0) frameBuf = await withSubtitle(sharp, frameBuf, line);
+    // 첫 컷은 훅 카드(자막 없이 훅 문구만), 이후는 사진 + 자막.
+    // 쓸 사진이 없으면 디자인 카드로 대체해 발행을 이어간다.
+    let frameBuf;
+    if (i === 0) {
+      frameBuf = fs.readFileSync(hookImg);
+    } else if (files.length) {
+      frameBuf = await verticalFrameBuffer(sharp, files[Math.min(i, files.length - 1)]);
+      frameBuf = await withSubtitle(sharp, frameBuf, line);
+    } else {
+      // 사진 없음 — 정보 카드(상호·지역·메뉴)로 구성하고 자막은 카드에 통합
+      frameBuf = await designCardBuffer(sharp, {
+        eyebrow: region,
+        title: subject.name,
+        sub: line || data.menu || "",
+      });
+    }
     const frame = path.join(TMP, `frame_${i}.jpg`);
     fs.writeFileSync(frame, frameBuf);
 
