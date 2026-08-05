@@ -738,7 +738,6 @@ async function main() {
   //  - grid(기본): 기존 모음집 — 리스트 인포그래픽 한 장을 릴스로
   //  - countdown: 큐레이션 — 인트로 + 순위 카드 순차 공개 + 아웃트로 (1위 보려고 끝까지 봄)
   const STYLE = process.env.ROUNDUP_STYLE === "countdown" ? "countdown" : "grid";
-  const caption = buildCaption(theme, places);
   const sharpMod = (await import("sharp")).default;
 
   // 순위 근거: 네이버 '블로그 후기 수'. 실제 방문·후기가 많을수록 인기 있는 집이라
@@ -763,6 +762,10 @@ async function main() {
       console.error("후기 랭킹 실패(수집 순서 사용):", String(e).slice(0, 100));
     }
   }
+  // ⚠️ 캡션은 순위가 확정된 뒤에 만든다. 정렬 전에 만들면 캡션의 1,2,3 번호와
+  //    영상 속 순위가 어긋난다(실제로 어긋났던 버그).
+  const caption = buildCaption(theme, places);
+
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
   const ranked = STYLE === "countdown" ? [...places].reverse() : places;
 
