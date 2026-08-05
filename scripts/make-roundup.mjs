@@ -375,7 +375,7 @@ async function bgFrame(sharp, imgUrl, brightness = 0.5, blur = 0) {
 }
 
 /** 인트로 카드 — "부산 돼지국밥 TOP 8" 같은 제목을 크게 */
-async function composeIntroCard(sharp, theme, places, title) {
+async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
   const bg = await bgFrame(sharp, (places.find((p) => p.foodPicked) ?? places[0]).imageUrl, 0.4, 8);
   const lines = wrapLines(title, 10, 3);
   const size = lines.length >= 3 ? 100 : lines.length === 2 ? 116 : 128;
@@ -389,7 +389,7 @@ async function composeIntroCard(sharp, theme, places, title) {
             `<text x="${RW / 2}" y="${startY + i * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">${esc(l)}</text>`
         )
         .join("")}
-      <text x="${RW / 2}" y="${startY + lines.length * lineH + 40}" font-family="${FONT}" font-size="48" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">끝까지 보고 저장하세요</text>
+      <text x="${RW / 2}" y="${startY + lines.length * lineH + 40}" font-family="${FONT}" font-size="48" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">${rankBasis ? esc(`네이버 ${rankBasis} 순위`) : "끝까지 보고 저장하세요"}</text>
     </svg>`
   );
   return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
@@ -705,13 +705,35 @@ async function main() {
   const sharpMod = (await import("sharp")).default;
 
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
+  // 카운트다운 순위는 '네이버 검색량' 기준으로 매긴다(임의 순서가 아니라 근거 있는 랭킹).
+  // 데이터랩 키가 없거나 실패하면 수집 순서를 그대로 쓴다.
+  let rankBasis = "";
+  if (STYLE === "countdown") {
+    try {
+      const { rankBySearchVolume } = await import("../lib/datalab.ts");
+      const { ranked: byVolume, scored } = await rankBySearchVolume(places);
+      if (scored) {
+        places = byVolume; // 1위가 앞
+        rankBasis = "검색량";
+        console.log("검색량 기준 순위 적용:", places.map((p) => p.name).join(" > "));
+      } else {
+        console.log("검색량 데이터 없음 — 수집 순서 사용");
+      }
+    } catch (e) {
+      console.error("검색량 랭킹 실패(수집 순서 사용):", String(e).slice(0, 100));
+    }
+  }
+  // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
   const ranked = STYLE === "countdown" ? [...places].reverse() : places;
 
   const cards = []; // countdown에서 쓸 카드 파일들
   let reelCover = null;
   if (STYLE === "countdown") {
     const intro = path.join(TMP, "c_intro.jpg");
-    fs.writeFileSync(intro, await composeIntroCard(sharpMod, theme, places, theme.titleResolved));
+    fs.writeFileSync(
+      intro,
+      await composeIntroCard(sharpMod, theme, places, theme.titleResolved, rankBasis)
+    );
     cards.push(intro);
     for (let i = 0; i < ranked.length; i++) {
       const rank = ranked.length - i; // N위 → 1위
