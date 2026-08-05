@@ -346,6 +346,100 @@ function buildPunchyTitle(theme, n) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+// ===== 카운트다운 릴스용 카드 (한 곳씩 크게 공개 → 1위 보려고 끝까지 봄) =====
+
+const RW = 1080, RH = 1920;
+
+/** 텍스트를 지정 글자수로 줄바꿈 */
+function wrapLines(text, per, maxLines) {
+  const words = String(text ?? "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > per && cur) { lines.push(cur.trim()); cur = w; }
+    else cur = (cur + " " + w).trim();
+  }
+  if (cur) lines.push(cur);
+  return lines.slice(0, maxLines);
+}
+
+/** 배경 사진을 세로 규격으로 (왜곡 없이) + 어둡게 */
+async function bgFrame(sharp, imgUrl, brightness = 0.5, blur = 0) {
+  const res = await fetch(imgUrl, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error(`배경 사진 실패 ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  let p = sharp(buf).resize(RW, RH, { fit: "cover", position: sharp.strategy.attention })
+    .modulate({ brightness, saturation: 1.06 });
+  if (blur > 0) p = p.blur(blur);
+  return p.toBuffer();
+}
+
+/** 인트로 카드 — "부산 돼지국밥 TOP 8" 같은 제목을 크게 */
+async function composeIntroCard(sharp, theme, places, title) {
+  const bg = await bgFrame(sharp, (places.find((p) => p.foodPicked) ?? places[0]).imageUrl, 0.4, 8);
+  const lines = wrapLines(title, 10, 3);
+  const size = lines.length >= 3 ? 100 : lines.length === 2 ? 116 : 128;
+  const lineH = Math.round(size * 1.28);
+  const startY = Math.round(RH / 2 - ((lines.length - 1) * lineH) / 2);
+  const svg = Buffer.from(
+    `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
+      ${lines
+        .map(
+          (l, i) =>
+            `<text x="${RW / 2}" y="${startY + i * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">${esc(l)}</text>`
+        )
+        .join("")}
+      <text x="${RW / 2}" y="${startY + lines.length * lineH + 40}" font-family="${FONT}" font-size="48" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">끝까지 보고 저장하세요</text>
+    </svg>`
+  );
+  return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
+}
+
+/** 순위 카드 — 큰 순위 숫자 + 상호명 + 지역 + 한줄평 */
+async function composeRankCard(sharp, place, rank) {
+  const bg = await bgFrame(sharp, place.imageUrl, 0.62, 0);
+  const nameLines = wrapLines(place.name, 11, 2);
+  const nameSize = nameLines.length === 2 ? 78 : 92;
+  const descLines = wrapLines(place.desc || "", 16, 2);
+  const boxTop = RH - 760;
+  const svg = Buffer.from(
+    `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
+      <!-- 순위 뱃지 -->
+      <circle cx="${RW / 2}" cy="330" r="118" fill="#d92121" stroke="#fff" stroke-width="10"/>
+      <text x="${RW / 2}" y="${330 + 46}" font-family="${FONT}" font-size="120" font-weight="900" fill="#fff" text-anchor="middle">${rank}</text>
+      <!-- 하단 정보 박스 -->
+      <rect x="0" y="${boxTop}" width="${RW}" height="${RH - boxTop - 300}" fill="#000" fill-opacity="0.5"/>
+      ${nameLines
+        .map(
+          (l, i) =>
+            `<text x="${RW / 2}" y="${boxTop + 110 + i * Math.round(nameSize * 1.2)}" font-family="${FONT}" font-size="${nameSize}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="7" paint-order="stroke">${esc(l)}</text>`
+        )
+        .join("")}
+      <text x="${RW / 2}" y="${boxTop + 110 + nameLines.length * Math.round(nameSize * 1.2) + 20}" font-family="${FONT}" font-size="52" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">${esc(place.region || "")}${place.hundred ? " · 백년가게" : ""}</text>
+      ${descLines
+        .map(
+          (l, i) =>
+            `<text x="${RW / 2}" y="${boxTop + 110 + nameLines.length * Math.round(nameSize * 1.2) + 100 + i * 58}" font-family="${FONT}" font-size="46" font-weight="600" fill="#f0f0f0" text-anchor="middle" stroke="#000" stroke-width="4" paint-order="stroke">${esc(l)}</text>`
+        )
+        .join("")}
+    </svg>`
+  );
+  return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
+}
+
+/** 아웃트로 카드 — 저장·팔로우 유도 */
+async function composeOutroCard(sharp, places, title) {
+  const bg = await bgFrame(sharp, places[0].imageUrl, 0.35, 12);
+  const svg = Buffer.from(
+    `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
+      <text x="${RW / 2}" y="${RH / 2 - 60}" font-family="${FONT}" font-size="104" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">저장 필수</text>
+      <text x="${RW / 2}" y="${RH / 2 + 70}" font-family="${FONT}" font-size="58" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">${esc(wrapLines(title, 16, 1)[0] || "")}</text>
+      <text x="${RW / 2}" y="${RH / 2 + 180}" font-family="${FONT}" font-size="50" font-weight="700" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">@${esc(HANDLE)}</text>
+    </svg>`
+  );
+  return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
+}
+
 /** v2 표지 인포그래픽: 레드 배너 + 지역 칩 + 백년가게 배지 + 다크 푸터 */
 async function composeCover(theme, places) {
   const sharp = (await import("sharp")).default;
@@ -552,7 +646,12 @@ async function main() {
   }
 
   // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
-  const idxRow = await db.execute("SELECT value FROM config WHERE key='roundup_idx'");
+  // 모음집(grid)과 큐레이션(countdown)은 포인터를 따로 둬 같은 테마가 겹치지 않게 함
+  const IDX_KEY = process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx" : "roundup_idx";
+  const idxRow = await db.execute({
+    sql: "SELECT value FROM config WHERE key = ?",
+    args: [IDX_KEY],
+  });
   const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
   const all = themesData.themes;
   const ordered = all.map((_, i) => all[(idx + i) % all.length]);
@@ -598,21 +697,58 @@ async function main() {
   }
   console.log(`음식 사진 교체: ${places.filter((p) => p.foodPicked).length}/${places.length}곳`);
 
-  // 릴스 전용 모드: 리스트형 세로 표지(1080x1920)를 만들어 '릴스'로 발행한다.
-  // (캐러셀·슬라이드는 더 이상 만들지 않음)
+  // 발행 스타일
+  //  - grid(기본): 기존 모음집 — 리스트 인포그래픽 한 장을 릴스로
+  //  - countdown: 큐레이션 — 인트로 + 순위 카드 순차 공개 + 아웃트로 (1위 보려고 끝까지 봄)
+  const STYLE = process.env.ROUNDUP_STYLE === "countdown" ? "countdown" : "grid";
   const caption = buildCaption(theme, places);
-  const reelCover = await composeReelCover(theme, places);
+  const sharpMod = (await import("sharp")).default;
+
+  // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
+  const ranked = STYLE === "countdown" ? [...places].reverse() : places;
+
+  const cards = []; // countdown에서 쓸 카드 파일들
+  let reelCover = null;
+  if (STYLE === "countdown") {
+    const intro = path.join(TMP, "c_intro.jpg");
+    fs.writeFileSync(intro, await composeIntroCard(sharpMod, theme, places, theme.titleResolved));
+    cards.push(intro);
+    for (let i = 0; i < ranked.length; i++) {
+      const rank = ranked.length - i; // N위 → 1위
+      const f = path.join(TMP, `c_rank_${rank}.jpg`);
+      try {
+        fs.writeFileSync(f, await composeRankCard(sharpMod, ranked[i], rank));
+        cards.push(f);
+      } catch (e) {
+        console.error(`순위 카드 ${rank} 실패(건너뜀):`, String(e).slice(0, 90));
+      }
+    }
+    const outro = path.join(TMP, "c_outro.jpg");
+    try {
+      fs.writeFileSync(outro, await composeOutroCard(sharpMod, places, theme.titleResolved));
+      cards.push(outro);
+    } catch { /* 아웃트로는 없어도 됨 */ }
+    console.log(`카운트다운 카드 ${cards.length}장 생성`);
+  } else {
+    reelCover = await composeReelCover(theme, places);
+  }
 
   if (DRY) {
-    fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
-    console.log("DRY 모드 — 발행 생략. roundup-reel-preview.jpg 저장");
+    if (STYLE === "countdown") {
+      fs.copyFileSync(cards[0], "countdown-intro-preview.jpg");
+      if (cards[1]) fs.copyFileSync(cards[1], "countdown-rank-preview.jpg");
+      console.log("DRY — countdown-intro-preview.jpg / countdown-rank-preview.jpg 저장");
+    } else {
+      fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
+      console.log("DRY 모드 — 발행 생략. roundup-reel-preview.jpg 저장");
+    }
     console.log(caption);
     return;
   }
 
   // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커 선기록.
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const cid = `roundup-${theme.key}-${today}`;
+  const cid = `${STYLE === "countdown" ? "countdown" : "roundup"}-${theme.key}-${today}`;
   const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
   if (dup.rows.length) {
     console.log("오늘 이미 발행된 테마 — 스킵:", cid);
@@ -630,10 +766,41 @@ async function main() {
     ],
   });
 
-  // 리스트 표지 → 잔잔한 줌인 8초 세로 릴스 렌더
   const reelMp4 = path.join(TMP, "roundup-reel.mp4");
-  await new Promise((resolve, reject) => {
-    const p = spawn("ffmpeg", [
+  const ff = (args) =>
+    new Promise((resolve, reject) => {
+      const p = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "inherit"] });
+      p.on("error", reject);
+      p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
+    });
+
+  if (STYLE === "countdown") {
+    // 카드들을 순서대로 이어붙임 (인트로 3초, 순위 카드 2.6초, 아웃트로 2.6초)
+    const clips = [];
+    for (let i = 0; i < cards.length; i++) {
+      const secs = i === 0 ? 3.0 : 2.6;
+      const out = path.join(TMP, `c_clip_${i}.mp4`);
+      const d = Math.round(secs * 30);
+      await ff([
+        "-y", "-loop", "1", "-i", cards[i], "-t", String(secs), "-r", "30",
+        "-vf",
+        `scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0005,1.10)':d=${d}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p`,
+        "-c:v", "libx264", "-preset", "veryfast", out,
+      ]);
+      clips.push(out);
+    }
+    const listFile = path.join(TMP, "c_list.txt");
+    fs.writeFileSync(listFile, clips.map((c) => `file '${c}'`).join("\n"));
+    await ff([
+      "-y", "-f", "concat", "-safe", "0", "-i", listFile,
+      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+      "-c:a", "aac", "-shortest", "-movflags", "+faststart", reelMp4,
+    ]);
+    console.log(`카운트다운 릴스 렌더 완료 (${clips.length}컷)`);
+  } else {
+    // 리스트 표지 → 잔잔한 줌인 8초 세로 릴스 렌더 (기존 모음집)
+    await ff([
       "-y", "-loop", "1", "-i", reelCover, "-t", "8", "-r", "30",
       "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
       "-filter_complex",
@@ -641,10 +808,8 @@ async function main() {
       "-map", "[v]", "-map", "1:a",
       "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
       "-movflags", "+faststart", reelMp4,
-    ], { stdio: ["ignore", "ignore", "inherit"] });
-    p.on("error", reject);
-    p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
-  });
+    ]);
+  }
 
   const reelUrl = await uploadPublic(reelMp4);
   console.log("모음집 릴스 업로드:", reelUrl);
@@ -659,8 +824,8 @@ async function main() {
   // 포인터 이동 (계절 스킵돼도 로테이션 유지)
   const chosenIdx = all.findIndex((t) => t.key === theme.key);
   await db.execute({
-    sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('roundup_idx', ?, datetime('now'))",
-    args: [String((chosenIdx + 1) % all.length)],
+    sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+    args: [IDX_KEY, String((chosenIdx + 1) % all.length)],
   });
 
   console.log("완료:", theme.titleResolved);

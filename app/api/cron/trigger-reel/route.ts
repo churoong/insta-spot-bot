@@ -76,8 +76,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ skipped: true, reason: `KST 심야(${kstHour}시) — 트리거 안 함` });
     }
 
-    // 최근 발행 간격 확인 (외부 크론이 자주 호출해도 과다 발행되지 않게)
-    const gapMin = Number(process.env.MIN_GAP_MIN || 150);
+    // 최근 발행 간격 확인 (기본 360분 = 하루 약 3개)
+    const gapMin = Number(process.env.MIN_GAP_MIN || 360);
     if (!force) {
       const recent = await db.execute({
         sql: `SELECT created_at FROM posts

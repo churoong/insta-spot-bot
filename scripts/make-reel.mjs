@@ -224,7 +224,7 @@ async function main() {
   // 발행 간격 가드 — GitHub Actions 스케줄은 자주 누락되므로(실측: 하루 4회 중 1회만
   // 실행) 스케줄을 촘촘히 걸어두고, 최근에 이미 발행했으면 여기서 조용히 종료한다.
   // 이러면 누락된 회차는 다음 스케줄이 자연히 커버하고 과다 발행도 막힌다.
-  const gapMin = Number(process.env.MIN_GAP_MIN || 150);
+  const gapMin = Number(process.env.MIN_GAP_MIN || 360);
   const recent = await db.execute({
     sql: `SELECT created_at FROM posts
           WHERE status IN ('published','publishing') AND created_at >= datetime('now', ?)

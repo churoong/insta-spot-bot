@@ -1,0 +1,43 @@
+name: 큐레이션(카운트다운) 자동 발행
+
+on:
+  workflow_dispatch: {} # 수동 실행 (테스트용)
+  schedule:
+    # 매주 월·금. GitHub Actions 무료 스케줄러는 정시(특히 :00)에 혼잡해 수십 분~수 시간 지연됨.
+    # → 어중간한 분 + 이르게 예약해 지연돼도 저녁 시간대(18~20시 KST)에 올라가도록 함.
+    - cron: "41 9 * * 1,5" # UTC 09:41 = KST 18:41 목표 (월·금)
+
+jobs:
+  countdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 폰트·ffmpeg 설치 (인포그래픽·표지 릴스 렌더링용)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-nanum fonts-noto-color-emoji ffmpeg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 모음집 생성·발행
+        run: npx tsx scripts/make-roundup.mjs
+        env:
+          ROUNDUP_STYLE: countdown
+
+          TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+          GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
