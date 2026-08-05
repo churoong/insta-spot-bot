@@ -4,6 +4,7 @@ import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetc
 import { generateCaption, generateNarration, generateHook } from "@/lib/caption";
 import { pickPerformingKeyword } from "@/lib/performance";
 import { searchMapUrl } from "@/lib/kakao";
+import { blogBuzz, buzzQuery } from "@/lib/naver";
 
 // 캡션 생성 + 비전 사진 선별이 60초를 넘을 수 있음
 export const maxDuration = 300;
@@ -54,6 +55,16 @@ export async function GET(req: NextRequest) {
             args: [s.contentId, "reel-" + s.contentId],
           });
           if (dup.rows.length) continue;
+
+          // 인기도 게이트 — 블로그 후기가 거의 없는 무명 가게는 콘텐츠 가치가 낮다.
+          // (실측: 유명 노포 16,000건 vs 무명집 4건). 시도를 거듭할수록 기준을 낮춰
+          // 후보가 아예 없어 발행이 멈추는 일은 없게 한다.
+          const minBuzz = [300, 100, 30, 0, 0][attempt] ?? 0;
+          if (minBuzz > 0) {
+            const buzz = await blogBuzz(buzzQuery(s.name, s.address));
+            if (buzz !== null && buzz < minBuzz) continue;
+            (s as any).buzz = buzz ?? 0;
+          }
 
           // 음식 사진이 없어도 발행 가능(디자인 카드로 대체)하지만, 사진이 있는 곳을
           // 우선하기 위해 앞쪽 후보에서는 사진 있는 곳만 고르고, 뒤로 갈수록 허용한다.
