@@ -704,23 +704,26 @@ async function main() {
   const caption = buildCaption(theme, places);
   const sharpMod = (await import("sharp")).default;
 
-  // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
-  // 카운트다운 순위는 '네이버 검색량' 기준으로 매긴다(임의 순서가 아니라 근거 있는 랭킹).
-  // 데이터랩 키가 없거나 실패하면 수집 순서를 그대로 쓴다.
+  // 순위 근거: 네이버 '블로그 후기 수'. 실제 방문·후기가 많을수록 인기 있는 집이라
+  // 임의 순서가 아닌 근거 있는 랭킹이 된다. (데이터랩은 신규 등록이 막혀 사용 불가)
+  // 키가 없거나 실패하면 수집 순서를 그대로 쓴다.
   let rankBasis = "";
   if (STYLE === "countdown") {
     try {
-      const { rankBySearchVolume } = await import("../lib/datalab.ts");
-      const { ranked: byVolume, scored } = await rankBySearchVolume(places);
-      if (scored) {
-        places = byVolume; // 1위가 앞
-        rankBasis = "검색량";
-        console.log("검색량 기준 순위 적용:", places.map((p) => p.name).join(" > "));
+      const { rankByBuzz } = await import("../lib/naver.ts");
+      const res = await rankByBuzz(places);
+      if (res?.scored) {
+        places = res.ranked; // 1위가 앞
+        rankBasis = "블로그 후기";
+        console.log(
+          "후기 수 기준 순위:",
+          places.map((p) => `${p.name}(${p.buzz})`).join(" > ")
+        );
       } else {
-        console.log("검색량 데이터 없음 — 수집 순서 사용");
+        console.log("후기 데이터 없음 — 수집 순서 사용");
       }
     } catch (e) {
-      console.error("검색량 랭킹 실패(수집 순서 사용):", String(e).slice(0, 100));
+      console.error("후기 랭킹 실패(수집 순서 사용):", String(e).slice(0, 100));
     }
   }
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
