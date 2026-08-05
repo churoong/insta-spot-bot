@@ -307,8 +307,33 @@ async function main() {
   const cutCount = script.length > 0 ? script.length : files.length;
   console.log(script.length ? `나레이션 ${script.length}문장 (음성+자막)` : "나레이션 없음 — 무음 릴스");
 
+  // ⚡ TTS는 릴스당 '한 번'만 호출한다.
+  //    문장마다 따로 부르면 하루 릴스 6개 = 18회라 무료 일일 한도(429)를 금방 넘긴다.
+  //    전체 대본을 한 번에 읽히고, 각 컷 길이는 문장 길이 비율로 나눠 자막과 맞춘다.
+  let voiceTrack = null;
+  let voiceDur = 0;
+  if (script.length) {
+    const full = script.join("\n");
+    const w = await ttsToWav(full, path.join(TMP, "voice.wav"), voice, voiceDirection, voiceSpeed);
+    if (w) {
+      const d = await mediaDuration(w);
+      if (d > 1) { voiceTrack = w; voiceDur = d; }
+    }
+    if (!voiceTrack) console.log("음성 생성 실패 — 자막만 있는 무음 릴스로 진행");
+  }
+
+  // 컷 길이: 음성이 있으면 문장 길이 비율로 나눔(자막 싱크), 없으면 기본값
+  const weights = script.map((s) => Math.max(s.length, 6));
+  const wsum = weights.reduce((a, b) => a + b, 0) || 1;
+  const cutSecs = [];
+  for (let i = 0; i < cutCount; i++) {
+    if (voiceTrack) cutSecs.push(Math.max((voiceDur * (weights[i] ?? 1)) / wsum, 1.2));
+    else cutSecs.push(i === 0 ? (single ? 5.5 : 2.4) : Math.round((1.8 + Math.random() * 0.5) * 10) / 10);
+  }
+  // 마지막 컷에 여운(0.4초) — 음성이 끊기며 끝나지 않게
+  if (voiceTrack) cutSecs[cutSecs.length - 1] += 0.4;
+
   const clips = [];
-  const voices = [];
   const hookImg = path.join(TMP, "hook.jpg");
   fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
   // 모션 순서를 섞어 매 릴스가 같은 패턴으로 보이지 않게 함
@@ -317,18 +342,7 @@ async function main() {
   for (let i = 0; i < cutCount; i++) {
     const out = path.join(TMP, `clip_${i}.mp4`);
     const line = script[i] || "";
-
-    // 이 컷에 쓸 음성 — 길이가 컷 길이를 결정
-    let secs = i === 0 ? 2.6 : Math.round((1.8 + Math.random() * 0.5) * 10) / 10;
-    let wav = null;
-    if (line) {
-      const w = await ttsToWav(line, path.join(TMP, `v_${i}.wav`), voice, voiceDirection, voiceSpeed);
-      if (w) {
-        const d = await mediaDuration(w);
-        if (d > 0.5) { wav = w; secs = Math.min(d + 0.45, 9); } // 말끝 여유 + 상한
-      }
-    }
-    voices.push(wav);
+    const secs = Math.min(cutSecs[i], 12);
 
     // 프레임 준비: 첫 컷은 훅 배너, 이후는 왜곡 없는 세로 프레임. 자막은 공통으로 얹음.
     const srcFile = files[Math.min(i, files.length - 1)];
@@ -338,10 +352,10 @@ async function main() {
     const frame = path.join(TMP, `frame_${i}.jpg`);
     fs.writeFileSync(frame, frameBuf);
 
-    if (i === 0 && !line) {
-      // 나레이션이 없을 때만 첫 컷을 정지로(훅 문구 가독성)
+    if (i === 0 && !voiceTrack && !line) {
+      // 음성·자막이 모두 없을 때만 첫 컷을 정지로(훅 문구 가독성)
       await sh("ffmpeg", [
-        "-y", "-loop", "1", "-i", frame, "-t", String(single ? 5.5 : 2.4), "-r", "30",
+        "-y", "-loop", "1", "-i", frame, "-t", String(secs), "-r", "30",
         "-vf", "scale=1080:1920,format=yuv420p",
         "-c:v", "libx264", "-preset", "veryfast", out,
       ]);
@@ -360,28 +374,12 @@ async function main() {
     "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", silent,
   ]);
 
-  // 나레이션 오디오 이어붙여 영상에 입힘 (음성이 하나도 없으면 무음 트랙)
+  // 나레이션 오디오를 영상에 입힘 (없으면 무음 트랙)
   const reel = path.join(TMP, "reel.mp4");
-  const haveVoice = voices.some(Boolean);
-  if (haveVoice) {
-    // 음성 없는 컷은 그 길이만큼 무음으로 채워 영상과 싱크를 맞춘다
-    const parts = [];
-    for (let i = 0; i < clips.length; i++) {
-      if (voices[i]) parts.push(voices[i]);
-      else {
-        const d = await mediaDuration(clips[i]);
-        const sil = path.join(TMP, `sil_${i}.wav`);
-        await sh("ffmpeg", ["-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", String(Math.max(d, 0.3)), sil]);
-        parts.push(sil);
-      }
-    }
-    const alist = path.join(TMP, "alist.txt");
-    fs.writeFileSync(alist, parts.map((p) => `file '${p}'`).join("\n"));
-    const voiceTrack = path.join(TMP, "voice.wav");
-    await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", alist, voiceTrack]);
+  if (voiceTrack) {
     await sh("ffmpeg", [
       "-y", "-i", silent, "-i", voiceTrack,
-      "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest",
+      "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
       "-movflags", "+faststart", reel,
     ]);
   } else {
@@ -393,7 +391,7 @@ async function main() {
   }
   const size = fs.statSync(reel).size;
   const totalSec = await mediaDuration(reel);
-  console.log(`릴스 렌더 완료: ${(size / 1024 / 1024).toFixed(1)}MB, ${totalSec.toFixed(1)}초${haveVoice ? " (음성 포함)" : ""}`);
+  console.log(`릴스 렌더 완료: ${(size / 1024 / 1024).toFixed(1)}MB, ${totalSec.toFixed(1)}초${voiceTrack ? " (음성 포함)" : ""}`);
 
   // 6) 공개 URL 업로드
   const videoUrl = await uploadPublic(reel);
