@@ -41,16 +41,53 @@ function shortRegion(addr) {
   return [sido, gu].filter(Boolean).join(" ");
 }
 
+/**
+ * TourAPI 호출.
+ * ⚠️ data.go.kr이 GitHub Actions 러너 IP를 간헐적으로 차단(ConnectTimeout)해
+ *    발행이 통째로 실패한 적이 있다. 그래서 Vercel 프록시(/api/tour-proxy)를
+ *    1순위로 쓰고, 실패하면 직접 호출로 폴백한다. 각 경로마다 2회씩 재시도.
+ */
 async function tourCall(endpoint, params) {
-  const qs = new URLSearchParams({
-    serviceKey: process.env.TOUR_API_KEY,
-    MobileOS: "ETC", MobileApp: "instaSpotBot", _type: "json", ...params,
-  });
-  const res = await fetch(`${TOUR}/${endpoint}?${qs}`, { signal: AbortSignal.timeout(20000) });
-  if (!res.ok) throw new Error(`TourAPI ${endpoint} HTTP ${res.status}`);
-  const json = await res.json();
-  const items = json?.response?.body?.items?.item;
-  return Array.isArray(items) ? items : items ? [items] : [];
+  const base = (process.env.APP_BASE_URL || "https://insta-spot-bot.vercel.app").replace(/\/$/, "");
+  const secret = process.env.CRON_SECRET;
+
+  // 1순위: Vercel 프록시 (Actions IP 차단 우회)
+  if (secret) {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const pq = new URLSearchParams({ endpoint, ...params });
+        const r = await fetch(`${base}/api/tour-proxy?${pq}`, {
+          headers: { Authorization: `Bearer ${secret}` },
+          signal: AbortSignal.timeout(40000),
+        });
+        if (r.ok) {
+          const j = await r.json();
+          if (Array.isArray(j.items)) return j.items;
+        }
+      } catch (e) {
+        console.error(`[tour] 프록시 실패(${i + 1}):`, String(e).slice(0, 80));
+      }
+    }
+  }
+
+  // 폴백: 직접 호출
+  let lastErr = null;
+  for (let i = 0; i < 2; i++) {
+    try {
+      const qs = new URLSearchParams({
+        serviceKey: process.env.TOUR_API_KEY,
+        MobileOS: "ETC", MobileApp: "instaSpotBot", _type: "json", ...params,
+      });
+      const res = await fetch(`${TOUR}/${endpoint}?${qs}`, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) throw new Error(`TourAPI ${endpoint} HTTP ${res.status}`);
+      const json = await res.json();
+      const items = json?.response?.body?.items?.item;
+      return Array.isArray(items) ? items : items ? [items] : [];
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr ?? new Error(`TourAPI ${endpoint} 실패`);
 }
 
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */

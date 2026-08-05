@@ -29,6 +29,7 @@ jobs:
       - name: 모음집 생성·발행
         run: npx tsx scripts/make-roundup.mjs
         env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
