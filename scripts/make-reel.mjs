@@ -31,7 +31,7 @@ const RW = 1080, RH = 1920; // 릴스 규격 9:16
  * Gemini TTS로 한 문장을 음성(PCM)으로 만들어 wav 파일로 저장. 실패하면 null.
  * 무료 등급에서 동작하며, 실패해도 릴스는 무음으로 계속 발행된다.
  */
-async function ttsToWav(text, outWav, voice, direction) {
+async function ttsToWav(text, outWav, voice, direction, speed = 1) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   const model = process.env.TTS_MODEL || "gemini-2.5-flash-preview-tts";
@@ -59,11 +59,16 @@ async function ttsToWav(text, outWav, voice, direction) {
       console.error("[tts] 오디오 없음:", j?.error ? `${j.error.code} ${String(j.error.message).slice(0, 80)}` : "응답에 inlineData 없음");
       return null;
     }
-    // 응답은 raw PCM(L16 24kHz mono) — ffmpeg로 wav 컨테이너에 담는다
+    // 응답은 raw PCM(L16 24kHz mono) — ffmpeg로 wav 컨테이너에 담는다.
+    // speed>1이면 atempo로 실제 말 속도를 올린다(피치는 유지돼 목소리가 변하지 않음).
     const pcm = path.join(TMP, `tts_${Date.now()}_${Math.round(Math.random() * 1e6)}.pcm`);
     fs.writeFileSync(pcm, Buffer.from(inline.data, "base64"));
     const rate = /rate=(\d+)/.exec(inline.mimeType || "")?.[1] || "24000";
-    await sh("ffmpeg", ["-y", "-f", "s16le", "-ar", rate, "-ac", "1", "-i", pcm, outWav]);
+    const args = ["-y", "-f", "s16le", "-ar", rate, "-ac", "1", "-i", pcm];
+    const tempo = Math.min(Math.max(Number(speed) || 1, 0.5), 2); // atempo 유효 범위
+    if (Math.abs(tempo - 1) > 0.01) args.push("-filter:a", `atempo=${tempo.toFixed(2)}`);
+    args.push(outWav);
+    await sh("ffmpeg", args);
     return outWav;
   } catch (e) {
     console.error("[tts] 실패:", String(e).slice(0, 100));
@@ -298,6 +303,7 @@ async function main() {
   );
   const voice = process.env.TTS_VOICE || persona.voice || "Fenrir";
   const voiceDirection = persona.voiceDirection || "";
+  const voiceSpeed = Number(process.env.TTS_SPEED || persona.voiceSpeed || 1);
   const cutCount = script.length > 0 ? script.length : files.length;
   console.log(script.length ? `나레이션 ${script.length}문장 (음성+자막)` : "나레이션 없음 — 무음 릴스");
 
@@ -316,7 +322,7 @@ async function main() {
     let secs = i === 0 ? 2.6 : Math.round((1.8 + Math.random() * 0.5) * 10) / 10;
     let wav = null;
     if (line) {
-      const w = await ttsToWav(line, path.join(TMP, `v_${i}.wav`), voice, voiceDirection);
+      const w = await ttsToWav(line, path.join(TMP, `v_${i}.wav`), voice, voiceDirection, voiceSpeed);
       if (w) {
         const d = await mediaDuration(w);
         if (d > 0.5) { wav = w; secs = Math.min(d + 0.45, 9); } // 말끝 여유 + 상한
