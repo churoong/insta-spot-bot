@@ -150,7 +150,52 @@ async function verticalFrameBuffer(sharp, imgPath) {
 }
 
 
-/** 첫 프레임에 훅 배너를 합성한 세로 이미지 버퍼 반환 */
+/**
+ * 텍스트 훅 카드 — 릴스 첫 화면. 사진이 아니라 '문구'가 주인공이 되게 만든다.
+ * 배경은 그 가게 음식 사진을 크게 어둡히고, 큰 글씨를 중앙에 올린다.
+ * (사진 퀄리티가 평범해도 첫 화면 임팩트가 유지되는 게 목적)
+ */
+async function composeHookCard(sharp, imgPath, hookText, subText) {
+  const W = RW, H = RH;
+  // 배경: 어둡게 + 살짝 블러 → 글씨 가독성 확보
+  const bg = await sharp(imgPath)
+    .resize(W, H, { fit: "cover", position: sharp.strategy.attention })
+    .modulate({ brightness: 0.42, saturation: 1.05 })
+    .blur(8)
+    .toBuffer();
+
+  // 글자 크기: 길이에 따라 자동 축소, 최대 2줄로 나눔
+  const text = String(hookText || "").trim();
+  const maxPerLine = text.length <= 11 ? 11 : 10;
+  const words = text.split(/\s+/);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > maxPerLine && cur) { lines.push(cur.trim()); cur = w; }
+    else cur = (cur + " " + w).trim();
+  }
+  if (cur) lines.push(cur);
+  const use = lines.slice(0, 3);
+  const size = use.length >= 3 ? 104 : use.length === 2 ? 122 : 132;
+  const lineH = Math.round(size * 1.28);
+  const startY = Math.round(H / 2 - ((use.length - 1) * lineH) / 2);
+
+  const svg = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="${startY - lineH}" width="${W}" height="${use.length * lineH + lineH}" fill="#000" fill-opacity="0.22"/>
+      ${use
+        .map(
+          (l, i) =>
+            `<text x="${W / 2}" y="${startY + i * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#000" stroke-width="8" paint-order="stroke">${esc(l)}</text>`
+        )
+        .join("")}
+      ${subText ? `<text x="${W / 2}" y="${startY + use.length * lineH + 46}" font-family="${FONT}" font-size="46" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">${esc(subText)}</text>` : ""}
+    </svg>`
+  );
+  return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
+}
+
+/** (구) 사진 위 작은 배너형 훅 — 텍스트 카드로 대체됨 */
 async function composeHook(sharp, imgPath, hook) {
   const W = RW, H = RH;
   const base = await verticalFrameBuffer(sharp, imgPath); // 왜곡 없는 세로 프레임 재사용
@@ -260,7 +305,8 @@ async function main() {
   //      여러 장이면 훅 정지 2.4초 + 나머지 줌인 2.0초씩(모션으로 리텐션↑).
   //    - 지터 방지: 큰 크기로 업스케일 후 zoompan(서브픽셀 이동 매끄럽게)
   const sharp = (await import("sharp")).default;
-  const hook = HOOKS[Math.floor(Math.random() * HOOKS.length)];
+  // 훅 문구: AI가 가게 사실에서 뽑은 구체적 훅 우선, 실패하면 일반 훅
+  const hook = (data.hook && String(data.hook).trim()) || HOOKS[Math.floor(Math.random() * HOOKS.length)];
   console.log("훅:", hook);
   const single = files.length === 1;
 
@@ -334,8 +380,13 @@ async function main() {
   if (voiceTrack) cutSecs[cutSecs.length - 1] += 0.4;
 
   const clips = [];
+  // 첫 화면: 텍스트가 주인공인 훅 카드 (가게명·지역을 작은 부제로)
+  const subText = [subject.name, (subject.address || "").split(/\s+/).slice(0, 2).join(" ")]
+    .filter(Boolean)
+    .join(" · ")
+    .slice(0, 28);
   const hookImg = path.join(TMP, "hook.jpg");
-  fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
+  fs.writeFileSync(hookImg, await composeHookCard(sharp, files[0], hook, subText));
   // 모션 순서를 섞어 매 릴스가 같은 패턴으로 보이지 않게 함
   const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
 
@@ -344,11 +395,11 @@ async function main() {
     const line = script[i] || "";
     const secs = Math.min(cutSecs[i], 12);
 
-    // 프레임 준비: 첫 컷은 훅 배너, 이후는 왜곡 없는 세로 프레임. 자막은 공통으로 얹음.
+    // 첫 컷은 훅 카드(자막 없이 훅 문구만 보이게), 이후는 사진 + 자막
     const srcFile = files[Math.min(i, files.length - 1)];
     let frameBuf =
       i === 0 ? fs.readFileSync(hookImg) : await verticalFrameBuffer(sharp, srcFile);
-    frameBuf = await withSubtitle(sharp, frameBuf, line);
+    if (i > 0) frameBuf = await withSubtitle(sharp, frameBuf, line);
     const frame = path.join(TMP, `frame_${i}.jpg`);
     fs.writeFileSync(frame, frameBuf);
 

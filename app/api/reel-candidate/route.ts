@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetchQuizImages } from "@/lib/tourapi";
-import { generateCaption, generateNarration } from "@/lib/caption";
+import { generateCaption, generateNarration, generateHook } from "@/lib/caption";
 import { pickPerformingKeyword } from "@/lib/performance";
 import { searchMapUrl } from "@/lib/kakao";
 
@@ -77,6 +77,8 @@ export async function GET(req: NextRequest) {
             menu: info.menu,
             lines: Math.min(Math.max(imgs.length, 3), 5),
           });
+          // 첫 화면 텍스트 훅 카드 문구 (사진이 아니라 '문구'로 스크롤을 멈추게 함)
+          const hook = await generateHook(s, { menu: info.menu });
 
           const region = String(s.address ?? "").split(/\s+/).slice(0, 2).join(" ");
           return NextResponse.json({
@@ -88,6 +90,7 @@ export async function GET(req: NextRequest) {
             originalUrls: imgs, // DB 기록용 원본
             caption: cap.caption,
             narration: narration ?? [],
+            hook: hook ?? null,
             mapx: s.mapx ?? null,
             mapy: s.mapy ?? null,
             mapUrl: searchMapUrl(s.name, region),

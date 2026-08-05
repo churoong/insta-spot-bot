@@ -101,6 +101,39 @@ ${persona.captionStyle.map((s: string) => `- ${s}`).join("\n")}
 }
 
 /**
+ * 릴스 첫 화면(텍스트 훅 카드)에 띄울 강렬한 한 줄.
+ * 사진 퀄리티에 기대지 않고 '문구'로 스크롤을 멈추게 하는 게 목적.
+ * 실패하면 null → 호출부가 기본 훅으로 대체.
+ */
+export async function generateHook(spot: Spot, opts: { menu?: string } = {}): Promise<string | null> {
+  const name = cleanName(spot.name);
+  const { sido, gu } = regionHint(spot.address);
+  const prompt = `인스타 릴스 첫 화면에 크게 띄울 '훅 문구' 하나만 만들어줘.
+
+가게: ${name} (${[sido, gu].filter(Boolean).join(" ") || "지역"})
+${opts.menu ? `대표 메뉴: ${opts.menu}` : ""}
+설명: ${(spot.overview || "").slice(0, 400) || "(없음)"}
+
+규칙:
+- 8~18자. 딱 한 줄. 스크롤을 멈추게 하는 궁금증·호기심 유발형.
+- 위 설명에 있는 '사실'에서 뽑아내(연식, 3대째, 단일 메뉴, 현지인 단골, 특이한 조리법 등).
+  사실이 없으면 음식의 강렬한 한 방(식감·국물·불맛)으로.
+- 과장 광고 문구 금지("인생맛집", "미쳤다", "역대급"). 거짓·추측 금지.
+- 물음표로 끝나도 좋음. 이모지·해시태그·따옴표 금지. 순수 한글(한자 금지).
+
+예시 톤: 30년째 줄 서는 이유 / 메뉴가 딱 하나입니다 / 현지인은 여기만 갑니다
+
+문구 한 줄만 출력해.`;
+
+  const r = await llmText(prompt, { maxTokens: 100 });
+  if (!r) return null;
+  const line = r.text.split("\n")[0].replace(/[#"'`]/g, "").trim();
+  if (!line || line.length < 5 || line.length > 24) return null;
+  if (/[一-鿿]/.test(line)) return null;
+  return line;
+}
+
+/**
  * 릴스 나레이션 스크립트 — 캐릭터 톤의 짧은 문장 배열.
  * 각 문장이 릴스의 한 컷(자막 + 음성)에 대응한다.
  * 실패하면 null → 호출부는 음성 없이 진행(무음 릴스로 폴백).
