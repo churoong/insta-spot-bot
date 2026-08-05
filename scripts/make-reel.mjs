@@ -28,6 +28,92 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const RW = 1080, RH = 1920; // 릴스 규격 9:16
 
 /**
+ * Gemini TTS로 한 문장을 음성(PCM)으로 만들어 wav 파일로 저장. 실패하면 null.
+ * 무료 등급에서 동작하며, 실패해도 릴스는 무음으로 계속 발행된다.
+ */
+async function ttsToWav(text, outWav, voice) {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  const model = process.env.TTS_MODEL || "gemini-2.5-flash-preview-tts";
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text }] }],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Kore" } } },
+          },
+        }),
+        signal: AbortSignal.timeout(60000),
+      }
+    );
+    const j = await res.json();
+    const inline = j?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData)?.inlineData;
+    if (!inline?.data) {
+      console.error("[tts] 오디오 없음:", j?.error ? `${j.error.code} ${String(j.error.message).slice(0, 80)}` : "응답에 inlineData 없음");
+      return null;
+    }
+    // 응답은 raw PCM(L16 24kHz mono) — ffmpeg로 wav 컨테이너에 담는다
+    const pcm = path.join(TMP, `tts_${Date.now()}_${Math.round(Math.random() * 1e6)}.pcm`);
+    fs.writeFileSync(pcm, Buffer.from(inline.data, "base64"));
+    const rate = /rate=(\d+)/.exec(inline.mimeType || "")?.[1] || "24000";
+    await sh("ffmpeg", ["-y", "-f", "s16le", "-ar", rate, "-ac", "1", "-i", pcm, outWav]);
+    return outWav;
+  } catch (e) {
+    console.error("[tts] 실패:", String(e).slice(0, 100));
+    return null;
+  }
+}
+
+/** 미디어 길이(초) 조회 — ffprobe */
+function mediaDuration(file) {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", file,
+    ]);
+    let out = "";
+    p.on("error", () => resolve(0));
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", () => resolve(Number(String(out).trim()) || 0));
+  });
+}
+
+/** 자막 바(하단)를 합성한 프레임 버퍼 — 소리를 꺼도 읽히게 */
+async function withSubtitle(sharp, frameBuf, text) {
+  if (!text) return frameBuf;
+  // 한 줄이 너무 길면 두 줄로 나눔
+  const max = 18;
+  const words = String(text).split(/\s+/);
+  const lines = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > max && cur) { lines.push(cur.trim()); cur = w; }
+    else cur = (cur + " " + w).trim();
+  }
+  if (cur) lines.push(cur);
+  const use = lines.slice(0, 2);
+  const fontSize = 54, lineH = 74;
+  const boxH = use.length * lineH + 44;
+  const boxY = RH - 430 - boxH;
+  const svg = Buffer.from(
+    `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="40" y="${boxY}" width="${RW - 80}" height="${boxH}" rx="26" fill="#000" fill-opacity="0.55"/>
+      ${use
+        .map(
+          (l, i) =>
+            `<text x="${RW / 2}" y="${boxY + 34 + (i + 1) * lineH - 18}" font-family="${FONT}" font-size="${fontSize}" font-weight="800" fill="#fff" text-anchor="middle">${esc(l)}</text>`
+        )
+        .join("")}
+    </svg>`
+  );
+  return sharp(frameBuf).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
+}
+
+/**
  * 원본 사진 → 왜곡 없는 1080x1920 세로 프레임 버퍼.
  *  - 세로·정사각에 가까우면 음식 중심 스마트 크롭으로 꽉 채움
  *  - 가로로 긴 사진은 꽉 채우면 위아래가 심하게 잘리므로, 흐린 배경 위에
@@ -56,11 +142,6 @@ async function verticalFrameBuffer(sharp, imgPath) {
     .toBuffer();
 }
 
-/** 왜곡 없는 세로 프레임을 파일로 저장 */
-async function toVerticalFrame(sharp, inFile, outFile) {
-  const fs2 = await import("node:fs");
-  fs2.default.writeFileSync(outFile, await verticalFrameBuffer(sharp, inFile));
-}
 
 /** 첫 프레임에 훅 배너를 합성한 세로 이미지 버퍼 반환 */
 async function composeHook(sharp, imgPath, hook) {
@@ -206,43 +287,100 @@ async function main() {
     }
   };
 
+  // 나레이션 대본: 문장 수에 맞춰 컷을 구성한다(문장 1개 = 컷 1개).
+  // TTS 성공한 문장은 음성 길이에 맞춰 컷 길이를 정하고 자막을 얹는다.
+  const script = Array.isArray(data.narration) ? data.narration.filter(Boolean) : [];
+  const voice = data.voice || process.env.TTS_VOICE || "Kore";
+  const cutCount = script.length > 0 ? script.length : files.length;
+  console.log(script.length ? `나레이션 ${script.length}문장 (음성+자막)` : "나레이션 없음 — 무음 릴스");
+
   const clips = [];
+  const voices = [];
   const hookImg = path.join(TMP, "hook.jpg");
   fs.writeFileSync(hookImg, await composeHook(sharp, files[0], hook));
   // 모션 순서를 섞어 매 릴스가 같은 패턴으로 보이지 않게 함
   const order = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
-  for (let i = 0; i < files.length; i++) {
+
+  for (let i = 0; i < cutCount; i++) {
     const out = path.join(TMP, `clip_${i}.mp4`);
-    if (i === 0 && single) {
-      // 한 장뿐: 훅 얹은 사진(이미 1080x1920)을 잔잔히 줌
-      await zoomClip(hookImg, out, 5.5, order[0]);
-    } else if (i === 0) {
-      // 훅 정지 컷 (문구 안정적으로 읽히게)
+    const line = script[i] || "";
+
+    // 이 컷에 쓸 음성 — 길이가 컷 길이를 결정
+    let secs = i === 0 ? 2.6 : Math.round((1.8 + Math.random() * 0.5) * 10) / 10;
+    let wav = null;
+    if (line) {
+      const w = await ttsToWav(line, path.join(TMP, `v_${i}.wav`), voice);
+      if (w) {
+        const d = await mediaDuration(w);
+        if (d > 0.5) { wav = w; secs = Math.min(d + 0.45, 9); } // 말끝 여유 + 상한
+      }
+    }
+    voices.push(wav);
+
+    // 프레임 준비: 첫 컷은 훅 배너, 이후는 왜곡 없는 세로 프레임. 자막은 공통으로 얹음.
+    const srcFile = files[Math.min(i, files.length - 1)];
+    let frameBuf =
+      i === 0 ? fs.readFileSync(hookImg) : await verticalFrameBuffer(sharp, srcFile);
+    frameBuf = await withSubtitle(sharp, frameBuf, line);
+    const frame = path.join(TMP, `frame_${i}.jpg`);
+    fs.writeFileSync(frame, frameBuf);
+
+    if (i === 0 && !line) {
+      // 나레이션이 없을 때만 첫 컷을 정지로(훅 문구 가독성)
       await sh("ffmpeg", [
-        "-y", "-loop", "1", "-i", hookImg, "-t", "2.4", "-r", "30",
-        "-vf", "scale=1080:1920,format=yuv420p", // 이미 9:16이라 비율 변화 없음
+        "-y", "-loop", "1", "-i", frame, "-t", String(single ? 5.5 : 2.4), "-r", "30",
+        "-vf", "scale=1080:1920,format=yuv420p",
         "-c:v", "libx264", "-preset", "veryfast", out,
       ]);
     } else {
-      const frame = path.join(TMP, `frame_${i}.jpg`);
-      await toVerticalFrame(sharp, files[i], frame); // 왜곡 없는 세로 프레임
-      // 길이도 살짝 다르게(1.8~2.3초) — 일정 간격 컷은 기계적으로 보임
-      const secs = Math.round((1.8 + Math.random() * 0.5) * 10) / 10;
       await zoomClip(frame, out, secs, order[i % order.length]);
     }
     clips.push(out);
   }
+
+  // 영상 이어붙이기
   const listFile = path.join(TMP, "list.txt");
   fs.writeFileSync(listFile, clips.map((c) => `file '${c}'`).join("\n"));
-  const reel = path.join(TMP, "reel.mp4");
+  const silent = path.join(TMP, "silent.mp4");
   await sh("ffmpeg", [
     "-y", "-f", "concat", "-safe", "0", "-i", listFile,
-    "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-    "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-shortest", "-movflags", "+faststart", reel,
+    "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", silent,
   ]);
+
+  // 나레이션 오디오 이어붙여 영상에 입힘 (음성이 하나도 없으면 무음 트랙)
+  const reel = path.join(TMP, "reel.mp4");
+  const haveVoice = voices.some(Boolean);
+  if (haveVoice) {
+    // 음성 없는 컷은 그 길이만큼 무음으로 채워 영상과 싱크를 맞춘다
+    const parts = [];
+    for (let i = 0; i < clips.length; i++) {
+      if (voices[i]) parts.push(voices[i]);
+      else {
+        const d = await mediaDuration(clips[i]);
+        const sil = path.join(TMP, `sil_${i}.wav`);
+        await sh("ffmpeg", ["-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", String(Math.max(d, 0.3)), sil]);
+        parts.push(sil);
+      }
+    }
+    const alist = path.join(TMP, "alist.txt");
+    fs.writeFileSync(alist, parts.map((p) => `file '${p}'`).join("\n"));
+    const voiceTrack = path.join(TMP, "voice.wav");
+    await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", alist, voiceTrack]);
+    await sh("ffmpeg", [
+      "-y", "-i", silent, "-i", voiceTrack,
+      "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest",
+      "-movflags", "+faststart", reel,
+    ]);
+  } else {
+    await sh("ffmpeg", [
+      "-y", "-i", silent,
+      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+      "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", reel,
+    ]);
+  }
   const size = fs.statSync(reel).size;
-  console.log(`릴스 렌더 완료: ${(size / 1024 / 1024).toFixed(1)}MB`);
+  const totalSec = await mediaDuration(reel);
+  console.log(`릴스 렌더 완료: ${(size / 1024 / 1024).toFixed(1)}MB, ${totalSec.toFixed(1)}초${haveVoice ? " (음성 포함)" : ""}`);
 
   // 6) 공개 URL 업로드
   const videoUrl = await uploadPublic(reel);

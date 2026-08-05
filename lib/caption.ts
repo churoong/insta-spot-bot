@@ -1,6 +1,7 @@
 import type { Spot } from "./tourapi";
 import { FOOD_KEYWORDS } from "./tourapi";
 import { llmText } from "./llm";
+import persona from "@/data/persona.json";
 
 const SOURCE_LINE = "📷 사진·정보 출처: 한국관광공사 TourAPI";
 
@@ -52,7 +53,11 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
   const menuRule = opts.menu
     ? `\n- 이 집 대표 메뉴는 "${opts.menu}"야. 본문에 이 메뉴 얘기를 자연스럽게 한 번 녹여줘 (맛 묘사).`
     : "";
-  const prompt = `인스타그램 맛집 소개 계정의 게시글 '본문'을 한국어로 작성해줘. (해시태그는 넣지 마 — 내가 따로 붙일 거야)
+  const prompt = `너는 인스타그램 맛집 계정 '${persona.name}'이야. ${persona.tagline}
+이 캐릭터로 게시글 '본문'을 한국어로 써줘. (해시태그는 넣지 마 — 내가 따로 붙일 거야)
+
+캐릭터 말투·시선:
+${persona.captionStyle.map((s: string) => `- ${s}`).join("\n")}
 
 가게 정보:
 - 상호명: ${name}
@@ -61,9 +66,9 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
 
 작성 규칙:
 1. ⭐상호명 "${name}"을 본문에 자연스럽게 넣어줘. 어디에 있는 곳인지(${regionText || "지역"})도 자연스럽게 언급해. 정보를 숨기지 말고 친절하게 소개하는 톤.
-2. 자연스럽고 사람 냄새 나는 톤으로 써. 광고 문구 같은 뻔한 표현("인생맛집", "핫플 인정")은 피하고, 실제로 다녀와 본 사람이 소개하듯 3~5문장. 반드시 **친근하지만 정중한 존댓말(해요체)** 로 써. 반말 금지. 이모지는 2~4개만 적당히.
+2. 3~5문장. 이모지는 2~4개만 적당히.
 3. 사진과 함께 올라가는 게시물이야. 자연스러우면 음식 얘기(맛, 비주얼)를 한두 개 녹여도 좋아.
-4. 마지막은 저장·방문을 부드럽게 권하는 한 문장으로 마무리해 (예: 저장해두고 가보세요). 댓글로 위치를 물어보라거나 DM을 보내준다는 안내는 절대 넣지 마.
+4. 마지막은 저장·방문을 부드럽게 권하는 한 문장으로 마무리해. 댓글로 위치를 물어보라거나 DM을 보내준다는 안내는 절대 넣지 마.
 5. ⚠️해시태그(#)는 절대 넣지 마. 본문 문장만 출력해.
 6. ⚠️반드시 순수 한글로만 써. 한자(漢字)나 중국어 문자를 절대 섞지 마.${seoRule}${menuRule}${featuredRule}
 
@@ -93,6 +98,46 @@ async function generateWithGemini(spot: Spot, opts: CaptionOpts = {}): Promise<C
   const infoBlock = `${infoLines.join("\n")}\n\n`;
 
   return { caption: `${body}\n\n${infoBlock}${buildHashtags(spot, dish, opts.menu)}\n\n${SOURCE_LINE}` };
+}
+
+/**
+ * 릴스 나레이션 스크립트 — 캐릭터 톤의 짧은 문장 배열.
+ * 각 문장이 릴스의 한 컷(자막 + 음성)에 대응한다.
+ * 실패하면 null → 호출부는 음성 없이 진행(무음 릴스로 폴백).
+ */
+export async function generateNarration(
+  spot: Spot,
+  opts: { menu?: string; lines?: number } = {}
+): Promise<string[] | null> {
+  const name = cleanName(spot.name);
+  const { sido, gu } = regionHint(spot.address);
+  const want = Math.min(Math.max(opts.lines ?? 4, 3), 6);
+  const prompt = `너는 인스타그램 맛집 계정 '${persona.name}'이야. ${persona.tagline}
+아래 가게를 소개하는 짧은 릴스 나레이션 대본을 써줘.
+
+가게: ${name} (${[sido, gu].filter(Boolean).join(" ") || "지역"})
+${opts.menu ? `대표 메뉴: ${opts.menu}` : ""}
+설명: ${(spot.overview || "").slice(0, 300) || "(없음)"}
+
+대본 규칙:
+${persona.narrationStyle.map((s: string) => `- ${s}`).join("\n")}
+- 정확히 ${want}문장. 각 문장은 한 줄로.
+- 말로 읽을 문장이니 해시태그·이모지·괄호·따옴표는 절대 넣지 마.
+- 순수 한글로만 써. 한자 금지. 숫자는 한글로 읽기 쉽게 (예: 30년 → 삼십 년 은 쓰지 말고 그냥 30년).
+- 상호명 "${name}"을 첫 문장이나 두 번째 문장에 넣어줘.
+- 존댓말 해요체.
+
+문장만 줄바꿈으로 구분해 출력해. 번호·기호 없이.`;
+
+  const r = await llmText(prompt, { maxTokens: 500 });
+  if (!r) return null;
+  const lines = r.text
+    .split("\n")
+    .map((l) => l.replace(/^[\d.\-•*)\s]+/, "").replace(/[#"'`()]/g, "").trim())
+    .filter((l) => l.length >= 4 && l.length <= 60);
+  if (lines.length < 2) return null;
+  if (lines.some((l) => /[一-鿿]/.test(l))) return null; // 한자 혼입 시 음성 생략
+  return lines.slice(0, want);
 }
 
 /** 게시물명에서 음식 종류 추출 (SEO 본문·해시태그용) */

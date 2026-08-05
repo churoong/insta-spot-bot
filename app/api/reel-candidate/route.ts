@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetchQuizImages } from "@/lib/tourapi";
-import { generateCaption } from "@/lib/caption";
+import { generateCaption, generateNarration } from "@/lib/caption";
 import { pickPerformingKeyword } from "@/lib/performance";
 import { searchMapUrl } from "@/lib/kakao";
 
@@ -72,6 +72,12 @@ export async function GET(req: NextRequest) {
             continue;
           }
 
+          // 릴스 나레이션 대본(자막·TTS용). 실패해도 무음 릴스로 진행하므로 치명적이지 않음.
+          const narration = await generateNarration(s, {
+            menu: info.menu,
+            lines: Math.min(Math.max(imgs.length, 3), 5),
+          });
+
           const region = String(s.address ?? "").split(/\s+/).slice(0, 2).join(" ");
           return NextResponse.json({
             contentId: s.contentId,
@@ -81,6 +87,7 @@ export async function GET(req: NextRequest) {
             imageUrls: imgs.map(proxy), // Actions는 프록시로 받음
             originalUrls: imgs, // DB 기록용 원본
             caption: cap.caption,
+            narration: narration ?? [],
             mapx: s.mapx ?? null,
             mapy: s.mapy ?? null,
             mapUrl: searchMapUrl(s.name, region),
