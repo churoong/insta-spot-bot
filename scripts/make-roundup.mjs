@@ -389,7 +389,7 @@ async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
             `<text x="${RW / 2}" y="${startY + i * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">${esc(l)}</text>`
         )
         .join("")}
-      <text x="${RW / 2}" y="${startY + lines.length * lineH + 40}" font-family="${FONT}" font-size="48" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">${rankBasis ? esc(`네이버 ${rankBasis} 순위`) : "끝까지 보고 저장하세요"}</text>
+      <text x="${RW / 2}" y="${startY + lines.length * lineH + 40}" font-family="${FONT}" font-size="48" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">끝까지 보고 저장하세요</text>
     </svg>`
   );
   return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
@@ -730,6 +730,7 @@ async function main() {
   const ranked = STYLE === "countdown" ? [...places].reverse() : places;
 
   const cards = []; // countdown에서 쓸 카드 파일들
+  const narration = []; // 카드와 1:1 대응하는 나레이션 문장
   let reelCover = null;
   if (STYLE === "countdown") {
     const intro = path.join(TMP, "c_intro.jpg");
@@ -738,12 +739,21 @@ async function main() {
       await composeIntroCard(sharpMod, theme, places, theme.titleResolved, rankBasis)
     );
     cards.push(intro);
+    narration.push(`${theme.titleResolved}. ${ranked.length}위부터 공개합니다`);
+
     for (let i = 0; i < ranked.length; i++) {
       const rank = ranked.length - i; // N위 → 1위
       const f = path.join(TMP, `c_rank_${rank}.jpg`);
       try {
         fs.writeFileSync(f, await composeRankCard(sharpMod, ranked[i], rank));
         cards.push(f);
+        const p = ranked[i];
+        const tail = p.desc ? `. ${p.desc}` : "";
+        narration.push(
+          rank === 1
+            ? `대망의 1위, ${p.region ? p.region + " " : ""}${p.name}${tail}`
+            : `${rank}위, ${p.region ? p.region + " " : ""}${p.name}${tail}`
+        );
       } catch (e) {
         console.error(`순위 카드 ${rank} 실패(건너뜀):`, String(e).slice(0, 90));
       }
@@ -752,6 +762,7 @@ async function main() {
     try {
       fs.writeFileSync(outro, await composeOutroCard(sharpMod, places, theme.titleResolved));
       cards.push(outro);
+      narration.push("저장해두고 하나씩 가보세요");
     } catch { /* 아웃트로는 없어도 됨 */ }
     console.log(`카운트다운 카드 ${cards.length}장 생성`);
   } else {
@@ -801,13 +812,46 @@ async function main() {
 
   if (STYLE === "countdown") {
     // 카드들을 순서대로 이어붙임 (인트로 3초, 순위 카드 2.6초, 아웃트로 2.6초)
+    // 나레이션 음성 — TTS는 릴스당 1회만 호출(무료 한도 보호). 실패하면 무음 진행.
+    const persona = JSON.parse(
+      fs.readFileSync(new URL("../data/persona.json", import.meta.url), "utf8")
+    );
+    const { ttsPcm, ttsVoiceConfig } = await import("../lib/tts.ts");
+    const vc = ttsVoiceConfig(persona);
+    let voiceWav = null;
+    let voiceDur = 0;
+    try {
+      const r = await ttsPcm(narration.join("\n"), { voice: vc.voice, direction: vc.direction });
+      if (r) {
+        const pcm = path.join(TMP, "c_voice.pcm");
+        fs.writeFileSync(pcm, r.pcm);
+        const wav = path.join(TMP, "c_voice.wav");
+        const args = ["-y", "-f", "s16le", "-ar", String(r.rate), "-ac", "1", "-i", pcm];
+        const tempo = Math.min(Math.max(vc.speed, 0.5), 2);
+        if (Math.abs(tempo - 1) > 0.01) args.push("-filter:a", `atempo=${tempo.toFixed(2)}`);
+        args.push(wav);
+        await ff(args);
+        voiceDur = await probeDuration(wav);
+        if (voiceDur > 1) voiceWav = wav;
+      }
+    } catch (e) {
+      console.error("나레이션 생성 실패(무음 진행):", String(e).slice(0, 100));
+    }
+    console.log(voiceWav ? `나레이션 ${narration.length}문장 (${voiceDur.toFixed(1)}초)` : "나레이션 없음 — 무음");
+
+    // 컷 길이: 음성이 있으면 문장 길이 비율로 배분해 화면과 말이 맞게 함
+    const weights = narration.map((s) => Math.max(s.length, 8));
+    const wsum = weights.reduce((a, b) => a + b, 0) || 1;
+
     const clips = [];
     for (let i = 0; i < cards.length; i++) {
-      const secs = i === 0 ? 3.0 : 2.6;
+      const secs = voiceWav
+        ? Math.max((voiceDur * (weights[i] ?? 1)) / wsum, 1.4)
+        : i === 0 ? 3.0 : 2.6;
       const out = path.join(TMP, `c_clip_${i}.mp4`);
       const d = Math.round(secs * 30);
       await ff([
-        "-y", "-loop", "1", "-i", cards[i], "-t", String(secs), "-r", "30",
+        "-y", "-loop", "1", "-i", cards[i], "-t", String(secs.toFixed(2)), "-r", "30",
         "-vf",
         `scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0005,1.10)':d=${d}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p`,
         "-c:v", "libx264", "-preset", "veryfast", out,
@@ -816,13 +860,25 @@ async function main() {
     }
     const listFile = path.join(TMP, "c_list.txt");
     fs.writeFileSync(listFile, clips.map((c) => `file '${c}'`).join("\n"));
+    const silent = path.join(TMP, "c_silent.mp4");
     await ff([
       "-y", "-f", "concat", "-safe", "0", "-i", listFile,
-      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-      "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-      "-c:a", "aac", "-shortest", "-movflags", "+faststart", reelMp4,
+      "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", silent,
     ]);
-    console.log(`카운트다운 릴스 렌더 완료 (${clips.length}컷)`);
+    if (voiceWav) {
+      await ff([
+        "-y", "-i", silent, "-i", voiceWav,
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart", reelMp4,
+      ]);
+    } else {
+      await ff([
+        "-y", "-i", silent,
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", reelMp4,
+      ]);
+    }
+    console.log(`카운트다운 릴스 렌더 완료 (${clips.length}컷${voiceWav ? ", 음성 포함" : ""})`);
   } else {
     // 리스트 표지 → 잔잔한 줌인 8초 세로 릴스 렌더 (기존 모음집)
     await ff([
@@ -854,6 +910,19 @@ async function main() {
   });
 
   console.log("완료:", theme.titleResolved);
+}
+
+/** 미디어 길이(초) — ffprobe. 실패하면 0 */
+function probeDuration(file) {
+  return new Promise((resolve) => {
+    const p = spawn("ffprobe", [
+      "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", file,
+    ]);
+    let out = "";
+    p.on("error", () => resolve(0));
+    p.stdout.on("data", (d) => (out += d));
+    p.on("close", () => resolve(Number(String(out).trim()) || 0));
+  });
 }
 
 function curlUpload(args) {
