@@ -640,11 +640,13 @@ function engagementLine(theme, count) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function buildCaption(theme, places) {
+function buildCaption(theme, places, descending = false) {
   // 공개형 — "어디야→DM" 유도 문구 없음. 참여(추천 댓글)·저장 유도만.
-  const lines = places.map(
-    (p, i) => `${i + 1}. ${p.name}${p.hundred ? " 🏅" : ""} (${p.region}) — ${p.desc}`
-  );
+  // descending: 카운트다운 영상과 같은 순서(N위 → 1위)로 번호를 매긴다.
+  const lines = places.map((p, i) => {
+    const num = descending ? places.length - i : i + 1;
+    return `${num}. ${p.name}${p.hundred ? " 🏅" : ""} (${p.region}) — ${p.desc}`;
+  });
   const hundredCount = places.filter((p) => p.hundred).length;
   const hundredLine =
     hundredCount > 0
@@ -762,12 +764,15 @@ async function main() {
       console.error("후기 랭킹 실패(수집 순서 사용):", String(e).slice(0, 100));
     }
   }
-  // ⚠️ 캡션은 순위가 확정된 뒤에 만든다. 정렬 전에 만들면 캡션의 1,2,3 번호와
-  //    영상 속 순위가 어긋난다(실제로 어긋났던 버그).
-  const caption = buildCaption(theme, places);
-
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
   const ranked = STYLE === "countdown" ? [...places].reverse() : places;
+
+  // ⚠️ 캡션은 순위가 확정된 뒤에 만든다(정렬 전에 만들면 번호가 영상과 어긋남).
+  //    카운트다운은 영상과 같은 순서로 N위 → 1위 내림차순 표기.
+  const caption =
+    STYLE === "countdown"
+      ? buildCaption(theme, ranked, true)
+      : buildCaption(theme, places);
 
   const cards = []; // countdown에서 쓸 카드 파일들
   const narration = []; // 카드와 1:1 대응하는 나레이션 문장

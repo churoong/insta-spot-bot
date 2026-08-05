@@ -31,37 +31,44 @@ export async function ttsPcm(
   const model = process.env.TTS_MODEL || "gemini-2.5-flash-preview-tts";
   // 스타일 지시를 앞에 붙이면 같은 목소리도 훨씬 생동감 있게 읽는다
   const prompt = opts.direction ? `${opts.direction}: ${text}` : text;
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice || "Leda" } },
+
+  // 긴 대본은 응답 도중 연결이 끊기는 경우가 있다(undici "terminated") → 재시도.
+  // 단 429(한도 초과)는 재시도해도 소용없으니 즉시 포기한다.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: opts.voice || "Leda" } },
+              },
             },
-          },
-        }),
-        signal: AbortSignal.timeout(90000),
-      }
-    );
-    const j = await res.json();
-    const inline = j?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
-    if (!inline?.data) {
-      console.error(
-        "[tts] 오디오 없음:",
-        j?.error ? `${j.error.code} ${String(j.error.message).slice(0, 90)}` : "inlineData 없음"
+          }),
+          signal: AbortSignal.timeout(180000),
+        }
       );
-      return null;
+      const j = await res.json();
+      const inline = j?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)?.inlineData;
+      if (inline?.data) {
+        const rate = Number(/rate=(\d+)/.exec(inline.mimeType || "")?.[1] || 24000);
+        return { pcm: Buffer.from(inline.data, "base64"), rate };
+      }
+      const code = j?.error?.code;
+      console.error(
+        `[tts] 오디오 없음(${attempt + 1}/3):`,
+        j?.error ? `${code} ${String(j.error.message).slice(0, 80)}` : "inlineData 없음"
+      );
+      if (code === 429) return null; // 한도 초과는 재시도 무의미
+    } catch (e) {
+      console.error(`[tts] 실패(${attempt + 1}/3):`, String(e).slice(0, 90));
     }
-    const rate = Number(/rate=(\d+)/.exec(inline.mimeType || "")?.[1] || 24000);
-    return { pcm: Buffer.from(inline.data, "base64"), rate };
-  } catch (e) {
-    console.error("[tts] 실패:", String(e).slice(0, 100));
-    return null;
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 3000));
   }
+  return null;
 }
