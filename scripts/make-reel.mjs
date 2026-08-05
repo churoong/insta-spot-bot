@@ -31,18 +31,20 @@ const RW = 1080, RH = 1920; // 릴스 규격 9:16
  * Gemini TTS로 한 문장을 음성(PCM)으로 만들어 wav 파일로 저장. 실패하면 null.
  * 무료 등급에서 동작하며, 실패해도 릴스는 무음으로 계속 발행된다.
  */
-async function ttsToWav(text, outWav, voice) {
+async function ttsToWav(text, outWav, voice, direction) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
   const model = process.env.TTS_MODEL || "gemini-2.5-flash-preview-tts";
   try {
+    // 스타일 지시를 앞에 붙이면 같은 목소리도 훨씬 생동감 있게 읽는다
+    const prompt = direction ? `${direction}: ${text}` : text;
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text }] }],
+          contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             responseModalities: ["AUDIO"],
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Kore" } } },
@@ -290,7 +292,12 @@ async function main() {
   // 나레이션 대본: 문장 수에 맞춰 컷을 구성한다(문장 1개 = 컷 1개).
   // TTS 성공한 문장은 음성 길이에 맞춰 컷 길이를 정하고 자막을 얹는다.
   const script = Array.isArray(data.narration) ? data.narration.filter(Boolean) : [];
-  const voice = data.voice || process.env.TTS_VOICE || "Kore";
+  // 목소리·톤은 페르소나 설정(data/persona.json)을 따른다
+  const persona = JSON.parse(
+    fs.readFileSync(new URL("../data/persona.json", import.meta.url), "utf8")
+  );
+  const voice = process.env.TTS_VOICE || persona.voice || "Fenrir";
+  const voiceDirection = persona.voiceDirection || "";
   const cutCount = script.length > 0 ? script.length : files.length;
   console.log(script.length ? `나레이션 ${script.length}문장 (음성+자막)` : "나레이션 없음 — 무음 릴스");
 
@@ -309,7 +316,7 @@ async function main() {
     let secs = i === 0 ? 2.6 : Math.round((1.8 + Math.random() * 0.5) * 10) / 10;
     let wav = null;
     if (line) {
-      const w = await ttsToWav(line, path.join(TMP, `v_${i}.wav`), voice);
+      const w = await ttsToWav(line, path.join(TMP, `v_${i}.wav`), voice, voiceDirection);
       if (w) {
         const d = await mediaDuration(w);
         if (d > 0.5) { wav = w; secs = Math.min(d + 0.45, 9); } // 말끝 여유 + 상한
