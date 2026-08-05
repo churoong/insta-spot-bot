@@ -1,7 +1,12 @@
 name: 릴스 자동 발행
 
 on:
-  workflow_dispatch: {} # 수동 실행 (테스트용)
+  workflow_dispatch: # 수동 실행 (테스트용)
+    inputs:
+      force:
+        description: "발행 간격(150분) 무시하고 즉시 발행"
+        type: boolean
+        default: false
   schedule:
     # GitHub Actions 스케줄은 자주 누락된다(실측: 하루 4회 중 1회만 실행).
     # 그래서 촘촘히 걸어두고 — 스크립트가 MIN_GAP_MIN(기본 150분) 내 발행이 있으면
@@ -31,6 +36,8 @@ jobs:
       - name: 릴스 생성·발행
         run: npx tsx scripts/make-reel.mjs
         env:
+          # force 입력 시 간격 가드 해제(테스트용). 빈 값이면 스크립트 기본 150분 적용.
+          MIN_GAP_MIN: ${{ inputs.force && '0' || '' }}
           TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
