@@ -764,6 +764,14 @@ async function main() {
       console.error("후기 랭킹 실패(수집 순서 사용):", String(e).slice(0, 100));
     }
   }
+  // 카운트다운은 릴스 완주율을 위해 상위 5곳만 쓴다(8곳이면 45초+로 길어져 이탈).
+  // 8곳을 수집한 뒤 후기순 상위 5곳을 고르는 것이라 오히려 품질은 올라간다.
+  if (STYLE === "countdown" && places.length > 5) {
+    places = places.slice(0, 5);
+    theme.titleResolved = buildPunchyTitle(theme, places.length);
+    console.log(`TOP 5로 축소 → ${theme.titleResolved}`);
+  }
+
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
   const ranked = STYLE === "countdown" ? [...places].reverse() : places;
 
