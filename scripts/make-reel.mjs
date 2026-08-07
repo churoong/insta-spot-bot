@@ -430,8 +430,9 @@ async function main() {
   const wsum = weights.reduce((a, b) => a + b, 0) || 1;
   const cutSecs = [];
   for (let i = 0; i < cutCount; i++) {
-    if (voiceTrack) cutSecs.push(Math.max((voiceDur * (weights[i] ?? 1)) / wsum, 1.2));
-    else cutSecs.push(i === 0 ? (single ? 5.5 : 2.4) : Math.round((1.8 + Math.random() * 0.5) * 10) / 10);
+    // 최소 2.0초 — 너무 짧게 스치면 내용이 안 읽히고 영상도 빈약해 보인다
+    if (voiceTrack) cutSecs.push(Math.max((voiceDur * (weights[i] ?? 1)) / wsum, 2.0));
+    else cutSecs.push(i === 0 ? 3.0 : Math.round((2.4 + Math.random() * 0.6) * 10) / 10);
   }
   // 마지막 컷에 여운(0.4초) — 음성이 끊기며 끝나지 않게
   if (voiceTrack) cutSecs[cutSecs.length - 1] += 0.4;
@@ -460,13 +461,25 @@ async function main() {
     const secs = Math.min(cutSecs[i], 12);
 
     // 첫 컷은 훅 카드(자막 없이 훅 문구만), 이후는 사진 + 자막.
-    // 쓸 사진이 없으면 디자인 카드로 대체해 발행을 이어간다.
+    // 사진 수보다 컷이 많으면 사진을 '순환'해서 쓰되(모션이 매번 달라 반복 느낌이 덜함),
+    // 사진이 다 떨어진 회차에는 중간중간 정보 카드를 끼워 화면에 변화를 준다.
     let frameBuf;
     if (i === 0) {
       frameBuf = fs.readFileSync(hookImg);
     } else if (files.length) {
-      frameBuf = await verticalFrameBuffer(sharp, files[Math.min(i, files.length - 1)]);
-      frameBuf = await withSubtitle(sharp, frameBuf, line);
+      const round = Math.floor((i - 1) / files.length); // 몇 바퀴째인지
+      const useCard = round > 0 && (i - 1) % 2 === 1; // 두 바퀴째부터 한 컷 걸러 정보 카드
+      if (useCard) {
+        frameBuf = await designCardBuffer(sharp, {
+          eyebrow: region,
+          title: subject.name,
+          sub: line,
+          note: data.menu ? `대표 메뉴 · ${data.menu}` : "",
+        });
+      } else {
+        frameBuf = await verticalFrameBuffer(sharp, files[(i - 1) % files.length]);
+        frameBuf = await withSubtitle(sharp, frameBuf, line);
+      }
     } else {
       // 사진 없음 — 정보 카드(상호·지역·메뉴)로 구성하고 자막은 카드에 통합
       frameBuf = await designCardBuffer(sharp, {
