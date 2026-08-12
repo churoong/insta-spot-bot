@@ -213,39 +213,42 @@ function wrapText(text, per, maxLines) {
  */
 async function composeHookCard(sharp, imgPath, hookText, subText) {
   const W = RW, H = RH;
-  // 배경: 어둡게 + 살짝 블러 → 글씨 가독성 확보
-  const bg = await sharp(imgPath)
-    .resize(W, H, { fit: "cover", position: sharp.strategy.attention })
-    .modulate({ brightness: 0.42, saturation: 1.05 })
-    .blur(8)
-    .toBuffer();
+  // ⚠️ 첫 화면은 '음식'이 바로 보여야 한다.
+  //    예전엔 밝기 42% + 블러로 배경을 죽이고 글씨를 키웠는데, 맛집 계정인데
+  //    첫 화면에 음식이 안 보여 0.5초 만에 스킵당했다(실측 평균 시청 1.6~3.4초).
+  //    → 사진은 선명하게 두고, 글씨는 상단 배너로 얹어 음식을 가리지 않게 한다.
+  const bg = await verticalFrameBuffer(sharp, imgPath); // 선명한 음식 프레임(톤 프리셋 포함)
 
-  // 글자 크기: 길이에 따라 자동 축소, 최대 2줄로 나눔
   const text = String(hookText || "").trim();
-  const maxPerLine = text.length <= 11 ? 11 : 10;
   const words = text.split(/\s+/);
   const lines = [];
   let cur = "";
   for (const w of words) {
-    if ((cur + " " + w).trim().length > maxPerLine && cur) { lines.push(cur.trim()); cur = w; }
+    if ((cur + " " + w).trim().length > 13 && cur) { lines.push(cur.trim()); cur = w; }
     else cur = (cur + " " + w).trim();
   }
   if (cur) lines.push(cur);
-  const use = lines.slice(0, 3);
-  const size = use.length >= 3 ? 104 : use.length === 2 ? 122 : 132;
-  const lineH = Math.round(size * 1.28);
-  const startY = Math.round(H / 2 - ((use.length - 1) * lineH) / 2);
+  const use = lines.slice(0, 2);
+  const size = use.length === 2 ? 76 : 84;
+  const lineH = Math.round(size * 1.26);
+  const topY = 250; // 인스타 상단 UI를 피한 위치
+  const boxH = use.length * lineH + 52;
 
   const svg = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <rect x="0" y="${startY - lineH}" width="${W}" height="${use.length * lineH + lineH}" fill="#000" fill-opacity="0.22"/>
+      <!-- 글자 가독성용 그라데이션(사진을 가리지 않는 상단만) -->
+      <defs><linearGradient id="sh" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000" stop-opacity="0.62"/>
+        <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+      </linearGradient></defs>
+      <rect x="0" y="0" width="${W}" height="${topY + boxH + 60}" fill="url(#sh)"/>
       ${use
         .map(
           (l, i) =>
-            `<text x="${W / 2}" y="${startY + i * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#000" stroke-width="8" paint-order="stroke">${esc(l)}</text>`
+            `<text x="${W / 2}" y="${topY + (i + 1) * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#000" stroke-width="7" paint-order="stroke">${esc(l)}</text>`
         )
         .join("")}
-      ${subText ? `<text x="${W / 2}" y="${startY + use.length * lineH + 46}" font-family="${FONT}" font-size="46" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">${esc(subText)}</text>` : ""}
+      ${subText ? `<text x="${W / 2}" y="${topY + use.length * lineH + 62}" font-family="${FONT}" font-size="42" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">${esc(subText)}</text>` : ""}
     </svg>`
   );
   return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
@@ -430,9 +433,14 @@ async function main() {
   const wsum = weights.reduce((a, b) => a + b, 0) || 1;
   const cutSecs = [];
   for (let i = 0; i < cutCount; i++) {
-    // 최소 2.0초 — 너무 짧게 스치면 내용이 안 읽히고 영상도 빈약해 보인다
-    if (voiceTrack) cutSecs.push(Math.max((voiceDur * (weights[i] ?? 1)) / wsum, 2.0));
-    else cutSecs.push(i === 0 ? 3.0 : Math.round((2.4 + Math.random() * 0.6) * 10) / 10);
+    // 최소 2.0초 — 너무 짧게 스치면 내용이 안 읽히고 영상도 빈약해 보인다.
+    // 단 첫 컷은 3초를 넘기지 않는다(첫 장면이 길면 "정지된 광고"처럼 보여 이탈).
+    if (voiceTrack) {
+      const s = Math.max((voiceDur * (weights[i] ?? 1)) / wsum, 2.0);
+      cutSecs.push(i === 0 ? Math.min(s, 3.0) : s);
+    } else {
+      cutSecs.push(i === 0 ? 2.6 : Math.round((2.4 + Math.random() * 0.6) * 10) / 10);
+    }
   }
   // 마지막 컷에 여운(0.4초) — 음성이 끊기며 끝나지 않게
   if (voiceTrack) cutSecs[cutSecs.length - 1] += 0.4;
@@ -491,16 +499,9 @@ async function main() {
     const frame = path.join(TMP, `frame_${i}.jpg`);
     fs.writeFileSync(frame, frameBuf);
 
-    if (i === 0 && !voiceTrack && !line) {
-      // 음성·자막이 모두 없을 때만 첫 컷을 정지로(훅 문구 가독성)
-      await sh("ffmpeg", [
-        "-y", "-loop", "1", "-i", frame, "-t", String(secs), "-r", "30",
-        "-vf", "scale=1080:1920,format=yuv420p",
-        "-c:v", "libx264", "-preset", "veryfast", out,
-      ]);
-    } else {
-      await zoomClip(frame, out, secs, order[i % order.length]);
-    }
+    // 첫 컷도 정지 없이 곧바로 줌인 — 멈춰 있는 화면은 광고처럼 보여 즉시 스킵된다.
+    // (0번 모션 = 줌인. 첫 화면부터 움직여야 시선이 붙는다)
+    await zoomClip(frame, out, secs, i === 0 ? 0 : order[i % order.length]);
     clips.push(out);
   }
 
