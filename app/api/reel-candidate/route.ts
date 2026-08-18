@@ -86,9 +86,9 @@ export async function GET(req: NextRequest) {
           }
 
           // 릴스 나레이션 대본(자막·TTS용). 실패해도 무음 릴스로 진행하므로 치명적이지 않음.
-          // 컷 수 = 나레이션 문장 수. 사진 수에 묶으면 사진 1~2장일 때 6초짜리
-          // 빈약한 릴스가 된다 → 사진과 무관하게 7문장(약 20~28초)을 만든다.
-          const narration = await generateNarration(s, { menu: info.menu, lines: 7 });
+          // 컷 수 = 나레이션 문장 수. 평균 시청이 2초인데 영상이 길면 완주율이 바닥이라
+          // 4문장(약 11~14초)으로 짧게 간다. 짧은 영상은 반복 재생도 걸린다.
+          const narration = await generateNarration(s, { menu: info.menu, lines: 4 });
           // 첫 화면 텍스트 훅 카드 문구 (사진이 아니라 '문구'로 스크롤을 멈추게 함)
           const hook = await generateHook(s, { menu: info.menu });
 

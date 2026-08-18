@@ -156,7 +156,7 @@ export async function generateNarration(
 ): Promise<string[] | null> {
   const name = cleanName(spot.name);
   const { sido, gu } = regionHint(spot.address);
-  const want = Math.min(Math.max(opts.lines ?? 7, 4), 9);
+  const want = Math.min(Math.max(opts.lines ?? 4, 3), 5);
   const prompt = `너는 인스타그램 맛집 계정 '${persona.name}'이야. ${persona.tagline}
 아래 가게를 소개하는 릴스 나레이션 대본을 써줘.
 
@@ -167,9 +167,9 @@ ${opts.menu ? `대표 메뉴: ${opts.menu}` : ""}
 대본 규칙:
 ${persona.narrationStyle.map((s: string) => `- ${s}`).join("\n")}
 - 정확히 ${want}문장. 각 문장은 한 줄로.
-- ⭐문장마다 '다른 이야기'를 해. 같은 말을 돌려 쓰지 마. 이런 흐름이 좋아:
-  훅(궁금증) → 어디에 있는 곳인지 → 대표 메뉴 → 맛 묘사 → 곁들임·분위기 →
-  이런 분께 추천 → 저장·방문 권유 마무리
+- ⭐짧고 강하게. 문장마다 다른 이야기를 하고, 설명을 늘어놓지 마. 흐름:
+  훅(궁금증) → 어디 무슨 집인지 → 맛의 한 방 → 저장·방문 권유 마무리
+- 각 문장 12~24자. 길면 지루해서 넘긴다.
 - 말로 읽을 문장이니 해시태그·이모지·괄호·따옴표는 절대 넣지 마.
 - 순수 한글로만 써. 한자 금지. 숫자는 한글로 풀어 쓰지 말고 그대로 (예: 30년).
 - 상호명 "${name}"을 첫 문장이나 두 번째 문장에 넣어줘.
