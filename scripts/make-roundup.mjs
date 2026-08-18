@@ -91,7 +91,7 @@ async function tourCall(endpoint, params) {
 }
 
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
-async function collectPlaces(theme) {
+async function collectPlaces(theme, limit) {
   const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
   if (theme.areaCode) params.areaCode = String(theme.areaCode);
   let items = await tourCall("searchKeyword2", params);
@@ -111,7 +111,7 @@ async function collectPlaces(theme) {
       region: rg,
       imageUrl: toHttps(it.firstimage),
     });
-    if (picked.length >= theme.count) break;
+    if (picked.length >= (limit ?? theme.count)) break;
   }
   return picked;
 }
@@ -166,7 +166,7 @@ async function pickFoodImage(place) {
     const text =
       (await geminiCall(
         [
-          { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 건물 외관·간판·내부 전경은 제외. 음식 사진이 없으면 []. 예: [3,1]` },
+          { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
           ...parts,
         ],
         60
@@ -247,30 +247,73 @@ async function llmGenerate(prompt, maxTokens) {
   return null;
 }
 
+/**
+ * 대표메뉴·소개글 보강.
+ * 왜: 이름과 지역만 주고 문구를 만들게 하면 "OO시의 깊은 진국 순대국"처럼
+ * 어느 집에나 붙는 말이 나온다. 실제 근거(대표메뉴·소개)가 있어야 구체적인 설명이 된다.
+ */
+async function enrichPlaces(places) {
+  const clean = (v) =>
+    String(v ?? "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+  for (const p of places) {
+    try {
+      const it = (await tourCall("detailIntro2", { contentId: p.contentId, contentTypeId: "39" }))[0] ?? {};
+      const menu = (clean(it.firstmenu) || clean(it.treatmenu))
+        .split(/\s*,\s*/).map((x) => x.trim()).filter(Boolean).slice(0, 4).join(", ");
+      if (menu) p.menu = menu.slice(0, 60);
+    } catch { /* 메뉴 없어도 진행 */ }
+    try {
+      const ov = clean((await tourCall("detailCommon2", { contentId: p.contentId }))[0]?.overview);
+      if (ov) p.overview = ov;
+    } catch { /* 소개 없어도 진행 */ }
+  }
+  console.log(`정보 보강: 메뉴 ${places.filter((p) => p.menu).length}곳 / 소개 ${places.filter((p) => p.overview).length}곳`);
+}
+
 /** 한줄평(표지용) + 상세 설명(슬라이드용) 생성 — 모든 AI 실패 시 null(모음집 발행 스킵) */
 async function makeDescriptions(theme, places) {
-  const prompt = `인스타 카드뉴스용 문구를 만들어줘. 주제: "${theme.keyword} 맛집 모음"
-식당 목록:
-${places.map((p, i) => `${i + 1}. ${p.name} (${p.region})`).join("\n")}
+  const prompt = `인스타 맛집 카드뉴스 문구를 만들어줘. 주제: "${theme.keyword} 맛집 모음"
+
+식당 정보:
+${places
+  .map((p, i) => {
+    const b = [`${i + 1}. ${p.name} (${p.region})`];
+    if (p.menu) b.push(`   대표메뉴: ${p.menu}`);
+    if (p.overview) b.push(`   소개: ${p.overview.slice(0, 240)}`);
+    return b.join("\n");
+  })
+  .join("\n")}
 
 각 식당마다 두 가지를 만들어:
-- s: 표지용 짧은 한줄평 (10~16자, 명사형 종결. 예: "깊고 깔끔한 사골국물")
-- d: 상세 슬라이드용 설명 (28~40자, 존댓말 해요체 1~2문장. 메뉴 특징·분위기를 구체적으로. 예: "진한 사골 육수에 수제 순대가 푸짐해요. 웨이팅이 있어도 기다릴 가치가 있는 곳!")
+- s: 표지 카드용 (22~30자). 그 집만의 구체적인 포인트 한 가지 — 대표메뉴 이름이나 재료·조리 특징을 반드시 넣어. 반드시 명사로 끝낼 것(예: "…끓여낸 사골 순대국"). "…끓여낸", "…담긴"처럼 관형형으로 끝내면 문장이 잘린 것처럼 보이니 금지.
+- d: 상세 설명 (45~65자, 존댓말 해요체 2문장). 뭘 파는 집인지 + 어떤 점이 특별한지.
 
-규칙: 상호명 반복 금지, 과장·허위 금지(일반적 묘사만), 지역 특색 살리면 좋음.
+금지(어느 집에나 붙는 말): "고양시의 깊은 진국 순대국", "현지에서 오래 사랑받는 맛집", "정성이 담긴 한 그릇"
+좋은 예: "가마솥에 고아낸 뽀얀 사골육수 순대국밥", "손으로 채워 만든 아바이순대 한 접시"
+
+규칙: 상호명 반복 금지, 없는 사실 지어내기 금지(정보가 부족하면 그 음식 자체의 특징으로), 식당마다 서로 다른 표현 사용.
 JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
-  const text = await llmGenerate(prompt, 1600);
+  const text = await llmGenerate(prompt, 2400);
   if (!text) return null;
   try {
     const m = text.match(/\[[\s\S]*\]/);
     if (!m) return null;
     const arr = JSON.parse(m[0]);
     if (!Array.isArray(arr) || !arr.some((x) => x?.s && x?.d)) return null;
+    // 상한에서 그냥 자르면 "…직접 간을 " 처럼 문장이 끊긴다 → 마지막 완성 문장까지만
+    const trimSentence = (v, max) => {
+      const t = String(v ?? "").trim();
+      const ch = [...t];
+      if (ch.length <= max) return t;
+      const cut = ch.slice(0, max).join("");
+      const i = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("!"), cut.lastIndexOf("?"));
+      return i > max * 0.5 ? cut.slice(0, i + 1) : cut.replace(/\s*\S*$/, "") + "…";
+    };
     const fbShort = "현지에서 오래 사랑받아온 곳";
     const fbDetail = `${theme.keyword} 하나로 오랜 시간 사랑받아온, 믿고 찾아갈 수 있는 곳이에요.`;
     return places.map((_, i) => ({
-      short: String(arr[i]?.s ?? fbShort).slice(0, 22),
-      detail: String(arr[i]?.d ?? fbDetail).slice(0, 48),
+      short: trimSentence(arr[i]?.s ?? fbShort, 34),
+      detail: trimSentence(arr[i]?.d ?? fbDetail, 80),
     }));
   } catch {
     return null;
@@ -283,18 +326,24 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
  */
 async function composeReelCover(theme, places) {
   const sharp = (await import("sharp")).default;
-  const W = 1080, H = 1920, HEADER = 210, FOOTER = 110;
+  const W = 1080, H = 1920, HEADER = 430, FOOTER = 96;
   const rows = Math.ceil(places.length / 2);
   const CELL_W = 540, CELL_H = Math.floor((H - HEADER - FOOTER) / rows);
-  const PHOTO_W = 250, PAD = 12;
-  const emoji = theme.emoji || "💡";
+  const IN = 10; // 카드 안쪽 여백
+  const CARD_W = CELL_W - 16;
+  const PH_W = CARD_W - IN * 2;
+  const PH_H = Math.round(CELL_H * 0.57); // 사진은 카드 위쪽, 글은 아래 가로 전체(빈 여백 없이 꽉 차게)
+  const emoji = theme.emoji || "🍽️";
 
-  // 배경: 음식 판별 사진 풀블리드 + 따뜻한 어두운 오버레이 (블러 없음)
+  // 배경: 음식 사진 풀블리드 + 따뜻한 어두운 오버레이.
+  // 블러를 넣는 이유: 관광공사 원본에 타 블로그 워터마크가 박힌 경우가 있어 배경에서
+  // 글자가 읽힌다. 배경은 장식일 뿐이므로 뭉개면 워터마크도 사라지고 카드가 도드라진다.
   const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
   const bgRes = await fetch(bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
   if (!bgRes.ok) throw new Error("릴스 배경 사진 실패");
   const bgPhoto = await sharp(Buffer.from(await bgRes.arrayBuffer()))
     .resize(W, H, { fit: "cover" })
+    .blur(14)
     .modulate({ saturation: 1.12 })
     .jpeg({ quality: 86 })
     .toBuffer();
@@ -305,6 +354,10 @@ async function composeReelCover(theme, places) {
     return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: HEADER + row * CELL_H };
   };
 
+  // 사진은 카드 상단에 가로로 꽉 차게(모서리 라운드) — 세로 띠보다 음식이 잘 보인다
+  const mask = Buffer.from(
+    `<svg width="${PH_W}" height="${PH_H}"><rect x="0" y="0" width="${PH_W}" height="${PH_H}" rx="14" ry="14" fill="#fff"/></svg>`
+  );
   const photoLayers = [];
   for (let i = 0; i < places.length; i++) {
     try {
@@ -312,11 +365,13 @@ async function composeReelCover(theme, places) {
       if (!res.ok) continue;
       const buf = Buffer.from(await res.arrayBuffer());
       const { x, y } = cellPos(i);
-      const resized = await sharp(buf)
-        .resize(PHOTO_W, CELL_H - PAD * 2, { fit: "cover" })
-        .jpeg({ quality: 82 })
+      const rounded = await sharp(buf)
+        .resize(PH_W, PH_H, { fit: "cover", position: "attention" })
+        .ensureAlpha()
+        .composite([{ input: mask, blend: "dest-in" }])
+        .png()
         .toBuffer();
-      photoLayers.push({ input: resized, left: x + CELL_W - PHOTO_W - PAD, top: y + PAD });
+      photoLayers.push({ input: rounded, left: x + 8 + IN, top: y + 6 + IN });
     } catch { /* 사진 실패 시 텍스트만 */ }
   }
 
@@ -324,34 +379,52 @@ async function composeReelCover(theme, places) {
   for (let i = 0; i < places.length; i++) {
     const p = places[i];
     const { x, y } = cellPos(i);
-    const nm = p.name.length > 11 ? p.name.slice(0, 10) + "…" : p.name;
-    const ns = nm.length <= 7 ? 31 : nm.length <= 9 ? 25 : 20;
-    const d1 = (p.desc ?? "").slice(0, 12), d2 = (p.desc ?? "").slice(12, 24);
-    const chipW = p.region.length * 21 + 48;
-    bgCells += `<rect x="${x + 8}" y="${y + 6}" width="${CELL_W - 16}" height="${CELL_H - 12}" rx="16" fill="white" fill-opacity="0.96" stroke="#f1dede" stroke-width="2"/>`;
+    const CX = x + 8, CY = y + 6;
+    const base = CY + IN + PH_H; // 사진 아래 기준선
+    // 괄호 표기·지점명은 칸을 다 잡아먹고 잘리므로 표지에서는 뺀다
+    const plainName =
+      p.name.replace(/\([^)]*\)/g, "").replace(/\s+\S+점$/, "").replace(/\s+/g, " ").trim() || p.name;
+    const nm = plainName.length > 13 ? plainName.slice(0, 12) + "…" : plainName;
+    const ns = nm.length <= 8 ? 40 : nm.length <= 10 ? 35 : 30;
+    // 글자수로 잘라 쓰면 "소울/푸드"처럼 단어가 끊긴다 → 어절 단위 줄바꿈
+    const dl = wrapLines(p.desc ?? "", 21, 2);
+    const chipW = p.region.length * 20 + 46;
+    bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CELL_H - 12}" rx="22" fill="white" fill-opacity="0.97" stroke="#f0dcd6" stroke-width="2"/>`;
     textCells += `
     <g>
-      <rect x="${x + PAD + 8}" y="${y + PAD + 12}" width="46" height="46" rx="12" fill="#d92121"/>
-      <text x="${x + PAD + 31}" y="${y + PAD + 45}" font-family="${FONT}" font-size="29" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
-      <text x="${x + PAD + 64}" y="${y + PAD + 44}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
-      <rect x="${x + PAD + 8}" y="${y + PAD + 66}" width="${chipW}" height="36" rx="18" fill="#f6ede7"/>
-      <text x="${x + PAD + 8 + chipW / 2}" y="${y + PAD + 91}" font-family="${FONT}" font-size="21" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(p.region)}</text>
-      ${p.hundred ? `<rect x="${x + PAD + 8 + chipW + 8}" y="${y + PAD + 66}" width="112" height="36" rx="18" fill="#fff3d6" stroke="#e8c66a" stroke-width="1.5"/>
-      <text x="${x + PAD + 8 + chipW + 64}" y="${y + PAD + 91}" font-family="${FONT}" font-size="20" font-weight="800" fill="#9a7419" text-anchor="middle">백년가게</text>` : ""}
-      <text x="${x + PAD + 10}" y="${y + PAD + 140}" font-family="${FONT}" font-size="23" fill="#333">${emoji} ${esc(d1)}</text>
-      ${d2 ? `<text x="${x + PAD + 10}" y="${y + PAD + 172}" font-family="${FONT}" font-size="23" fill="#333">${esc(d2)}</text>` : ""}
+      <rect x="${CX + IN + 10}" y="${CY + IN + 10}" width="54" height="54" rx="15" fill="#d92121"/>
+      <text x="${CX + IN + 37}" y="${CY + IN + 48}" font-family="${FONT}" font-size="32" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
+      <text x="${CX + IN + 2}" y="${base + 46}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      <rect x="${CX + IN + 2}" y="${base + 62}" width="${chipW}" height="36" rx="18" fill="#f6ede7"/>
+      <text x="${CX + IN + 2 + chipW / 2}" y="${base + 87}" font-family="${FONT}" font-size="21" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(p.region)}</text>
+      ${p.hundred ? `<rect x="${CX + IN + 10 + chipW}" y="${base + 62}" width="112" height="36" rx="18" fill="#fff3d6" stroke="#e8c66a" stroke-width="1.5"/>
+      <text x="${CX + IN + 66 + chipW}" y="${base + 87}" font-family="${FONT}" font-size="20" font-weight="800" fill="#9a7419" text-anchor="middle">백년가게</text>` : ""}
+      ${dl.map((ln, k) => `<text x="${CX + IN + 2}" y="${base + 122 + k * 32}" font-family="${FONT}" font-size="25" fill="#3a2a24">${k === 0 ? emoji + " " : ""}${esc(ln)}</text>`).join("")}
     </g>`;
   }
 
-  const titleText = String(theme.titleResolved || "");
-  const ts = titleText.length <= 11 ? 72 : titleText.length <= 14 ? 62 : 52;
+  // 제목: 음식 이름을 화면 최대 크기로 — 피드에서 확대하지 않아도 무슨 음식인지 바로 읽혀야 한다
+  const tp = theme.coverParts ?? {
+    top: "", main: theme.food || theme.keyword, sub: `${theme.suffix || "맛집"} ${places.length}선`,
+  };
+  const mainLen = Math.max(1, [...tp.main].length);
+  const ms = Math.min(200, Math.floor(950 / mainLen));
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="hd" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#140803" stop-opacity="0.9"/>
+        <stop offset="70%" stop-color="#140803" stop-opacity="0.78"/>
+        <stop offset="100%" stop-color="#140803" stop-opacity="0.45"/>
+      </linearGradient>
+    </defs>
     <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="0.55"/>
-    <text x="${W / 2}" y="100" font-family="${FONT}" font-size="${ts}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(titleText)}</text>
-    <text x="${W / 2}" y="165" font-family="${FONT}" font-size="30" font-weight="700" fill="#ffd9c9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
+    <rect x="0" y="0" width="${W}" height="${HEADER}" fill="url(#hd)"/>
+    <text x="${W / 2}" y="88" font-family="${FONT}" font-size="42" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
+    <text x="${W / 2}" y="${118 + Math.round(ms * 0.8)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
+    <text x="${W / 2}" y="${HEADER - 34}" font-family="${FONT}" font-size="58" font-weight="900" fill="#ffd54a" text-anchor="middle">${esc(tp.sub)}</text>
     ${bgCells}
-    <text x="${W / 2}" y="${H - 62}" font-family="${FONT}" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">자세한 소개는 피드 게시물에서 📌</text>
-    <text x="${W / 2}" y="${H - 22}" font-family="${FONT}" font-size="24" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
+    <text x="${W / 2}" y="${H - 50}" font-family="${FONT}" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요</text>
+    <text x="${W / 2}" y="${H - 16}" font-family="${FONT}" font-size="24" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
   </svg>`;
   const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
@@ -367,20 +440,25 @@ async function composeReelCover(theme, places) {
   return out;
 }
 
-/** 자극형 제목 템플릿 랜덤 선택 — "가장 맛있는 집" 이미지의 강한 제목 */
+/**
+ * 자극형 제목 — 표지에서 음식 이름(main)만 초대형으로 뽑아 쓰기 위해 3조각으로 나눠 준다.
+ * text는 캡션·기록용 전체 문장.
+ */
 function buildPunchyTitle(theme, n) {
   const r = theme.region || "전국";
   const f = theme.food || theme.keyword;
   const sfx = theme.suffix || "맛집";
-  const pool = [
-    `${r} ${f} ${n}대 ${sfx}`,
-    `${r} ${f} 레전드 ${n}선`,
-    `맛도리 ${f} ${n}선`,
-    `${r} ${f} ${sfx} TOP ${n}`,
-    `놓치면 후회하는 ${f} ${n}선`,
-    `${r}에서 제일 맛있는 ${f} ${n}곳`,
+  const tops = [
+    `${r}에서 제일 맛있는`,
+    `죽기 전에 꼭 먹어야 할`,
+    `아는 사람만 간다는`,
+    `줄 서서라도 먹는`,
+    `${r} 사람들이 인정한`,
+    `놓치면 후회하는`,
   ];
-  return pool[Math.floor(Math.random() * pool.length)];
+  const top = tops[Math.floor(Math.random() * tops.length)];
+  const sub = `${sfx} ${n}선`;
+  return { text: `${top} ${f} ${sub}`, top, main: f, sub };
 }
 
 // ===== 카운트다운 릴스용 카드 (한 곳씩 크게 공개 → 1위 보려고 끝까지 봄) =====
@@ -541,7 +619,10 @@ async function composeCover(theme, places) {
   for (let i = 0; i < places.length; i++) {
     const p = places[i];
     const { x, y } = cellPos(i);
-    const nm = p.name.length > 13 ? p.name.slice(0, 12) + "…" : p.name;
+    // 괄호 표기·지점명은 칸을 다 잡아먹고 잘리므로 표지에서는 뺀다
+    const plainName =
+      p.name.replace(/\([^)]*\)/g, "").replace(/\s+\S+점$/, "").replace(/\s+/g, " ").trim() || p.name;
+    const nm = plainName.length > 13 ? plainName.slice(0, 12) + "…" : plainName;
     const ns = nm.length <= 7 ? 30 : nm.length <= 9 ? 25 : 20;
     const d1 = (p.desc ?? "").slice(0, 12), d2 = (p.desc ?? "").slice(12, 24);
     const chipW = p.region.length * 20 + 46;
@@ -645,7 +726,8 @@ function buildCaption(theme, places, descending = false) {
   // descending: 카운트다운 영상과 같은 순서(N위 → 1위)로 번호를 매긴다.
   const lines = places.map((p, i) => {
     const num = descending ? places.length - i : i + 1;
-    return `${num}. ${p.name}${p.hundred ? " 🏅" : ""} (${p.region}) — ${p.desc}`;
+    return `${num}. ${p.name}${p.hundred ? " 🏅" : ""} (${p.region})
+   ${p.detail || p.desc}`;
   });
   const hundredCount = places.filter((p) => p.hundred).length;
   const hundredLine =
@@ -698,19 +780,41 @@ async function main() {
   let theme = null, places = [];
   for (let t = 0; t < Math.min(3, ordered.length); t++) {
     const cand = ordered[t];
-    const got = await collectPlaces(cand);
-    console.log(`[${cand.key}] 수집: ${got.length}곳 (목표 ${cand.count})`);
-    if (got.length >= Math.min(6, cand.count)) { // 6곳 이상이면 발행(8곳 상한)
-      theme = cand;
-      places = got.slice(0, cand.count);
-      // 표지 그리드는 2열이라 홀수면 마지막 칸이 혼자 남아 비대칭 → 항상 짝수로 맞춤
-      if (places.length % 2 === 1) places = places.slice(0, -1);
-      break;
-    }
+    // 표지 한 장에 6칸(2열x3행)까지만 — 8칸이면 셀이 좁아 상호명·설명이 잘리고
+    // 피드에서 확대하기 전엔 아무것도 안 읽힌다(실측). 음식 사진 검증에서 탈락하는
+    // 곳을 대체해야 하므로 필요한 6곳보다 넉넉히 모아 둔다.
+    const got = await collectPlaces(cand, 16);
+    console.log(`[${cand.key}] 수집 풀: ${got.length}곳`);
+    if (got.length >= 6) { theme = cand; places = got; break; }
   }
   if (!theme) throw new Error("수집 가능한 테마 없음");
-  // 자극형 제목 랜덤 생성 ("9대 맛집", "레전드 9선", "맛도리", "TOP 9" 등)
-  theme.titleResolved = buildPunchyTitle(theme, places.length);
+
+  // 음식 사진 검증을 표지 구성보다 먼저 한다.
+  // 왜: 비전이 음식 사진을 못 찾으면 예전에는 원본(간판·외관)을 그대로 썼고,
+  //     그 결과 표지에 가게 간판이 올라갔다. 검증 통과한 곳만 표지에 세우고
+  //     탈락한 곳은 다음 후보로 대체한다. (무료 등급 분당 한도 고려해 4초 간격)
+  const NEED = 6;
+  const passed = [];
+  for (const p of places) {
+    if (passed.length >= NEED) break;
+    await pickFoodImage(p);
+    if (p.foodPicked) passed.push(p);
+    else console.log(`  음식 사진 없음 → 제외: ${p.name}`);
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+  // 2열 그리드라 홀수면 마지막 칸이 혼자 남아 비대칭 → 짝수로만
+  const useCount = passed.length >= 6 ? 6 : passed.length >= 4 ? 4 : 0;
+  if (!useCount) {
+    console.log(`⏭️ 음식 사진 확보 ${passed.length}곳뿐 — 이번 모음집 발행 건너뜀`);
+    return;
+  }
+  places = passed.slice(0, useCount);
+  console.log(`음식 사진 확보: ${places.length}곳`);
+
+  // 자극형 제목 랜덤 생성
+  const tt = buildPunchyTitle(theme, places.length);
+  theme.titleResolved = tt.text;
+  theme.coverParts = tt;
   console.log("제목:", theme.titleResolved);
 
   // 백년가게 대조 (배지·캡션용)
@@ -719,6 +823,7 @@ async function main() {
 
   // 한줄평+상세설명 먼저 (비전 호출이 분당 한도를 소모하기 전에)
   // 모든 AI(Gemini→Groq)가 실패하면 저품질 기본 문구로 내보내지 않고 발행 자체를 건너뜀
+  await enrichPlaces(places);
   const descs = await makeDescriptions(theme, places);
   if (!descs) {
     console.log("⏭️ AI 한도 소진 (Gemini/Groq 모두 실패) — 이번 모음집 발행 건너뜀");
@@ -729,12 +834,6 @@ async function main() {
     p.detail = descs[i].detail;
   });
 
-  // 음식 사진 우선 선택 (Gemini 비전) — 무료 등급 분당 한도 고려해 4초 간격 순차
-  for (const p of places) {
-    await pickFoodImage(p);
-    await new Promise((r) => setTimeout(r, 4000));
-  }
-  console.log(`음식 사진 교체: ${places.filter((p) => p.foodPicked).length}/${places.length}곳`);
 
   // 발행 스타일
   //  - grid(기본): 기존 모음집 — 리스트 인포그래픽 한 장을 릴스로
@@ -768,7 +867,9 @@ async function main() {
   // 8곳을 수집한 뒤 후기순 상위 5곳을 고르는 것이라 오히려 품질은 올라간다.
   if (STYLE === "countdown" && places.length > 5) {
     places = places.slice(0, 5);
-    theme.titleResolved = buildPunchyTitle(theme, places.length);
+    const tt5 = buildPunchyTitle(theme, places.length);
+    theme.titleResolved = tt5.text;
+    theme.coverParts = tt5;
     console.log(`TOP 5로 축소 → ${theme.titleResolved}`);
   }
 
