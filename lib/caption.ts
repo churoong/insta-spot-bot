@@ -140,7 +140,7 @@ ${opts.menu ? `대표 메뉴: ${opts.menu}` : ""}
   const r = await llmText(prompt, { maxTokens: 100 });
   if (!r) return null;
   const line = r.text.split("\n")[0].replace(/[#"'`]/g, "").trim();
-  if (!line || line.length < 5 || line.length > 24) return null;
+  if (!line || line.length < 5 || line.length > 34) return null; // 상한이 빡빡하면 좋은 훅이 버려짐
   if (/[一-鿿]/.test(line)) return null;
   return line;
 }
