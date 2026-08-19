@@ -90,6 +90,91 @@ async function tourCall(endpoint, params) {
   throw lastErr ?? new Error(`TourAPI ${endpoint} 실패`);
 }
 
+/**
+ * 테마 선택 가중치 — 지난 모음집의 "조회수"로 잘 통한 음식에 비중을 준다.
+ *
+ * 좋아요가 아니라 조회수를 쓰는 이유: 2026-08-18 짬뽕 모음집은 좋아요가 3개뿐인데
+ * 조회 2,236·도달 1,444로 이 계정에서 유일하게 팔로워 밖까지 나갔다. 같은 주에
+ * 좋아요 9개를 받은 게시물은 147회에 그쳤다. 이 계정에서 좋아요는 배포 성과와 무관하다.
+ *
+ * 과적합 방지: 중앙값 대비 배수에 log를 씌워 완화하고(한 번 터진 테마가 독점하지 않게),
+ * 아직 안 해본 테마에는 중앙값 수준의 가중치를 줘 탐험을 유지한다.
+ * 조회 실패·데이터 부족이면 null을 돌려 기존 단순 로테이션으로 돌아간다.
+ */
+async function themeWeights(db, all) {
+  const token = process.env.IG_ACCESS_TOKEN;
+  if (!token) return null;
+  const known = new Set(all.map((t) => t.key));
+  let rows;
+  try {
+    rows = (
+      await db.execute(
+        `SELECT content_id, ig_media_id FROM posts
+          WHERE status = 'published' AND ig_media_id IS NOT NULL
+            AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
+          ORDER BY id DESC LIMIT 30`
+      )
+    ).rows;
+  } catch {
+    return null;
+  }
+  if (!rows.length) return null;
+
+  const stat = {};
+  const recent = []; // 직전에 쓴 테마 (모음집·큐레이션 통합, 최근 2개)
+  for (const r of rows) {
+    // content_id = roundup-<테마키>-<날짜> (테마키에도 하이픈이 있어 뒤 날짜를 기준으로 자름).
+    // 날짜는 20260818 형식이고, 초기 게시물에는 roundup-reel- 접두사도 있다.
+    const m = String(r.content_id).match(/^(?:roundup|countdown)-(?:reel-)?(.+)-\d{4}-?\d{2}-?\d{2}$/);
+    if (!m || !known.has(m[1])) continue;
+    if (recent.length < 2 && !recent.includes(m[1])) recent.push(m[1]);
+    try {
+      const res = await fetch(
+        `https://graph.instagram.com/v23.0/${r.ig_media_id}/insights?metric=views&access_token=${token}`,
+        { signal: AbortSignal.timeout(15000) }
+      );
+      const v = (await res.json())?.data?.[0]?.values?.[0]?.value;
+      if (typeof v === "number") (stat[m[1]] ??= []).push(v);
+    } catch { /* 개별 실패는 건너뜀 */ }
+  }
+
+  const avgs = Object.entries(stat).map(([k, v]) => [k, v.reduce((a, b) => a + b, 0) / v.length]);
+  if (avgs.length < 2) return null; // 비교 대상이 없으면 가중치 의미 없음
+  const sorted = avgs.map(([, v]) => v).sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)] || 1;
+  const byKey = Object.fromEntries(avgs);
+  const weights = all.map((t) =>
+    byKey[t.key] === undefined ? 2.0 : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
+  );
+  console.log(
+    "테마 가중치(조회수):",
+    all
+      .map((t, i) => `${t.key} ${weights[i].toFixed(1)}${byKey[t.key] !== undefined ? `(${Math.round(byKey[t.key])}회)` : "(미시도)"}`)
+      .join(" · ")
+  );
+  return { weights, recent };
+}
+
+/** 가중 랜덤으로 중복 없이 시도 순서를 만든다 (첫 자리는 최근에 쓴 테마 제외) */
+function weightedOrder(all, weights, exclude = []) {
+  const pool = all.map((t, i) => ({ t, w: weights[i] }));
+  const out = [];
+  while (pool.length) {
+    const filtered = out.length === 0 ? pool.filter((p) => !exclude.includes(p.t.key)) : pool;
+    const usable = filtered.length ? filtered : pool;
+    const total = usable.reduce((a, b) => a + b.w, 0);
+    let r = Math.random() * total;
+    let pick = usable[usable.length - 1];
+    for (const p of usable) {
+      r -= p.w;
+      if (r <= 0) { pick = p; break; }
+    }
+    out.push(pick.t);
+    pool.splice(pool.indexOf(pick), 1);
+  }
+  return out;
+}
+
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
 async function collectPlaces(theme, limit) {
   const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
@@ -775,7 +860,13 @@ async function main() {
   });
   const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
   const all = themesData.themes;
-  const ordered = all.map((_, i) => all[(idx + i) % all.length]);
+  // 조회수 성과로 가중한 순서 (데이터가 없거나 조회 실패면 기존 단순 로테이션)
+  const perf = await themeWeights(db, all);
+  const ordered = perf
+    ? weightedOrder(all, perf.weights, perf.recent)
+    : all.map((_, i) => all[(idx + i) % all.length]);
+  if (perf?.recent.length) console.log("직전 테마 제외:", perf.recent.join(", "));
+  console.log("테마 시도 순서:", ordered.slice(0, 3).map((t) => t.key).join(" → "));
 
   let theme = null, places = [];
   for (let t = 0; t < Math.min(3, ordered.length); t++) {
