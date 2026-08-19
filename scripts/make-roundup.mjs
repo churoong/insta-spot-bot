@@ -378,15 +378,17 @@ ${places
   .join("\n")}
 
 각 식당마다 두 가지를 만들어:
-- s: 표지 카드용 (22~30자). 그 집만의 구체적인 포인트 한 가지 — 대표메뉴 이름이나 재료·조리 특징을 반드시 넣어. 반드시 명사로 끝낼 것(예: "…끓여낸 사골 순대국"). "…끓여낸", "…담긴"처럼 관형형으로 끝내면 문장이 잘린 것처럼 보이니 금지.
-- d: 상세 설명 (45~65자, 존댓말 해요체 2문장). 뭘 파는 집인지 + 어떤 점이 특별한지.
+- s: 표지 카드용 (반드시 45~65자. 카드에서 3줄로 표시되니 짧으면 허전하다). 존댓말 해요체 1~2문장.
+     그 집만의 구체적인 포인트를 두 가지 담아: ① 대표메뉴 이름과 재료·조리 특징 ② 곁들임·역사·분위기 중 하나.
+     예: "12시간 고아낸 사골육수에 손으로 채운 수제 순대를 넣어 줘요. 겉절이와 새우젓으로 간을 맞춰 먹는 집이에요."
+- d: 캡션용 상세 설명 (70~90자, 존댓말 해요체 2~3문장). s보다 더 자세히 — 무엇을 파는 집인지, 어떤 점이 특별한지, 알아두면 좋은 점.
 
 금지(어느 집에나 붙는 말): "고양시의 깊은 진국 순대국", "현지에서 오래 사랑받는 맛집", "정성이 담긴 한 그릇"
 좋은 예: "가마솥에 고아낸 뽀얀 사골육수 순대국밥", "손으로 채워 만든 아바이순대 한 접시"
 
 규칙: 상호명 반복 금지, 없는 사실 지어내기 금지(정보가 부족하면 그 음식 자체의 특징으로), 식당마다 서로 다른 표현 사용.
 JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
-  const text = await llmGenerate(prompt, 2400);
+  const text = await llmGenerate(prompt, 3600);
   if (!text) return null;
   try {
     const m = text.match(/\[[\s\S]*\]/);
@@ -402,11 +404,11 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
       const i = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("!"), cut.lastIndexOf("?"));
       return i > max * 0.5 ? cut.slice(0, i + 1) : cut.replace(/\s*\S*$/, "") + "…";
     };
-    const fbShort = "현지에서 오래 사랑받아온 곳";
+    const fbShort = "오랜 시간 한자리를 지켜온 집이에요. 현지에서 꾸준히 사랑받아 온 곳이에요.";
     const fbDetail = `${theme.keyword} 하나로 오랜 시간 사랑받아온, 믿고 찾아갈 수 있는 곳이에요.`;
     return places.map((_, i) => ({
-      short: trimSentence(arr[i]?.s ?? fbShort, 34),
-      detail: trimSentence(arr[i]?.d ?? fbDetail, 80),
+      short: trimSentence(arr[i]?.s ?? fbShort, 69),
+      detail: trimSentence(arr[i]?.d ?? fbDetail, 100),
     }));
   } catch {
     return null;
@@ -429,14 +431,14 @@ async function composeReelCover(theme, places) {
   // 하단 여백은 인스타 UI(캡션·버튼)가 덮는 자리라 오히려 잘 맞는다.
   const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285
   const CH = Math.round(W * 5 / 4); // 1350
-  const HEADER = 300, FOOTER = 70;
+  const HEADER = 258, FOOTER = 50;
 
   const rows = Math.ceil(places.length / 2);
   const CELL_W = 540, CELL_H = Math.floor((CH - HEADER - FOOTER) / rows);
   const IN = 10;
   const CARD_W = CELL_W - 16, CARD_H = CELL_H - 12;
   const PH_W = CARD_W - IN * 2;
-  const PH_H = Math.round(CELL_H * 0.56);
+  const PH_H = Math.round(CELL_H * 0.527);
   const emoji = theme.emoji || "🍽️";
 
   // 배경: 음식 사진 풀블리드 + 따뜻한 어두운 오버레이.
@@ -488,7 +490,7 @@ async function composeReelCover(theme, places) {
     const nm = coverName(p.name);
     const ns = nm.length <= 8 ? 36 : nm.length <= 10 ? 31 : 27;
     // 글자수로 잘라 쓰면 "소울/푸드"처럼 단어가 끊긴다 → 어절 단위 줄바꿈
-    const dl = wrapLines(p.desc ?? "", 22, 2);
+    const dl = wrapLines(p.desc ?? "", 23, 3);
     const chipW = p.region.length * 19 + 44;
     bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CARD_H}" rx="22" fill="white" fill-opacity="0.97" stroke="#f0dcd6" stroke-width="2"/>`;
     textCells += `
@@ -499,8 +501,8 @@ async function composeReelCover(theme, places) {
       <text x="${CX + IN + 10 + chipW / 2}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="700" fill="#ffffff" text-anchor="middle">📍 ${esc(p.region)}</text>
       ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : ""}
-      <text x="${CX + IN + 2}" y="${base + 42}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
-      ${dl.map((ln, k) => `<text x="${CX + IN + 2}" y="${base + 82 + k * 30}" font-family="${FONT}" font-size="23" fill="#3a2a24">${k === 0 ? emoji + " " : ""}${esc(ln)}</text>`).join("")}
+      <text x="${CX + IN + 2}" y="${base + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      ${dl.map((ln, k) => `<text x="${CX + IN + 2}" y="${base + 76 + k * 28}" font-family="${FONT}" font-size="22" fill="#3a2a24">${k === 0 ? emoji + " " : ""}${esc(ln)}</text>`).join("")}
     </g>`;
   }
 
@@ -509,7 +511,7 @@ async function composeReelCover(theme, places) {
     top: "", main: theme.food || theme.keyword, sub: `${theme.suffix || "맛집"} ${places.length}선`,
   };
   const mainLen = Math.max(1, [...tp.main].length);
-  const ms = Math.min(150, Math.floor(950 / mainLen));
+  const ms = Math.min(138, Math.floor(950 / mainLen));
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="hd" x1="0" y1="0" x2="0" y2="1">
@@ -519,12 +521,12 @@ async function composeReelCover(theme, places) {
     </defs>
     <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="0.62"/>
     <rect x="0" y="${CT}" width="${W}" height="${HEADER}" fill="url(#hd)"/>
-    <text x="${W / 2}" y="${CT + 52}" font-family="${FONT}" font-size="34" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
-    <text x="${W / 2}" y="${CT + 78 + Math.round(ms * 0.8)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
-    <text x="${W / 2}" y="${CT + HEADER - 28}" font-family="${FONT}" font-size="46" font-weight="900" fill="#ffd54a" text-anchor="middle">${esc(tp.sub)}</text>
+    <text x="${W / 2}" y="${CT + 38}" font-family="${FONT}" font-size="30" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
+    <text x="${W / 2}" y="${CT + 44 + Math.round(ms * 0.86)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
+    <text x="${W / 2}" y="${CT + HEADER - 26}" font-family="${FONT}" font-size="40" font-weight="900" fill="#ffd54a" text-anchor="middle">${esc(tp.sub)}</text>
     ${bgCells}
-    <text x="${W / 2}" y="${CT + CH - 40}" font-family="${FONT}" font-size="27" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요</text>
-    <text x="${W / 2}" y="${CT + CH - 10}" font-family="${FONT}" font-size="21" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
+    <text x="${W / 2}" y="${CT + CH - 28}" font-family="${FONT}" font-size="24" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요</text>
+    <text x="${W / 2}" y="${CT + CH - 6}" font-family="${FONT}" font-size="18" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
   </svg>`;
   const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
