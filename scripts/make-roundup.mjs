@@ -419,13 +419,24 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
  */
 async function composeReelCover(theme, places) {
   const sharp = (await import("sharp")).default;
-  const W = 1080, H = 1920, HEADER = 430, FOOTER = 96;
+  const W = 1080, H = 1920;
+
+  // ⚠️ 인스타는 릴스를 피드에서 4:5, 프로필 그리드에서도 잘라 보여준다.
+  // 1080x1920의 위아래 285px은 "확대하기 전"에는 아예 안 보이는 영역이다.
+  // (실측 2026-08-19 국밥 모음집: 200px 대형 제목이 통째로 잘려 나갔다)
+  // 그래서 제목·카드·푸터를 전부 가운데 1080x1350 안에 넣고, 잘리는 위아래는
+  // 흐린 배경만 남긴다. 릴스 탭(9:16)에서는 위아래 여백으로 보이는데,
+  // 하단 여백은 인스타 UI(캡션·버튼)가 덮는 자리라 오히려 잘 맞는다.
+  const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285
+  const CH = Math.round(W * 5 / 4); // 1350
+  const HEADER = 300, FOOTER = 70;
+
   const rows = Math.ceil(places.length / 2);
-  const CELL_W = 540, CELL_H = Math.floor((H - HEADER - FOOTER) / rows);
-  const IN = 10; // 카드 안쪽 여백
-  const CARD_W = CELL_W - 16;
+  const CELL_W = 540, CELL_H = Math.floor((CH - HEADER - FOOTER) / rows);
+  const IN = 10;
+  const CARD_W = CELL_W - 16, CARD_H = CELL_H - 12;
   const PH_W = CARD_W - IN * 2;
-  const PH_H = Math.round(CELL_H * 0.57); // 사진은 카드 위쪽, 글은 아래 가로 전체(빈 여백 없이 꽉 차게)
+  const PH_H = Math.round(CELL_H * 0.56);
   const emoji = theme.emoji || "🍽️";
 
   // 배경: 음식 사진 풀블리드 + 따뜻한 어두운 오버레이.
@@ -444,7 +455,7 @@ async function composeReelCover(theme, places) {
   const cellPos = (i) => {
     const lastOdd = places.length % 2 === 1 && i === places.length - 1;
     const col = i % 2, row = Math.floor(i / 2);
-    return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: HEADER + row * CELL_H };
+    return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: CT + HEADER + row * CELL_H };
   };
 
   // 사진은 카드 상단에 가로로 꽉 차게(모서리 라운드) — 세로 띠보다 음식이 잘 보인다
@@ -474,50 +485,46 @@ async function composeReelCover(theme, places) {
     const { x, y } = cellPos(i);
     const CX = x + 8, CY = y + 6;
     const base = CY + IN + PH_H; // 사진 아래 기준선
-    // 괄호 표기·지점명은 칸을 다 잡아먹고 잘리므로 표지에서는 뺀다
-    const plainName =
-      p.name.replace(/\([^)]*\)/g, "").replace(/\s+\S+점$/, "").replace(/\s+/g, " ").trim() || p.name;
-    const nm = plainName.length > 13 ? plainName.slice(0, 12) + "…" : plainName;
-    const ns = nm.length <= 8 ? 40 : nm.length <= 10 ? 35 : 30;
+    const nm = coverName(p.name);
+    const ns = nm.length <= 8 ? 36 : nm.length <= 10 ? 31 : 27;
     // 글자수로 잘라 쓰면 "소울/푸드"처럼 단어가 끊긴다 → 어절 단위 줄바꿈
-    const dl = wrapLines(p.desc ?? "", 21, 2);
-    const chipW = p.region.length * 20 + 46;
-    bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CELL_H - 12}" rx="22" fill="white" fill-opacity="0.97" stroke="#f0dcd6" stroke-width="2"/>`;
+    const dl = wrapLines(p.desc ?? "", 22, 2);
+    const chipW = p.region.length * 19 + 44;
+    bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CARD_H}" rx="22" fill="white" fill-opacity="0.97" stroke="#f0dcd6" stroke-width="2"/>`;
     textCells += `
     <g>
-      <rect x="${CX + IN + 10}" y="${CY + IN + 10}" width="54" height="54" rx="15" fill="#d92121"/>
-      <text x="${CX + IN + 37}" y="${CY + IN + 48}" font-family="${FONT}" font-size="32" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
-      <text x="${CX + IN + 2}" y="${base + 46}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
-      <rect x="${CX + IN + 2}" y="${base + 62}" width="${chipW}" height="36" rx="18" fill="#f6ede7"/>
-      <text x="${CX + IN + 2 + chipW / 2}" y="${base + 87}" font-family="${FONT}" font-size="21" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(p.region)}</text>
-      ${p.hundred ? `<rect x="${CX + IN + 10 + chipW}" y="${base + 62}" width="112" height="36" rx="18" fill="#fff3d6" stroke="#e8c66a" stroke-width="1.5"/>
-      <text x="${CX + IN + 66 + chipW}" y="${base + 87}" font-family="${FONT}" font-size="20" font-weight="800" fill="#9a7419" text-anchor="middle">백년가게</text>` : ""}
-      ${dl.map((ln, k) => `<text x="${CX + IN + 2}" y="${base + 122 + k * 32}" font-family="${FONT}" font-size="25" fill="#3a2a24">${k === 0 ? emoji + " " : ""}${esc(ln)}</text>`).join("")}
+      <rect x="${CX + IN + 10}" y="${CY + IN + 10}" width="50" height="50" rx="14" fill="#d92121"/>
+      <text x="${CX + IN + 35}" y="${CY + IN + 45}" font-family="${FONT}" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
+      <rect x="${CX + IN + 10}" y="${base - 44}" width="${chipW}" height="34" rx="17" fill="#000000" fill-opacity="0.6"/>
+      <text x="${CX + IN + 10 + chipW / 2}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="700" fill="#ffffff" text-anchor="middle">📍 ${esc(p.region)}</text>
+      ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
+      <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : ""}
+      <text x="${CX + IN + 2}" y="${base + 42}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      ${dl.map((ln, k) => `<text x="${CX + IN + 2}" y="${base + 82 + k * 30}" font-family="${FONT}" font-size="23" fill="#3a2a24">${k === 0 ? emoji + " " : ""}${esc(ln)}</text>`).join("")}
     </g>`;
   }
 
-  // 제목: 음식 이름을 화면 최대 크기로 — 피드에서 확대하지 않아도 무슨 음식인지 바로 읽혀야 한다
+  // 제목: 음식 이름을 크게 — 단, 4:5로 잘려도 살아남는 위치(CT 아래)에 둔다
   const tp = theme.coverParts ?? {
     top: "", main: theme.food || theme.keyword, sub: `${theme.suffix || "맛집"} ${places.length}선`,
   };
   const mainLen = Math.max(1, [...tp.main].length);
-  const ms = Math.min(200, Math.floor(950 / mainLen));
+  const ms = Math.min(150, Math.floor(950 / mainLen));
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="hd" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#140803" stop-opacity="0.9"/>
-        <stop offset="70%" stop-color="#140803" stop-opacity="0.78"/>
-        <stop offset="100%" stop-color="#140803" stop-opacity="0.45"/>
+        <stop offset="0%" stop-color="#140803" stop-opacity="0.88"/>
+        <stop offset="100%" stop-color="#140803" stop-opacity="0.5"/>
       </linearGradient>
     </defs>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="0.55"/>
-    <rect x="0" y="0" width="${W}" height="${HEADER}" fill="url(#hd)"/>
-    <text x="${W / 2}" y="88" font-family="${FONT}" font-size="42" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
-    <text x="${W / 2}" y="${118 + Math.round(ms * 0.8)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
-    <text x="${W / 2}" y="${HEADER - 34}" font-family="${FONT}" font-size="58" font-weight="900" fill="#ffd54a" text-anchor="middle">${esc(tp.sub)}</text>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="0.62"/>
+    <rect x="0" y="${CT}" width="${W}" height="${HEADER}" fill="url(#hd)"/>
+    <text x="${W / 2}" y="${CT + 52}" font-family="${FONT}" font-size="34" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
+    <text x="${W / 2}" y="${CT + 78 + Math.round(ms * 0.8)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
+    <text x="${W / 2}" y="${CT + HEADER - 28}" font-family="${FONT}" font-size="46" font-weight="900" fill="#ffd54a" text-anchor="middle">${esc(tp.sub)}</text>
     ${bgCells}
-    <text x="${W / 2}" y="${H - 50}" font-family="${FONT}" font-size="30" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요</text>
-    <text x="${W / 2}" y="${H - 16}" font-family="${FONT}" font-size="24" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
+    <text x="${W / 2}" y="${CT + CH - 40}" font-family="${FONT}" font-size="27" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요</text>
+    <text x="${W / 2}" y="${CT + CH - 10}" font-family="${FONT}" font-size="21" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
   </svg>`;
   const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
@@ -531,6 +538,21 @@ async function composeReelCover(theme, places) {
     .jpeg({ quality: 88 })
     .toFile(out);
   return out;
+}
+
+/**
+ * 표지 카드에 넣을 상호명.
+ * 괄호 표기와 지점명은 칸을 다 잡아먹고 잘리므로 뺀다. 다만 "3.3 국밥전문점"의
+ * "국밥전문점"까지 지워져 "3.3"만 남은 적이 있어(2026-08-19), 지점으로 볼 수 있는
+ * 짧은 마지막 어절만 지우고 업종어는 지키도록 한다.
+ */
+function coverName(raw) {
+  const NOT_BRANCH = ["전문점", "음식점", "분식점", "할인점", "가맹점", "체인점"];
+  const parts = String(raw).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().split(" ");
+  const last = parts[parts.length - 1] ?? "";
+  if (parts.length > 1 && /점$/.test(last) && last.length <= 4 && !NOT_BRANCH.includes(last)) parts.pop();
+  const name = parts.join(" ") || String(raw);
+  return name.length > 13 ? name.slice(0, 12) + "…" : name;
 }
 
 /**
@@ -712,10 +734,7 @@ async function composeCover(theme, places) {
   for (let i = 0; i < places.length; i++) {
     const p = places[i];
     const { x, y } = cellPos(i);
-    // 괄호 표기·지점명은 칸을 다 잡아먹고 잘리므로 표지에서는 뺀다
-    const plainName =
-      p.name.replace(/\([^)]*\)/g, "").replace(/\s+\S+점$/, "").replace(/\s+/g, " ").trim() || p.name;
-    const nm = plainName.length > 13 ? plainName.slice(0, 12) + "…" : plainName;
+    const nm = coverName(p.name);
     const ns = nm.length <= 7 ? 30 : nm.length <= 9 ? 25 : 20;
     const d1 = (p.desc ?? "").slice(0, 12), d2 = (p.desc ?? "").slice(12, 24);
     const chipW = p.region.length * 20 + 46;
@@ -1143,14 +1162,15 @@ async function main() {
     }
     console.log(`카운트다운 릴스 렌더 완료 (${clips.length}컷${voiceWav ? ", 음성 포함" : ""})`);
   } else {
-    // 리스트 표지 → 잔잔한 줌인 8초 세로 릴스 렌더 (기존 모음집)
+    // 리스트 표지 → 8초 고정 세로 릴스 (기존 모음집).
+    // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
+    // 사진 한 장을 그대로 보여주는 편이 낫다.
     await ff([
       "-y", "-loop", "1", "-i", reelCover, "-t", "8", "-r", "30",
       "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-      "-filter_complex",
-      "[0:v]scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.00025,1.20)':d=240:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p[v]",
+      "-filter_complex", "[0:v]fps=30,format=yuv420p[v]",
       "-map", "[v]", "-map", "1:a",
-      "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac", "-shortest",
+      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-c:a", "aac", "-shortest",
       "-movflags", "+faststart", reelMp4,
     ]);
   }
