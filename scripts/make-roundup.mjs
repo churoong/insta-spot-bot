@@ -157,22 +157,27 @@ async function themeWeights(db, all) {
 
 /** 가중 랜덤으로 중복 없이 시도 순서를 만든다 (첫 자리는 최근에 쓴 테마 제외) */
 function weightedOrder(all, weights, exclude = []) {
-  const pool = all.map((t, i) => ({ t, w: weights[i] }));
-  const out = [];
-  while (pool.length) {
-    const filtered = out.length === 0 ? pool.filter((p) => !exclude.includes(p.t.key)) : pool;
-    const usable = filtered.length ? filtered : pool;
-    const total = usable.reduce((a, b) => a + b.w, 0);
-    let r = Math.random() * total;
-    let pick = usable[usable.length - 1];
-    for (const p of usable) {
-      r -= p.w;
-      if (r <= 0) { pick = p; break; }
+  const draw = (pool) => {
+    const out = [];
+    while (pool.length) {
+      const total = pool.reduce((a, b) => a + b.w, 0);
+      let r = Math.random() * total;
+      let pick = pool[pool.length - 1];
+      for (const p of pool) {
+        r -= p.w;
+        if (r <= 0) { pick = p; break; }
+      }
+      out.push(pick.t);
+      pool.splice(pool.indexOf(pick), 1);
     }
-    out.push(pick.t);
-    pool.splice(pool.indexOf(pick), 1);
-  }
-  return out;
+    return out;
+  };
+  const items = all.map((t, i) => ({ t, w: weights[i] }));
+  // 최근에 쓴 테마는 맨 뒤로 — 앞 테마가 수집에 실패해도 곧바로 다시 나오지 않게
+  return [
+    ...draw(items.filter((p) => !exclude.includes(p.t.key))),
+    ...draw(items.filter((p) => exclude.includes(p.t.key))),
+  ];
 }
 
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
@@ -185,9 +190,12 @@ async function collectPlaces(theme, limit) {
   );
   const seen = {};
   const picked = [];
+  // 시군구 편중 방지 상한. 지역 한정 테마(areaCode)는 시군구 수 자체가 적어
+  // 2곳으로 묶으면 6곳을 채울 수 없다 (제주=제주시·서귀포시 2개뿐 → 최대 4곳).
+  const perRegion = theme.areaCode ? 4 : 2;
   for (const it of items.sort(() => Math.random() - 0.5)) {
     const rg = shortRegion(it.addr1);
-    if ((seen[rg] ?? 0) >= 2) continue;
+    if ((seen[rg] ?? 0) >= perRegion) continue;
     seen[rg] = (seen[rg] ?? 0) + 1;
     picked.push({
       contentId: String(it.contentid),
@@ -217,7 +225,7 @@ async function markHundredYear(db, places) {
 }
 
 /** 가게별 이미지 중 Gemini 비전으로 음식 사진 선택 (실패 시 기존 유지) */
-async function pickFoodImage(place) {
+async function pickFoodImage(place, food) {
   try {
     const items = await tourCall("detailImage2", {
       contentId: place.contentId, imageYN: "Y", numOfRows: "15",
@@ -251,7 +259,7 @@ async function pickFoodImage(place) {
     const text =
       (await geminiCall(
         [
-          { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
+          { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터).${food ? ` 이 모음집 주제는 "${food}"이니 ${food}로 보이는 사진을 가장 앞에 둬. 주제와 다른 음식(예: 김밥·튀김 같은 곁들임)은 뒤로 미뤄.` : ""} 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
           ...parts,
         ],
         60
@@ -869,14 +877,24 @@ async function main() {
   console.log("테마 시도 순서:", ordered.slice(0, 3).map((t) => t.key).join(" → "));
 
   let theme = null, places = [];
-  for (let t = 0; t < Math.min(3, ordered.length); t++) {
+  // 표지 한 장에 6칸(2열x3행)까지만 — 8칸이면 셀이 좁아 상호명·설명이 잘리고
+  // 피드에서 확대하기 전엔 아무것도 안 읽힌다(실측).
+  //
+  // 풀을 10곳 이상 요구하는 이유: 뒤이어 음식 사진 검증에서 몇 곳이 탈락하는데,
+  // 딱 6곳만 모인 테마(예: 제주 흑돼지 9곳)를 잡으면 6칸을 못 채워 그날 발행이
+  // 통째로 날아간다. 여유가 있는 테마를 먼저 쓰고, 전부 얇으면 그중 제일 큰 풀을 쓴다.
+  let best = null;
+  for (let t = 0; t < Math.min(5, ordered.length); t++) {
     const cand = ordered[t];
-    // 표지 한 장에 6칸(2열x3행)까지만 — 8칸이면 셀이 좁아 상호명·설명이 잘리고
-    // 피드에서 확대하기 전엔 아무것도 안 읽힌다(실측). 음식 사진 검증에서 탈락하는
-    // 곳을 대체해야 하므로 필요한 6곳보다 넉넉히 모아 둔다.
     const got = await collectPlaces(cand, 16);
     console.log(`[${cand.key}] 수집 풀: ${got.length}곳`);
-    if (got.length >= 6) { theme = cand; places = got; break; }
+    if (got.length >= 10) { theme = cand; places = got; break; }
+    if (!best || got.length > best.places.length) best = { theme: cand, places: got };
+  }
+  if (!theme && best && best.places.length >= 6) {
+    theme = best.theme;
+    places = best.places;
+    console.log(`풀이 얇아 최대 후보로 진행: ${theme.key} (${places.length}곳)`);
   }
   if (!theme) throw new Error("수집 가능한 테마 없음");
 
@@ -888,7 +906,7 @@ async function main() {
   const passed = [];
   for (const p of places) {
     if (passed.length >= NEED) break;
-    await pickFoodImage(p);
+    await pickFoodImage(p, theme.food);
     if (p.foodPicked) passed.push(p);
     else console.log(`  음식 사진 없음 → 제외: ${p.name}`);
     await new Promise((r) => setTimeout(r, 4000));

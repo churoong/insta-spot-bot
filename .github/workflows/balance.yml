@@ -4,7 +4,7 @@ on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
     # 매주 월·금. 정시 혼잡 회피 + 지연 감안해 이른 저녁 목표.
-    - cron: "47 8 * * 1,5" # UTC 08:47 = KST 17:47
+    - cron: "47 6 * * 5" # UTC 06:47 = KST 15:47 (금) — 모음집 비중을 늘리며 주 2회→1회
 
 jobs:
   balance:

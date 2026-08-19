@@ -283,10 +283,16 @@ async function main() {
   // 발행 간격 가드 — GitHub Actions 스케줄은 자주 누락되므로(실측: 하루 4회 중 1회만
   // 실행) 스케줄을 촘촘히 걸어두고, 최근에 이미 발행했으면 여기서 조용히 종료한다.
   // 이러면 누락된 회차는 다음 스케줄이 자연히 커버하고 과다 발행도 막힌다.
-  const gapMin = Number(process.env.MIN_GAP_MIN || 360);
+  //
+  // 1200분(20시간) = 하루 1개. 일반 릴스는 도달 105~144·시청 2초로 성과가 없어
+  // 모음집(8초, 완주율 94%) 쪽으로 비중을 옮겼다(2026-08).
+  // category=릴스만 세는 이유: 모음집·큐레이션까지 함께 세면 저녁 모음집이
+  // 다음 날 아침 릴스를 막아 발행 시각이 계속 밀린다.
+  const gapMin = Number(process.env.MIN_GAP_MIN || 1200);
   const recent = await db.execute({
     sql: `SELECT created_at FROM posts
-          WHERE status IN ('published','publishing') AND created_at >= datetime('now', ?)
+          WHERE status IN ('published','publishing') AND category = '릴스'
+            AND created_at >= datetime('now', ?)
           ORDER BY id DESC LIMIT 1`,
     args: [`-${gapMin} minutes`],
   });
