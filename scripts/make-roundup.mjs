@@ -1142,7 +1142,7 @@ async function main() {
     if (process.env.COVER_STYLE && STYLES.includes(process.env.COVER_STYLE)) {
       coverStyle = process.env.COVER_STYLE; // 시안 확인용 수동 지정
     } else {
-      const ci = await db.execute("SELECT value FROM config WHERE key = cover_idx");
+      const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
       coverStyle = STYLES[(ci.rows.length ? Number(ci.rows[0].value) : 0) % STYLES.length];
     }
     console.log("표지 스타일:", coverStyle);
