@@ -378,16 +378,18 @@ ${places
   .join("\n")}
 
 각 식당마다 두 가지를 만들어:
-- s: 표지 카드용 (반드시 45~65자. 카드에서 3줄로 표시되니 짧으면 허전하다). 존댓말 해요체 1~2문장.
-     그 집만의 구체적인 포인트를 두 가지 담아: ① 대표메뉴 이름과 재료·조리 특징 ② 곁들임·역사·분위기 중 하나.
-     예: "12시간 고아낸 사골육수에 손으로 채운 수제 순대를 넣어 줘요. 겉절이와 새우젓으로 간을 맞춰 먹는 집이에요."
-- d: 캡션용 상세 설명 (70~90자, 존댓말 해요체 2~3문장). s보다 더 자세히 — 무엇을 파는 집인지, 어떤 점이 특별한지, 알아두면 좋은 점.
+- s: 표지 카드용. 짧은 명사구 2~3개를 배열로. 각 항목 12~22자.
+     ⚠️ 반드시 명사로 끝낼 것. "~해요/~예요/~있어요" 같은 서술형 종결 금지.
+     "~끓여낸/~담긴/~이어온" 같은 관형형 종결도 금지(문장이 잘린 것처럼 보인다).
+     항목마다 다른 정보를 담아: ① 대표메뉴와 재료·조리 특징 ② 곁들임·구성 ③ 역사·위치·분위기 중 하나.
+     예: ["12시간 고아낸 사골육수 순대국밥", "손으로 채운 수제 순대와 머리고기", "1987년부터 이어온 시장 노포"]
+- d: 캡션용 상세 설명 (70~90자, 존댓말 해요체 2~3문장). 캡션은 줄글이라 서술형으로 쓴다.
+     s보다 더 자세히 — 무엇을 파는 집인지, 어떤 점이 특별한지, 알아두면 좋은 점.
 
 금지(어느 집에나 붙는 말): "고양시의 깊은 진국 순대국", "현지에서 오래 사랑받는 맛집", "정성이 담긴 한 그릇"
-좋은 예: "가마솥에 고아낸 뽀얀 사골육수 순대국밥", "손으로 채워 만든 아바이순대 한 접시"
 
 규칙: 상호명 반복 금지, 없는 사실 지어내기 금지(정보가 부족하면 그 음식 자체의 특징으로), 식당마다 서로 다른 표현 사용.
-JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
+JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개)`;
   const text = await llmGenerate(prompt, 3600);
   if (!text) return null;
   try {
@@ -395,7 +397,17 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
     if (!m) return null;
     const arr = JSON.parse(m[0]);
     if (!Array.isArray(arr) || !arr.some((x) => x?.s && x?.d)) return null;
-    // 상한에서 그냥 자르면 "…직접 간을 " 처럼 문장이 끊긴다 → 마지막 완성 문장까지만
+
+    // 표지 문구는 개조식(명사 종결) 항목 목록. 문자열로 오면 문장부호로 쪼개 항목화한다.
+    const trimPhrase = (v) => {
+      const t = String(v ?? "").trim().replace(/[.·]+$/, "");
+      return [...t].length <= 22 ? t : [...t].slice(0, 22).join("").replace(/\s*\S*$/, "");
+    };
+    const toLines = (v) => {
+      const raw = Array.isArray(v) ? v : String(v ?? "").split(/(?<=[.!?])\s+|\s*[·|]\s*/);
+      return raw.map(trimPhrase).filter(Boolean).slice(0, 3);
+    };
+    // 캡션은 줄글이라 상한에서 자를 때 마지막 완성 문장까지만 남긴다
     const trimSentence = (v, max) => {
       const t = String(v ?? "").trim();
       const ch = [...t];
@@ -404,12 +416,16 @@ JSON 배열만 출력: [{"s":"...","d":"..."}, ...] (${places.length}개)`;
       const i = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("!"), cut.lastIndexOf("?"));
       return i > max * 0.5 ? cut.slice(0, i + 1) : cut.replace(/\s*\S*$/, "") + "…";
     };
-    const fbShort = "오랜 시간 한자리를 지켜온 집이에요. 현지에서 꾸준히 사랑받아 온 곳이에요.";
+    const fbLines = [`${theme.keyword} 한 가지로 이어온 노포`, "현지에서 오래 사랑받아온 집"];
     const fbDetail = `${theme.keyword} 하나로 오랜 시간 사랑받아온, 믿고 찾아갈 수 있는 곳이에요.`;
-    return places.map((_, i) => ({
-      short: trimSentence(arr[i]?.s ?? fbShort, 69),
-      detail: trimSentence(arr[i]?.d ?? fbDetail, 100),
-    }));
+    return places.map((_, i) => {
+      const lines = toLines(arr[i]?.s);
+      return {
+        lines: lines.length ? lines : fbLines,
+        short: (lines.length ? lines : fbLines).join(", "),
+        detail: trimSentence(arr[i]?.d ?? fbDetail, 140), // 캡션은 길이 제약이 없어 문장이 끊기지 않게 넉넉히
+      };
+    });
   } catch {
     return null;
   }
@@ -439,7 +455,6 @@ async function composeReelCover(theme, places) {
   const CARD_W = CELL_W - 16, CARD_H = CELL_H - 12;
   const PH_W = CARD_W - IN * 2;
   const PH_H = Math.round(CELL_H * 0.527);
-  const emoji = theme.emoji || "🍽️";
 
   // 배경: 음식 사진 풀블리드 + 따뜻한 어두운 오버레이.
   // 블러를 넣는 이유: 관광공사 원본에 타 블로그 워터마크가 박힌 경우가 있어 배경에서
@@ -490,7 +505,8 @@ async function composeReelCover(theme, places) {
     const nm = coverName(p.name);
     const ns = nm.length <= 8 ? 36 : nm.length <= 10 ? 31 : 27;
     // 글자수로 잘라 쓰면 "소울/푸드"처럼 단어가 끊긴다 → 어절 단위 줄바꿈
-    const dl = wrapLines(p.desc ?? "", 23, 3);
+    // 개조식 항목을 한 줄씩. 문구가 없으면 예전 방식(줄글 줄바꿈)으로 폴백
+    const dl = (p.descLines?.length ? p.descLines : wrapLines(p.desc ?? "", 23, 3)).slice(0, 3);
     const chipW = p.region.length * 19 + 44;
     bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CARD_H}" rx="22" fill="white" fill-opacity="0.97" stroke="#f0dcd6" stroke-width="2"/>`;
     textCells += `
@@ -502,7 +518,7 @@ async function composeReelCover(theme, places) {
       ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : ""}
       <text x="${CX + IN + 2}" y="${base + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
-      ${dl.map((ln, k) => `<text x="${CX + IN + 2}" y="${base + 76 + k * 28}" font-family="${FONT}" font-size="22" fill="#3a2a24">${k === 0 ? emoji + " " : ""}${esc(ln)}</text>`).join("")}
+      ${dl.map((ln, k) => `<circle cx="${CX + IN + 10}" cy="${base + 69 + k * 28}" r="4.5" fill="#d92121"/><text x="${CX + IN + 24}" y="${base + 76 + k * 28}" font-family="${FONT}" font-size="22" fill="#3a2a24">${esc(ln)}</text>`).join("")}
     </g>`;
   }
 
@@ -960,6 +976,7 @@ async function main() {
     return;
   }
   places.forEach((p, i) => {
+    p.descLines = descs[i].lines;
     p.desc = descs[i].short;
     p.detail = descs[i].detail;
   });
