@@ -241,7 +241,7 @@ async function pickFoodImage(place, food) {
     ]
       .filter((v, i, a) => v.url && a.findIndex((x) => x.url === v.url) === i)
       .slice(0, 6);
-    if (cands.length <= 1 || !process.env.GEMINI_API_KEY) return;
+    if (cands.length < 1 || !process.env.GEMINI_API_KEY) return;
 
     const valid = [], parts = [];
     for (const c of cands) {
@@ -254,12 +254,12 @@ async function pickFoodImage(place, food) {
         parts.push({ inlineData: { mimeType: "image/jpeg", data: b.toString("base64") } });
       } catch { /* skip */ }
     }
-    if (valid.length <= 1) return;
+    if (valid.length < 1) return;
 
     const text =
       (await geminiCall(
         [
-          { text: `식당 사진 ${valid.length}장이야. 음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터).${food ? ` 이 모음집 주제는 "${food}"이니 ${food}로 보이는 사진을 가장 앞에 둬. 주제와 다른 음식(예: 김밥·튀김 같은 곁들임)은 뒤로 미뤄.` : ""} 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
+          { text: `식당 사진 ${valid.length}장이야. ${food ? `"${food}" 요리가 실제로 화면에 보이는 사진의 번호만 좋은 순서대로 JSON 배열로 답해 (1번부터). 반찬·곁들임·다른 요리만 보이는 사진은 제외하고, ${food}가 보이는 사진이 한 장도 없으면 반드시 []로 답해.` : `음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터).`} 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
           ...parts,
         ],
         60
