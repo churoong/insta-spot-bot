@@ -435,7 +435,16 @@ JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개
  * 릴스용 표지(1080x1920): 원본 인포그래픽 그리드 스타일 유지(사진+번호+이름+지역칩+한줄소개),
  * 배경만 음식 사진(어둡고 따뜻한 오버레이)으로 먹음직스럽게. 릴스 규격에 딱 맞음.
  */
-async function composeReelCover(theme, places) {
+async function composeReelCover(theme, places, dark = false) {
+  // dark=true면 흰 카드 대신 반투명 다크 카드. 어느 쪽이 유입이 좋은지 비교하려고
+  // 두 배색을 같은 레이아웃으로 유지한다(레이아웃 차이가 섞이면 비교가 안 된다).
+  const PAL = dark
+    ? { card: "#170d09", cardOp: 0.84, stroke: "#ffffff", strokeOp: 0.14,
+        name: "#ffffff", desc: "#ded2cb", accent: "#ff4b2b",
+        scrim: 0.7, top: "#ffb59a", subBadge: true, sub: "#ffffff", footer: "#c9b8b0" }
+    : { card: "#ffffff", cardOp: 0.97, stroke: "#f0dcd6", strokeOp: 1,
+        name: "#b81414", desc: "#3a2a24", accent: "#d92121",
+        scrim: 0.62, top: "#ffcdb3", subBadge: false, sub: "#ffd54a", footer: "#e0cfc4" };
   const sharp = (await import("sharp")).default;
   const W = 1080, H = 1920;
 
@@ -464,8 +473,8 @@ async function composeReelCover(theme, places) {
   if (!bgRes.ok) throw new Error("릴스 배경 사진 실패");
   const bgPhoto = await sharp(Buffer.from(await bgRes.arrayBuffer()))
     .resize(W, H, { fit: "cover" })
-    .blur(14)
-    .modulate({ saturation: 1.12 })
+    .blur(dark ? 18 : 14)
+    .modulate({ saturation: dark ? 1.0 : 1.12, brightness: dark ? 0.92 : 1 })
     .jpeg({ quality: 86 })
     .toBuffer();
 
@@ -508,17 +517,17 @@ async function composeReelCover(theme, places) {
     // 개조식 항목을 한 줄씩. 문구가 없으면 예전 방식(줄글 줄바꿈)으로 폴백
     const dl = (p.descLines?.length ? p.descLines : wrapLines(p.desc ?? "", 23, 3)).slice(0, 3);
     const chipW = p.region.length * 19 + 44;
-    bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CARD_H}" rx="22" fill="white" fill-opacity="0.97" stroke="#f0dcd6" stroke-width="2"/>`;
+    bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CARD_H}" rx="22" fill="${PAL.card}" fill-opacity="${PAL.cardOp}" stroke="${PAL.stroke}" stroke-opacity="${PAL.strokeOp}" stroke-width="2"/>`;
     textCells += `
     <g>
-      <rect x="${CX + IN + 10}" y="${CY + IN + 10}" width="50" height="50" rx="14" fill="#d92121"/>
+      <rect x="${CX + IN + 10}" y="${CY + IN + 10}" width="50" height="50" rx="14" fill="${PAL.accent}"/>
       <text x="${CX + IN + 35}" y="${CY + IN + 45}" font-family="${FONT}" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
       <rect x="${CX + IN + 10}" y="${base - 44}" width="${chipW}" height="34" rx="17" fill="#000000" fill-opacity="0.6"/>
       <text x="${CX + IN + 10 + chipW / 2}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="700" fill="#ffffff" text-anchor="middle">📍 ${esc(p.region)}</text>
       ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : ""}
-      <text x="${CX + IN + 2}" y="${base + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
-      ${dl.map((ln, k) => `<circle cx="${CX + IN + 10}" cy="${base + 69 + k * 28}" r="4.5" fill="#d92121"/><text x="${CX + IN + 24}" y="${base + 76 + k * 28}" font-family="${FONT}" font-size="22" fill="#3a2a24">${esc(ln)}</text>`).join("")}
+      <text x="${CX + IN + 2}" y="${base + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
+      ${dl.map((ln, k) => `<circle cx="${CX + IN + 10}" cy="${base + 69 + k * 28}" r="4.5" fill="${PAL.accent}"/><text x="${CX + IN + 24}" y="${base + 76 + k * 28}" font-family="${FONT}" font-size="22" fill="${PAL.desc}">${esc(ln)}</text>`).join("")}
     </g>`;
   }
 
@@ -535,14 +544,15 @@ async function composeReelCover(theme, places) {
         <stop offset="100%" stop-color="#140803" stop-opacity="0.5"/>
       </linearGradient>
     </defs>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="0.62"/>
-    <rect x="0" y="${CT}" width="${W}" height="${HEADER}" fill="url(#hd)"/>
-    <text x="${W / 2}" y="${CT + 38}" font-family="${FONT}" font-size="30" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="${PAL.scrim}"/>
+    ${dark ? "" : `<rect x="0" y="${CT}" width="${W}" height="${HEADER}" fill="url(#hd)"/>`}
+    <text x="${W / 2}" y="${CT + 38}" font-family="${FONT}" font-size="30" font-weight="700" fill="${PAL.top}" text-anchor="middle">${esc(tp.top)}</text>
     <text x="${W / 2}" y="${CT + 44 + Math.round(ms * 0.86)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
-    <text x="${W / 2}" y="${CT + HEADER - 26}" font-family="${FONT}" font-size="40" font-weight="900" fill="#ffd54a" text-anchor="middle">${esc(tp.sub)}</text>
+    ${PAL.subBadge ? `<rect x="${W / 2 - 130}" y="${CT + HEADER - 64}" width="260" height="54" rx="27" fill="${PAL.accent}"/>` : ""}
+    <text x="${W / 2}" y="${CT + HEADER - 26}" font-family="${FONT}" font-size="${PAL.subBadge ? 36 : 40}" font-weight="900" fill="${PAL.sub}" text-anchor="middle">${esc(tp.sub)}</text>
     ${bgCells}
     <text x="${W / 2}" y="${CT + CH - 28}" font-family="${FONT}" font-size="24" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요</text>
-    <text x="${W / 2}" y="${CT + CH - 6}" font-family="${FONT}" font-size="18" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
+    <text x="${W / 2}" y="${CT + CH - 6}" font-family="${FONT}" font-size="18" fill="${PAL.footer}" text-anchor="middle">@${HANDLE}</text>
   </svg>`;
   const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
@@ -554,6 +564,64 @@ async function composeReelCover(theme, places) {
       { input: Buffer.from(textSvg), left: 0, top: 0 },
     ])
     .jpeg({ quality: 88 })
+    .toFile(out);
+  return out;
+}
+
+/**
+ * A안 표지 — 대표 음식 사진 한 장을 꽉 채우고 제목만 얹는다.
+ * 그리드형(기존·다크)과 달리 썸네일에서 음식이 크게 보이는 대신 6곳 정보는 안 보인다.
+ * 어느 쪽이 유입에 유리한지 비교하려고 나란히 돌린다.
+ */
+async function composeHeroCover(theme, places) {
+  const sharp = (await import("sharp")).default;
+  const W = 1080, H = 1920;
+  const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285 — 4:5로 잘려도 살아남는 위쪽 경계
+  const CH = Math.round(W * 5 / 4); // 1350
+
+  const p = places.find((x) => x.foodPicked) ?? places[0];
+  const res = await fetch(p.imageUrl, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error("히어로 배경 사진 실패");
+  // 그리드형과 달리 사진 자체가 주인공이라 블러를 넣지 않는다
+  const bgPhoto = await sharp(Buffer.from(await res.arrayBuffer()))
+    .resize(W, H, { fit: "cover", position: "attention" })
+    .modulate({ saturation: 1.14, brightness: 1.02 })
+    .jpeg({ quality: 90 })
+    .toBuffer();
+
+  const tp = theme.coverParts ?? {
+    top: "", main: theme.food || theme.keyword, sub: `${theme.suffix || "맛집"} ${places.length}선`,
+  };
+  const mainLen = Math.max(1, [...tp.main].length);
+  const ms = Math.min(215, Math.floor(980 / mainLen));
+
+  // 제목 덩어리를 4:5 화면 한가운데에 둔다 (윗줄 + 음식명 + 배지)
+  const BLOCK = 46 + ms + 20 + 84;
+  const bs = CT + Math.round((CH - BLOCK) / 2);
+  const regions = places.map((x) => x.region.split(" ")[1] || x.region).join("  ·  ");
+
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bt" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#120703" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#120703" stop-opacity="0.92"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="#120703" fill-opacity="0.42"/>
+    <rect x="0" y="${CT + Math.round(CH * 0.55)}" width="${W}" height="${H - CT - Math.round(CH * 0.55)}" fill="url(#bt)"/>
+    <text x="${W / 2}" y="${bs + 40}" font-family="${FONT}" font-size="40" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
+    <text x="${W / 2}" y="${bs + 46 + Math.round(ms * 0.86)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#2a0a03" stroke-width="8" paint-order="stroke">${esc(tp.main)}</text>
+    <rect x="${W / 2 - 175}" y="${bs + 66 + ms}" width="350" height="84" rx="42" fill="#d92121"/>
+    <text x="${W / 2}" y="${bs + 125 + ms}" font-family="${FONT}" font-size="52" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(tp.sub)}</text>
+    <text x="${W / 2}" y="${CT + CH - 122}" font-family="${FONT}" font-size="31" font-weight="700" fill="#ffd9c9" text-anchor="middle">${esc(regions)}</text>
+    <text x="${W / 2}" y="${CT + CH - 58}" font-family="${FONT}" font-size="36" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복하기</text>
+    <text x="${W / 2}" y="${CT + CH - 14}" font-family="${FONT}" font-size="22" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
+  </svg>`;
+
+  const out = path.join(TMP, "reel-cover.jpg");
+  await sharp(bgPhoto)
+    .composite([{ input: Buffer.from(svg), left: 0, top: 0 }])
+    .jpeg({ quality: 90 })
     .toFile(out);
   return out;
 }
@@ -761,7 +829,7 @@ async function composeCover(theme, places) {
     <g>
       <rect x="${x + PAD + 8}" y="${y + PAD + 10}" width="44" height="44" rx="12" fill="#d92121"/>
       <text x="${x + PAD + 30}" y="${y + PAD + 42}" font-family="${FONT}" font-size="28" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
-      <text x="${x + PAD + 62}" y="${y + PAD + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      <text x="${x + PAD + 62}" y="${y + PAD + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
       <rect x="${x + PAD + 8}" y="${y + PAD + 58}" width="${chipW}" height="34" rx="17" fill="#f6ede7"/>
       <text x="${x + PAD + 8 + chipW / 2}" y="${y + PAD + 82}" font-family="${FONT}" font-size="20" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(p.region)}</text>
       ${p.hundred ? `<rect x="${x + PAD + 8 + chipW + 8}" y="${y + PAD + 58}" width="110" height="34" rx="17" fill="#fff3d6" stroke="#e8c66a" stroke-width="1.5"/>
@@ -1031,6 +1099,7 @@ async function main() {
       : buildCaption(theme, places);
 
   const cards = []; // countdown에서 쓸 카드 파일들
+  let coverStyle = null; // grid 계열에서 쓴 표지 스타일 (성과 비교용)
   const narration = []; // 카드와 1:1 대응하는 나레이션 문장
   let reelCover = null;
   if (STYLE === "countdown") {
@@ -1067,7 +1136,20 @@ async function main() {
     } catch { /* 아웃트로는 없어도 됨 */ }
     console.log(`카운트다운 카드 ${cards.length}장 생성`);
   } else {
-    reelCover = await composeReelCover(theme, places);
+    // 표지 3안을 번갈아 발행하고 어느 쪽이 유입이 좋은지 나중에 조회수로 비교한다.
+    // 랜덤이 아니라 순환이라 같은 횟수만큼 노출된다(표본 수를 맞춰야 비교가 된다).
+    const STYLES = ["classic", "hero", "dark"];
+    if (process.env.COVER_STYLE && STYLES.includes(process.env.COVER_STYLE)) {
+      coverStyle = process.env.COVER_STYLE; // 시안 확인용 수동 지정
+    } else {
+      const ci = await db.execute("SELECT value FROM config WHERE key = cover_idx");
+      coverStyle = STYLES[(ci.rows.length ? Number(ci.rows[0].value) : 0) % STYLES.length];
+    }
+    console.log("표지 스타일:", coverStyle);
+    reelCover =
+      coverStyle === "hero"
+        ? await composeHeroCover(theme, places)
+        : await composeReelCover(theme, places, coverStyle === "dark");
   }
 
   if (DRY) {
@@ -1077,7 +1159,9 @@ async function main() {
       console.log("DRY — countdown-intro-preview.jpg / countdown-rank-preview.jpg 저장");
     } else {
       fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
-      console.log("DRY 모드 — 발행 생략. roundup-reel-preview.jpg 저장");
+      // 디자인 시안을 같은 데이터로 비교하려면 수집 결과가 필요하다(재수집하면 식당이 바뀜)
+      fs.writeFileSync("roundup-dry-data.json", JSON.stringify({ theme, places }, null, 1));
+      console.log("DRY 모드 — 발행 생략. roundup-reel-preview.jpg / roundup-dry-data.json 저장");
     }
     console.log(caption);
     return;
@@ -1092,14 +1176,15 @@ async function main() {
     return;
   }
   await db.execute({
-    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status)
-          VALUES (?, ?, ?, '모음집', ?, ?, 'publishing')`,
+    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status, cover_style)
+          VALUES (?, ?, ?, '모음집', ?, ?, 'publishing', ?)`,
     args: [
       cid,
       theme.titleResolved,
       places.map((p, i) => `${i + 1}. ${p.name} — ${p.address}`).join("\n"),
       places[0].imageUrl,
       caption,
+      coverStyle,
     ],
   });
 
@@ -1203,6 +1288,17 @@ async function main() {
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
     args: [mediaId, cid],
   });
+
+  // 표지 스타일 포인터 이동 — 3안이 같은 횟수만큼 나가야 비교가 된다.
+  // (수동 지정 COVER_STYLE로 돌린 회차는 표본을 흔들지 않도록 포인터를 건드리지 않는다)
+  if (coverStyle && !process.env.COVER_STYLE) {
+    const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
+    const next = ((ci.rows.length ? Number(ci.rows[0].value) : 0) + 1) % 3;
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+      args: ["cover_idx", String(next)],
+    });
+  }
 
   // 포인터 이동 (계절 스킵돼도 로테이션 유지)
   const chosenIdx = all.findIndex((t) => t.key === theme.key);

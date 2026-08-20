@@ -8,3 +8,9 @@ local.db
 local.db-*
 *.db
 *.db-journal
+
+# 미리보기·시안 산출물
+roundup-reel-preview.jpg
+countdown-*-preview.jpg
+roundup-dry-data.json
+balance-preview.jpg

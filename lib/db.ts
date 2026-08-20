@@ -91,6 +91,8 @@ export async function initDb() {
     "ALTER TABLE posts ADD COLUMN featured_by TEXT",
     "ALTER TABLE posts ADD COLUMN revealed INTEGER DEFAULT 0",
     "ALTER TABLE posts ADD COLUMN map_url TEXT",
+    // 모음집 표지 스타일(classic/hero/dark) — 어느 디자인이 유입이 좋은지 비교용
+    "ALTER TABLE posts ADD COLUMN cover_style TEXT",
   ];
   for (const sql of migrations) {
     try {
