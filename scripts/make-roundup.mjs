@@ -448,26 +448,28 @@ async function composeReelCover(theme, places, dark = false) {
   const sharp = (await import("sharp")).default;
   const W = 1080, H = 1920;
 
-  // ⚠️ 인스타는 릴스를 피드에서 4:5, 프로필 그리드에서도 잘라 보여준다.
-  // 1080x1920의 위아래 285px은 "확대하기 전"에는 아예 안 보이는 영역이다.
-  // (실측 2026-08-19 국밥 모음집: 200px 대형 제목이 통째로 잘려 나갔다)
-  // 그래서 제목·카드·푸터를 전부 가운데 1080x1350 안에 넣고, 잘리는 위아래는
-  // 흐린 배경만 남긴다. 릴스 탭(9:16)에서는 위아래 여백으로 보이는데,
-  // 하단 여백은 인스타 UI(캡션·버튼)가 덮는 자리라 오히려 잘 맞는다.
-  const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285
-  const CH = Math.round(W * 5 / 4); // 1350
-  const HEADER = 258, FOOTER = 50;
-
+  // 레이아웃 방침 (2026-08 두 차례 실측의 절충):
+  //  1) 피드·프로필은 4:5로 가운데를 잘라 보여준다 → 제목은 반드시 y=285 아래에.
+  //     (8/19 국밥: 위쪽에 둔 200px 제목이 피드에서 통째로 잘림)
+  //  2) 그렇다고 모든 내용을 가운데 4:5 안에 가두면 확대(9:16)했을 때 위아래가
+  //     흐린 배경뿐이라 허전하다. (8/21 돈까스: "확대하면 오히려 더 안좋다" 피드백.
+  //     구형 풀블리드였던 짬뽕 8대 맛집이 확대 시 가득 차 보였고 조회수도 최고였다)
+  //  → 제목만 안전영역에 두고, 카드 그리드는 화면 맨 아래까지, 위쪽 잘림 영역은
+  //    음식 사진 모자이크 띠로 채운다. 피드에서는 마지막 줄이 살짝 잘려 보이는데
+  //    "아래 더 있다"는 신호라 오히려 클릭 유도가 된다.
+  const CT = 285; // 4:5 피드 크롭의 위쪽 경계
+  const BAND_H = 272; // 상단 모자이크 띠 (피드에선 안 보이고 확대 시 노출)
+  const HEADER_END = 560; // 제목 블록 끝 (BAND_H..560 사이가 제목 자리)
+  const GRID_BOT = 1856; // 카드 그리드 끝 — 그 아래 얇은 푸터
   const rows = Math.ceil(places.length / 2);
-  const CELL_W = 540, CELL_H = Math.floor((CH - HEADER - FOOTER) / rows);
+  const CELL_W = 540, CELL_H = Math.floor((GRID_BOT - HEADER_END) / rows);
   const IN = 10;
   const CARD_W = CELL_W - 16, CARD_H = CELL_H - 12;
   const PH_W = CARD_W - IN * 2;
-  const PH_H = Math.round(CELL_H * 0.527);
+  const PH_H = Math.round(CELL_H * 0.55);
 
-  // 배경: 음식 사진 풀블리드 + 따뜻한 어두운 오버레이.
-  // 블러를 넣는 이유: 관광공사 원본에 타 블로그 워터마크가 박힌 경우가 있어 배경에서
-  // 글자가 읽힌다. 배경은 장식일 뿐이므로 뭉개면 워터마크도 사라지고 카드가 도드라진다.
+  // 배경: 음식 사진 풀블리드 + 오버레이. 블러는 원본에 박힌 타 블로그 워터마크를
+  // 뭉개기 위한 것(배경은 장식일 뿐이라 카드가 도드라지는 효과도 있다).
   const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
   const bgRes = await fetch(bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
   if (!bgRes.ok) throw new Error("릴스 배경 사진 실패");
@@ -481,28 +483,56 @@ async function composeReelCover(theme, places, dark = false) {
   const cellPos = (i) => {
     const lastOdd = places.length % 2 === 1 && i === places.length - 1;
     const col = i % 2, row = Math.floor(i / 2);
-    return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: CT + HEADER + row * CELL_H };
+    return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: HEADER_END + row * CELL_H };
   };
 
-  // 사진은 카드 상단에 가로로 꽉 차게(모서리 라운드) — 세로 띠보다 음식이 잘 보인다
+  // 사진은 한 곳당 한 번만 받아 카드와 상단 모자이크에 같이 쓴다
+  const photoBufs = [];
+  for (const p of places) {
+    try {
+      const res = await fetch(p.imageUrl, { signal: AbortSignal.timeout(20000) });
+      photoBufs.push(res.ok ? Buffer.from(await res.arrayBuffer()) : null);
+    } catch {
+      photoBufs.push(null);
+    }
+  }
+
   const mask = Buffer.from(
     `<svg width="${PH_W}" height="${PH_H}"><rect x="0" y="0" width="${PH_W}" height="${PH_H}" rx="14" ry="14" fill="#fff"/></svg>`
   );
   const photoLayers = [];
   for (let i = 0; i < places.length; i++) {
+    if (!photoBufs[i]) continue; // 사진 실패 시 텍스트만
     try {
-      const res = await fetch(places[i].imageUrl, { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) continue;
-      const buf = Buffer.from(await res.arrayBuffer());
       const { x, y } = cellPos(i);
-      const rounded = await sharp(buf)
+      const rounded = await sharp(photoBufs[i])
         .resize(PH_W, PH_H, { fit: "cover", position: "attention" })
         .ensureAlpha()
         .composite([{ input: mask, blend: "dest-in" }])
         .png()
         .toBuffer();
       photoLayers.push({ input: rounded, left: x + 8 + IN, top: y + 6 + IN });
-    } catch { /* 사진 실패 시 텍스트만 */ }
+    } catch { /* skip */ }
+  }
+
+  // 상단 모자이크 띠 — 확대했을 때만 보이는 영역이므로 정보는 없고 분위기만 채운다
+  const bandLayers = [];
+  const bandOk = photoBufs.filter(Boolean);
+  if (bandOk.length) {
+    const TILE_W = Math.ceil(W / bandOk.length);
+    for (let i = 0; i < bandOk.length; i++) {
+      try {
+        bandLayers.push({
+          input: await sharp(bandOk[i])
+            .resize(TILE_W, BAND_H, { fit: "cover", position: "attention" })
+            .modulate({ brightness: 0.72, saturation: 1.05 })
+            .jpeg({ quality: 84 })
+            .toBuffer(),
+          left: i * TILE_W,
+          top: 0,
+        });
+      } catch { /* skip */ }
+    }
   }
 
   let bgCells = "", textCells = "";
@@ -512,53 +542,57 @@ async function composeReelCover(theme, places, dark = false) {
     const CX = x + 8, CY = y + 6;
     const base = CY + IN + PH_H; // 사진 아래 기준선
     const nm = coverName(p.name);
-    const ns = nm.length <= 8 ? 36 : nm.length <= 10 ? 31 : 27;
-    // 글자수로 잘라 쓰면 "소울/푸드"처럼 단어가 끊긴다 → 어절 단위 줄바꿈
-    // 개조식 항목을 한 줄씩. 문구가 없으면 예전 방식(줄글 줄바꿈)으로 폴백
-    const dl = (p.descLines?.length ? p.descLines : wrapLines(p.desc ?? "", 23, 3)).slice(0, 3);
+    const ns = nm.length <= 8 ? 37 : nm.length <= 10 ? 32 : 28;
+    // 글자수로 잘라 쓰면 단어가 끊긴다 → 어절 단위 줄바꿈. 개조식 항목이 있으면 그대로.
+    const dl = (p.descLines?.length ? p.descLines : wrapLines(p.desc ?? "", 24, 3)).slice(0, 3);
     const chipW = p.region.length * 19 + 44;
     bgCells += `<rect x="${CX}" y="${CY}" width="${CARD_W}" height="${CARD_H}" rx="22" fill="${PAL.card}" fill-opacity="${PAL.cardOp}" stroke="${PAL.stroke}" stroke-opacity="${PAL.strokeOp}" stroke-width="2"/>`;
     textCells += `
     <g>
-      <rect x="${CX + IN + 10}" y="${CY + IN + 10}" width="50" height="50" rx="14" fill="${PAL.accent}"/>
-      <text x="${CX + IN + 35}" y="${CY + IN + 45}" font-family="${FONT}" font-size="30" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
+      <rect x="${CX + IN + 10}" y="${CY + IN + 10}" width="52" height="52" rx="14" fill="${PAL.accent}"/>
+      <text x="${CX + IN + 36}" y="${CY + IN + 47}" font-family="${FONT}" font-size="31" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
       <rect x="${CX + IN + 10}" y="${base - 44}" width="${chipW}" height="34" rx="17" fill="#000000" fill-opacity="0.6"/>
       <text x="${CX + IN + 10 + chipW / 2}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="700" fill="#ffffff" text-anchor="middle">📍 ${esc(p.region)}</text>
       ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : ""}
-      <text x="${CX + IN + 2}" y="${base + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
-      ${dl.map((ln, k) => `<circle cx="${CX + IN + 10}" cy="${base + 69 + k * 28}" r="4.5" fill="${PAL.accent}"/><text x="${CX + IN + 24}" y="${base + 76 + k * 28}" font-family="${FONT}" font-size="22" fill="${PAL.desc}">${esc(ln)}</text>`).join("")}
+      <text x="${CX + IN + 2}" y="${base + 44}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
+      ${dl.map((ln, k) => `<circle cx="${CX + IN + 10}" cy="${base + 76 + k * 31}" r="4.5" fill="${PAL.accent}"/><text x="${CX + IN + 24}" y="${base + 83 + k * 31}" font-family="${FONT}" font-size="23" fill="${PAL.desc}">${esc(ln)}</text>`).join("")}
     </g>`;
   }
 
-  // 제목: 음식 이름을 크게 — 단, 4:5로 잘려도 살아남는 위치(CT 아래)에 둔다
+  // 제목: 4:5로 잘려도 살아남는 위치(CT 아래)에, 모자이크 띠와 그리드 사이
   const tp = theme.coverParts ?? {
     top: "", main: theme.food || theme.keyword, sub: `${theme.suffix || "맛집"} ${places.length}선`,
   };
   const mainLen = Math.max(1, [...tp.main].length);
-  const ms = Math.min(138, Math.floor(950 / mainLen));
+  const ms = Math.min(132, Math.floor(950 / mainLen));
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="hd" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#140803" stop-opacity="0.88"/>
         <stop offset="100%" stop-color="#140803" stop-opacity="0.5"/>
       </linearGradient>
+      <linearGradient id="bandFade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#140803" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="#140803" stop-opacity="0.85"/>
+      </linearGradient>
     </defs>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="#1a0d08" fill-opacity="${PAL.scrim}"/>
-    ${dark ? "" : `<rect x="0" y="${CT}" width="${W}" height="${HEADER}" fill="url(#hd)"/>`}
-    <text x="${W / 2}" y="${CT + 38}" font-family="${FONT}" font-size="30" font-weight="700" fill="${PAL.top}" text-anchor="middle">${esc(tp.top)}</text>
-    <text x="${W / 2}" y="${CT + 44 + Math.round(ms * 0.86)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
-    ${PAL.subBadge ? `<rect x="${W / 2 - 130}" y="${CT + HEADER - 64}" width="260" height="54" rx="27" fill="${PAL.accent}"/>` : ""}
-    <text x="${W / 2}" y="${CT + HEADER - 26}" font-family="${FONT}" font-size="${PAL.subBadge ? 36 : 40}" font-weight="900" fill="${PAL.sub}" text-anchor="middle">${esc(tp.sub)}</text>
+    <rect x="0" y="${BAND_H}" width="${W}" height="${H - BAND_H}" fill="#1a0d08" fill-opacity="${PAL.scrim}"/>
+    <rect x="0" y="0" width="${W}" height="${BAND_H}" fill="url(#bandFade)"/>
+    ${dark ? "" : `<rect x="0" y="${BAND_H}" width="${W}" height="${HEADER_END - BAND_H}" fill="url(#hd)"/>`}
+    <text x="${W / 2}" y="${CT + 44}" font-family="${FONT}" font-size="30" font-weight="700" fill="${PAL.top}" text-anchor="middle">${esc(tp.top)}</text>
+    <text x="${W / 2}" y="${CT + 52 + Math.round(ms * 0.86)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
+    ${PAL.subBadge ? `<rect x="${W / 2 - 130}" y="${HEADER_END - 60}" width="260" height="52" rx="26" fill="${PAL.accent}"/>` : ""}
+    <text x="${W / 2}" y="${HEADER_END - 22}" font-family="${FONT}" font-size="${PAL.subBadge ? 35 : 38}" font-weight="900" fill="${PAL.sub}" text-anchor="middle">${esc(tp.sub)}</text>
     ${bgCells}
-    <text x="${W / 2}" y="${CT + CH - 28}" font-family="${FONT}" font-size="24" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요</text>
-    <text x="${W / 2}" y="${CT + CH - 6}" font-family="${FONT}" font-size="18" fill="${PAL.footer}" text-anchor="middle">@${HANDLE}</text>
+    <text x="${W / 2}" y="${H - 24}" font-family="${FONT}" font-size="24" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요 · <tspan fill="${PAL.footer}" font-weight="400" font-size="20">@${HANDLE}</tspan></text>
   </svg>`;
   const textSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${textCells}</svg>`;
 
   const out = path.join(TMP, "reel-cover.jpg");
   await sharp(bgPhoto)
     .composite([
+      ...bandLayers,
       { input: Buffer.from(svg), left: 0, top: 0 },
       ...photoLayers,
       { input: Buffer.from(textSvg), left: 0, top: 0 },
