@@ -750,7 +750,9 @@ async function composeRankCard(sharp, place, rank) {
   const bg = await bgFrame(sharp, place.imageUrl, 0.62, 0);
   const nameLines = wrapLines(place.name, 11, 2);
   const nameSize = nameLines.length === 2 ? 78 : 92;
-  const descLines = wrapLines(place.desc || "", 16, 2);
+  const descLines = place.descLines?.length
+    ? place.descLines.slice(0, 2).map((l) => ([...l].length > 16 ? [...l].slice(0, 16).join("") : l))
+    : wrapLines(place.desc || "", 16, 2);
   const boxTop = RH - 760;
   const svg = Buffer.from(
     `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
@@ -1152,11 +1154,15 @@ async function main() {
         fs.writeFileSync(f, await composeRankCard(sharpMod, ranked[i], rank));
         cards.push(f);
         const p = ranked[i];
-        const tail = p.desc ? `. ${p.desc}` : "";
+        // 컷 길이 = 그 컷의 나레이션 길이. 표지용 설명(45~65자)을 다 읽으면 식당당
+        // 컷이 늘어진다(실측 8/21 어탕 5선: "식당 간 간격이 너무 길다" 피드백).
+        // 순위 공개는 빠르게 넘기는 맛 — 2~5위는 이름만 읽고(설명은 화면 자막이 보여줌),
+        // 1위만 핵심 한 조각을 붙여 정점을 만든다.
+        const bite = p.descLines?.[0] ?? String(p.desc ?? "").split(/[,.]/)[0].trim();
         narration.push(
           rank === 1
-            ? `대망의 1위, ${p.region ? p.region + " " : ""}${p.name}${tail}`
-            : `${rank}위, ${p.region ? p.region + " " : ""}${p.name}${tail}`
+            ? `대망의 1위, ${p.region ? p.region + " " : ""}${p.name}${bite ? `. ${bite}` : ""}`
+            : `${rank}위, ${p.region ? p.region + " " : ""}${p.name}`
         );
       } catch (e) {
         console.error(`순위 카드 ${rank} 실패(건너뜀):`, String(e).slice(0, 90));
