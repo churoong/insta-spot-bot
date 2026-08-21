@@ -42,7 +42,12 @@ export async function pickTrendingAudio(query?: string): Promise<IgAudio | null>
       return null;
     }
     const list: any[] = Array.isArray(json?.data) ? json.data : [];
-    if (!list.length) return null;
+    if (!list.length) {
+      // 2026-08-21 실측: 권한·토큰·앱 라이브 상태 모두 정상인데 카탈로그가 0곡.
+      // 크리에이터 전환 반영 대기 또는 한국 계정 미개방으로 추정 — 열리면 이 로그가 사라진다.
+      console.log("[igaudio] 카탈로그 0곡 — CC BGM 폴백 (계정/지역 개방 대기 중)");
+      return null;
+    }
     // 최상위 1곡 고정이 아니라 상위 10곡 랜덤 — 매일 같은 곡 반복을 피한다
     const a = list.slice(0, 10)[Math.floor(Math.random() * Math.min(10, list.length))];
     if (!a?.id) return null;
