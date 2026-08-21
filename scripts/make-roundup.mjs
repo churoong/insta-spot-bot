@@ -1223,6 +1223,11 @@ async function main() {
   });
 
   const reelMp4 = path.join(TMP, "roundup-reel.mp4");
+  // BGM — CC BY 트랙(lib/bgm.ts). 무음 구간이 없어져 이탈이 줄고, 표지만 8초
+  // 보여주는 grid 스타일은 특히 BGM이 없으면 방송사고처럼 느껴진다.
+  const { pickBgm } = await import("../lib/bgm.ts");
+  const bgm = pickBgm();
+  if (bgm) console.log("BGM:", bgm.title);
   const ff = (args) =>
     new Promise((resolve, reject) => {
       const p = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "inherit"] });
@@ -1285,11 +1290,29 @@ async function main() {
       "-y", "-f", "concat", "-safe", "0", "-i", listFile,
       "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", silent,
     ]);
-    if (voiceWav) {
+    const cdSec = await probeDuration(silent);
+    const cdFade = cdSec > 2 ? `,afade=t=out:st=${(cdSec - 0.8).toFixed(2)}:d=0.8` : "";
+    if (voiceWav && bgm) {
+      // 목소리가 주인공 — BGM은 낮게(0.14), 영상 끝 페이드아웃
+      await ff([
+        "-y", "-i", silent, "-i", voiceWav, "-stream_loop", "-1", "-i", bgm.path,
+        "-filter_complex",
+        `[1:a]apad[vo];[2:a]volume=0.14[bg];[vo][bg]amix=inputs=2:duration=longest:dropout_transition=0${cdFade}[a]`,
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", reelMp4,
+      ]);
+    } else if (voiceWav) {
       await ff([
         "-y", "-i", silent, "-i", voiceWav,
         "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart", reelMp4,
+      ]);
+    } else if (bgm) {
+      await ff([
+        "-y", "-i", silent, "-stream_loop", "-1", "-i", bgm.path,
+        "-filter_complex", `[1:a]volume=0.35${cdFade}[a]`,
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", reelMp4,
       ]);
     } else {
       await ff([
@@ -1303,20 +1326,27 @@ async function main() {
     // 리스트 표지 → 8초 고정 세로 릴스 (기존 모음집).
     // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
     // 사진 한 장을 그대로 보여주는 편이 낫다.
+    const gridAudio = bgm
+      ? ["-stream_loop", "-1", "-i", bgm.path]
+      : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
+    // ⚠️ "-t 8"을 입력 사이에 두면 다음 입력(BGM)에 붙어 버려, 무한 루프 BGM과
+    //    -shortest가 만나 렌더가 영원히 안 끝난다(실측 5분 타임아웃). 출력 옵션으로.
     await ff([
-      "-y", "-loop", "1", "-i", reelCover, "-t", "8", "-r", "30",
-      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-      "-filter_complex", "[0:v]fps=30,format=yuv420p[v]",
-      "-map", "[v]", "-map", "1:a",
-      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-c:a", "aac", "-shortest",
-      "-movflags", "+faststart", reelMp4,
+      "-y", "-loop", "1", "-i", reelCover,
+      ...gridAudio,
+      "-filter_complex",
+      `[0:v]fps=30,format=yuv420p[v]${bgm ? ";[1:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,
+      "-map", "[v]", "-map", bgm ? "[a]" : "1:a",
+      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-c:a", "aac",
+      "-t", "8", "-movflags", "+faststart", reelMp4,
     ]);
   }
 
   const reelUrl = await uploadPublic(reelMp4);
   console.log("모음집 릴스 업로드:", reelUrl);
   const { publishReel } = await import("../lib/instagram.ts");
-  const mediaId = await publishReel(reelUrl, caption);
+  const mediaId = await publishReel(reelUrl, bgm ? `${caption}
+${bgm.attribution}` : caption);
   console.log("✅ 모음집 릴스 발행:", mediaId);
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,

@@ -343,7 +343,7 @@ async function main() {
     mapUrl: data.mapUrl,
   };
   const originalUrls = data.originalUrls || data.imageUrls; // DB 기록용
-  const caption = data.caption;
+  let caption = data.caption;
   console.log("릴스 대상:", subject.name, `(사진 ${subject.imageUrls.length}장)`);
 
   // 4) 이미지 다운로드 (최대 8장)
@@ -520,13 +520,34 @@ async function main() {
     "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", silent,
   ]);
 
-  // 나레이션 오디오를 영상에 입힘 (없으면 무음 트랙)
+  // 오디오: 나레이션 + BGM 믹스. BGM은 CC BY 트랙(lib/bgm.ts)을 무한 루프로 깔고
+  // 영상 끝에서 페이드아웃. 목소리가 주인공이라 BGM은 낮게(0.16), 목소리가 없으면
+  // BGM이 주인공(0.35). 트랙 파일이 없으면 기존 동작(음성만/무음) 그대로.
+  const { pickBgm } = await import("../lib/bgm.ts");
+  const bgm = pickBgm();
   const reel = path.join(TMP, "reel.mp4");
-  if (voiceTrack) {
+  const vidSec = await mediaDuration(silent);
+  const fade = vidSec > 2 ? `,afade=t=out:st=${(vidSec - 0.8).toFixed(2)}:d=0.8` : "";
+  if (voiceTrack && bgm) {
+    await sh("ffmpeg", [
+      "-y", "-i", silent, "-i", voiceTrack, "-stream_loop", "-1", "-i", bgm.path,
+      "-filter_complex",
+      `[1:a]apad[vo];[2:a]volume=0.16[bg];[vo][bg]amix=inputs=2:duration=longest:dropout_transition=0${fade}[a]`,
+      "-map", "0:v", "-map", "[a]",
+      "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", reel,
+    ]);
+  } else if (voiceTrack) {
     await sh("ffmpeg", [
       "-y", "-i", silent, "-i", voiceTrack,
       "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
       "-movflags", "+faststart", reel,
+    ]);
+  } else if (bgm) {
+    await sh("ffmpeg", [
+      "-y", "-i", silent, "-stream_loop", "-1", "-i", bgm.path,
+      "-filter_complex", `[1:a]volume=0.35${fade}[a]`,
+      "-map", "0:v", "-map", "[a]",
+      "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", reel,
     ]);
   } else {
     await sh("ffmpeg", [
@@ -534,6 +555,11 @@ async function main() {
       "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
       "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart", reel,
     ]);
+  }
+  if (bgm) {
+    console.log("BGM:", bgm.title);
+    caption += `
+${bgm.attribution}`; // CC BY 4.0 — 저작자 표시 의무
   }
   const size = fs.statSync(reel).size;
   const totalSec = await mediaDuration(reel);
