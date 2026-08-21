@@ -222,6 +222,105 @@ export async function publishReel(videoUrl: string, caption: string): Promise<st
   return publishContainer(id, caption);
 }
 
+// ===== Facebook Login 발행 경로 (Instagram Audio API — 라이브러리 음악 첨부용) =====
+// 2026-06 신설된 Audio API는 graph.facebook.com 전용이라, 음악을 붙일 때만 이 경로를
+// 쓰고 실패하면 기존 Instagram Login 경로로 폴백한다. 토큰은 페이지 연동 장기 토큰
+// (FB_ACCESS_TOKEN) — 장기 사용자 토큰에서 파생된 페이지 토큰은 만료되지 않는다.
+
+const GRAPH_FB = "https://graph.facebook.com/v23.0";
+
+function fbConfigured(): boolean {
+  return Boolean(process.env.FB_ACCESS_TOKEN && process.env.FB_IG_USER_ID);
+}
+
+async function fbPost(path: string, params: Record<string, unknown>): Promise<any> {
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null) continue;
+    body.set(k, typeof v === "object" ? JSON.stringify(v) : String(v));
+  }
+  body.set("access_token", process.env.FB_ACCESS_TOKEN!);
+  const res = await fetch(`${GRAPH_FB}/${path}`, {
+    method: "POST",
+    body,
+    signal: AbortSignal.timeout(60000),
+  });
+  const json: any = await res.json();
+  if (json?.error) throw new Error(`FB ${path}: ${JSON.stringify(json.error).slice(0, 300)}`);
+  return json;
+}
+
+export interface ReelMusic {
+  /** ig_audio 검색 결과의 오디오 ID */
+  audioId: string;
+  /** 라이브러리 음악 볼륨 0~100 (기본 100) */
+  audioVolume?: number;
+  /** 영상에 구운 오디오(나레이션) 볼륨 0~100 (기본 100) */
+  videoVolume?: number;
+}
+
+/** graph.facebook.com으로 릴스 발행 — music이 있으면 audio_configuration 첨부 */
+async function publishReelFb(videoUrl: string, caption: string, music: ReelMusic | null): Promise<string> {
+  const igId = process.env.FB_IG_USER_ID!;
+  const params: Record<string, unknown> = {
+    media_type: "REELS",
+    video_url: videoUrl,
+    caption,
+    share_to_feed: true,
+  };
+  if (music) {
+    params.audio_configuration = {
+      audio_id: music.audioId,
+      ...(music.audioVolume !== undefined ? { audio_volume: music.audioVolume } : {}),
+      ...(music.videoVolume !== undefined ? { video_volume: music.videoVolume } : {}),
+    };
+  }
+  const container = await fbPost(`${igId}/media`, params);
+  const id = String(container.id);
+  for (let i = 0; i < 80; i++) {
+    const status: any = await fetch(
+      `${GRAPH_FB}/${id}?fields=status_code,status&access_token=${encodeURIComponent(process.env.FB_ACCESS_TOKEN!)}`,
+      { signal: AbortSignal.timeout(15000) }
+    ).then((r) => r.json());
+    if (status.status_code === "FINISHED") break;
+    if (status.status_code === "ERROR") {
+      throw new Error(`FB 릴스 컨테이너 처리 실패: ${JSON.stringify(status).slice(0, 300)}`);
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  const published = await fbPost(`${igId}/media_publish`, { creation_id: id });
+  return String(published.id);
+}
+
+/**
+ * 릴스 발행 진입점 — 음악이 있으면 FB 경로(음악 첨부), 실패 시 단계적 폴백:
+ *   ① FB + 음악 → ② FB 음악 없이 → ③ 기존 Instagram Login 경로.
+ * FB 미설정이거나 음악이 없으면 바로 ③.
+ */
+export async function publishReelSmart(
+  videoUrl: string,
+  caption: string,
+  music: ReelMusic | null
+): Promise<string> {
+  if (music && fbConfigured()) {
+    try {
+      const id = await publishReelFb(videoUrl, caption, music);
+      console.log("[publish] FB 경로 발행 (라이브러리 음악 첨부):", id);
+      return id;
+    } catch (e) {
+      console.error("[publish] 음악 첨부 발행 실패 — 음악 없이 재시도:", String(e).slice(0, 200));
+      try {
+        const id = await publishReelFb(videoUrl, caption, null);
+        console.log("[publish] FB 경로 발행 (음악 없음):", id);
+        return id;
+      } catch (e2) {
+        console.error("[publish] FB 경로 실패 — Instagram Login으로 폴백:", String(e2).slice(0, 200));
+      }
+    }
+  }
+  return publishReel(videoUrl, caption);
+}
+
 /** 댓글에 대한 비공개 답장(Private Reply) — 댓글 작성자에게 DM 발송 */
 export async function sendPrivateReply(commentId: string, text: string) {
   await graphPost(`${igUserId()}/messages`, {

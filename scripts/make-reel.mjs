@@ -277,7 +277,7 @@ function sh(cmd, args) {
 
 async function main() {
   const { db, initDb } = await import("../lib/db.ts");
-  const { publishReel } = await import("../lib/instagram.ts");
+  const { publishReelSmart } = await import("../lib/instagram.ts");
   await initDb();
 
   // 발행 간격 가드 — GitHub Actions 스케줄은 자주 누락되므로(실측: 하루 4회 중 1회만
@@ -523,8 +523,13 @@ async function main() {
   // 오디오: 나레이션 + BGM 믹스. BGM은 CC BY 트랙(lib/bgm.ts)을 무한 루프로 깔고
   // 영상 끝에서 페이드아웃. 목소리가 주인공이라 BGM은 낮게(0.16), 목소리가 없으면
   // BGM이 주인공(0.35). 트랙 파일이 없으면 기존 동작(음성만/무음) 그대로.
+  // 인스타 라이브러리 음악(트렌딩) 우선 — FB 로그인 경로가 설정된 경우에만 잡힌다.
+  // 잡히면 CC BGM은 굽지 않는다(발행 시 audio_configuration으로 첨부, 이중 음악 방지).
+  const { pickTrendingAudio } = await import("../lib/igaudio.ts");
+  const igMusic = await pickTrendingAudio();
+  if (igMusic) console.log("IG 라이브러리 음악:", igMusic.title ?? igMusic.id, igMusic.artist ?? "");
   const { pickBgm } = await import("../lib/bgm.ts");
-  const bgm = pickBgm();
+  const bgm = igMusic ? null : pickBgm();
   const reel = path.join(TMP, "reel.mp4");
   const vidSec = await mediaDuration(silent);
   const fade = vidSec > 2 ? `,afade=t=out:st=${(vidSec - 0.8).toFixed(2)}:d=0.8` : "";
@@ -583,7 +588,12 @@ ${bgm.attribution}`; // CC BY 4.0 — 저작자 표시 의무
   });
 
   // 8) 릴스 발행 → 성공 시 완료 상태로 갱신
-  const mediaId = await publishReel(videoUrl, caption);
+  // 트렌딩 음악이 있으면 FB 경로로 첨부 발행(나레이션 100 + 음악 30), 실패 시 자동 폴백
+  const mediaId = await publishReelSmart(
+    videoUrl,
+    caption,
+    igMusic ? { audioId: igMusic.id, audioVolume: voiceTrack ? 30 : 100, videoVolume: 100 } : null
+  );
   console.log("✅ 릴스 발행 완료! media id:", mediaId);
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,

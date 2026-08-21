@@ -1225,8 +1225,13 @@ async function main() {
   const reelMp4 = path.join(TMP, "roundup-reel.mp4");
   // BGM — CC BY 트랙(lib/bgm.ts). 무음 구간이 없어져 이탈이 줄고, 표지만 8초
   // 보여주는 grid 스타일은 특히 BGM이 없으면 방송사고처럼 느껴진다.
+  // 인스타 라이브러리 음악(트렌딩) 우선 — FB 경로 설정 시에만. 잡히면 CC BGM은
+  // 굽지 않고 발행 시 audio_configuration으로 첨부한다(이중 음악 방지).
+  const { pickTrendingAudio } = await import("../lib/igaudio.ts");
+  const igMusic = await pickTrendingAudio();
+  if (igMusic) console.log("IG 라이브러리 음악:", igMusic.title ?? igMusic.id);
   const { pickBgm } = await import("../lib/bgm.ts");
-  const bgm = pickBgm();
+  const bgm = igMusic ? null : pickBgm();
   if (bgm) console.log("BGM:", bgm.title);
   const ff = (args) =>
     new Promise((resolve, reject) => {
@@ -1344,9 +1349,16 @@ async function main() {
 
   const reelUrl = await uploadPublic(reelMp4);
   console.log("모음집 릴스 업로드:", reelUrl);
-  const { publishReel } = await import("../lib/instagram.ts");
-  const mediaId = await publishReel(reelUrl, bgm ? `${caption}
-${bgm.attribution}` : caption);
+  const { publishReelSmart } = await import("../lib/instagram.ts");
+  // countdown은 나레이션이 주인공(음악 30), grid는 음악이 주인공(100)
+  const mediaId = await publishReelSmart(
+    reelUrl,
+    bgm ? `${caption}
+${bgm.attribution}` : caption,
+    igMusic
+      ? { audioId: igMusic.id, audioVolume: STYLE === "countdown" ? 30 : 100, videoVolume: 100 }
+      : null
+  );
   console.log("✅ 모음집 릴스 발행:", mediaId);
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
