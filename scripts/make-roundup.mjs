@@ -1088,7 +1088,7 @@ function engagementLine(theme, count) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function buildCaption(theme, places, descending = false) {
+function buildCaption(theme, places, descending = false, ep = null) {
   // 공개형 — "어디야→DM" 유도 문구 없음. 참여(추천 댓글)·저장 유도만.
   // descending: 카운트다운 영상과 같은 순서(N위 → 1위)로 번호를 매긴다.
   const lines = places.map((p, i) => {
@@ -1101,15 +1101,21 @@ function buildCaption(theme, places, descending = false) {
     hundredCount > 0
       ? `🏅 표시된 ${hundredCount}곳은 중소벤처기업부 인증 '백년가게'예요!\n\n`
       : "";
-  const tags = [...(theme.tags ?? []), "맛집추천", "맛집리스트", "먹스타그램", "저장각", "맛집투어"]
+  // 2025-12부터 게시물당 해시태그 5개 제한 — 테마 태그(최대 3) + 큐레이션 2개만.
+  // 검색 유입은 해시태그가 아니라 첫 줄의 [음식+맛집] 키워드가 담당한다.
+  const tags = [...(theme.tags ?? []).slice(0, 3), "맛집추천", "맛집리스트"]
+    .slice(0, 5)
     .map((t) => `#${t}`)
     .join(" ");
+  // EP 넘버링(시리즈 브랜딩)과 다음 편 예고 — "다음 편을 놓치기 싫어서"가 팔로우의
+  // 메커니즘. 단 "팔로우하면 공개" 같은 조건형은 참여 낚시로 강등되므로 예고만 한다.
   return (
-    `🔥 ${theme.titleResolved || theme.title}\n\n` +
+    `🔥 ${ep ? `전국맛집로드 EP.${ep} | ` : ""}${theme.titleResolved || theme.title}\n\n` +
     `${lines.join("\n")}\n\n` +
     hundredLine +
     `💬 ${engagementLine(theme, places.length)}\n\n` +
-    `📌 저장해두고 하나씩 정복해 보세요!\n\n` +
+    `📌 나중에 못 찾지 않게 지금 저장해 두세요!\n` +
+    `⏰ 내일 저녁 6시, 다음 편으로 이어집니다\n\n` +
     `${tags}\n\n📷 사진·정보 출처: 한국관광공사 TourAPI`
   );
 }
@@ -1273,12 +1279,21 @@ async function main() {
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
   const ranked = STYLE === "countdown" ? [...places].reverse() : places;
 
+  // 에피소드 번호 = 지금까지 발행된 모음집·큐레이션 수 + 1 (시리즈 브랜딩)
+  let ep = null;
+  try {
+    const c = await db.execute(
+      "SELECT COUNT(*) AS n FROM posts WHERE category = '모음집' AND status = 'published'"
+    );
+    ep = Number(c.rows[0]?.n ?? 0) + 1;
+  } catch { /* 실패해도 EP 없이 진행 */ }
+
   // ⚠️ 캡션은 순위가 확정된 뒤에 만든다(정렬 전에 만들면 번호가 영상과 어긋남).
   //    카운트다운은 영상과 같은 순서로 N위 → 1위 내림차순 표기.
   const caption =
     STYLE === "countdown"
-      ? buildCaption(theme, ranked, true)
-      : buildCaption(theme, places);
+      ? buildCaption(theme, ranked, true, ep)
+      : buildCaption(theme, places, false, ep);
 
   const cards = []; // countdown에서 쓸 카드 파일들
   let coverStyle = null; // grid 계열에서 쓴 표지 스타일 (성과 비교용)

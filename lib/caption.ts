@@ -65,10 +65,10 @@ ${persona.captionStyle.map((s: string) => `- ${s}`).join("\n")}
 - 설명: ${spot.overview || "(설명 없음 — 사진 분위기로 작성)"}
 
 작성 규칙:
-1. ⭐상호명 "${name}"을 본문에 자연스럽게 넣어줘. 어디에 있는 곳인지(${regionText || "지역"})도 자연스럽게 언급해. 정보를 숨기지 말고 친절하게 소개하는 톤.
+1. ⭐첫 문장은 "${regionText || "지역"}${dish ? " " + dish : ""} 맛집"이라는 검색어가 자연스럽게 녹아든 문장으로 시작해 — 인스타·구글 검색이 캡션 첫 줄을 읽는다. (예: "${regionText}에서 ${dish ?? "맛집"} 찾는다면 여기부터 가보세요") 상호명 "${name}"도 본문에 자연스럽게 넣어줘. 정보를 숨기지 말고 친절하게 소개하는 톤.
 2. 3~5문장. 이모지는 2~4개만 적당히.
 3. 사진과 함께 올라가는 게시물이야. 자연스러우면 음식 얘기(맛, 비주얼)를 한두 개 녹여도 좋아.
-4. 마지막은 저장·방문을 부드럽게 권하는 한 문장으로 마무리해. 댓글로 위치를 물어보라거나 DM을 보내준다는 안내는 절대 넣지 마.
+4. 마지막 문장은 둘 중 하나로 마무리해: "나중에 못 찾지 않게 지금 저장해 두세요" 같은 저장 가치 프레임, 또는 "같이 갈 사람에게 이 릴스를 보내 보세요" 같은 공유 권유 (DM 공유가 추천 배포의 최상위 신호다). "팔로우하면 ~해줄게" 같은 조건형 문구는 절대 금지. 댓글로 위치를 물어보라거나 DM을 보내준다는 안내도 절대 넣지 마.
 5. ⚠️해시태그(#)는 절대 넣지 마. 본문 문장만 출력해.
 6. ⚠️반드시 순수 한글로만 써. 한자(漢字)나 중국어 문자를 절대 섞지 마.${seoRule}${menuRule}${featuredRule}
 
@@ -236,43 +236,23 @@ function buildHashtags(spot: Spot, dish: string | null, menu?: string): string {
   const { sido, gu } = regionHint(spot.address);
   const tags: string[] = [];
 
-  // ① 상호명 (가장 구체적 — 검색으로 이 가게를 찾는 사람에게 직접 닿음)
+  // 2025-12부터 인스타가 게시물당 해시태그를 5개로 제한했고, 해시태그는 도달
+  // 수단이 아니라 토픽 분류 보조로 격하됐다(해시태그 팔로우 기능도 폐지).
+  // 다다익선이던 시절의 28개는 이제 스팸 신호 — 가장 구체적인 5개만 남긴다.
+  // 검색 유입은 해시태그가 아니라 캡션 본문 키워드(첫 문장)가 담당한다.
+  if (gu && dish) tags.push(`${gu}${dish}`); // 지역×음식 (검색어와 정확 일치)
+  if (sido) tags.push(`${sido}맛집`);
+  if (dish) tags.push(`${dish}맛집`);
   const nameTag = cleanName(spot.name).replace(/\s+/g, "");
-  if (nameTag.length >= 2) tags.push(nameTag);
+  if (nameTag.length >= 2) tags.push(nameTag); // 상호명 (이 가게를 찾는 사람)
+  tags.push("맛집추천");
 
-  // ② 지역 × 음식 조합 (구체적 검색어와 정확히 일치)
-  if (gu) {
-    tags.push(`${gu}맛집`);
-    if (dish) tags.push(`${gu}${dish}`, `${gu}${dish}맛집`);
-    tags.push(`${gu}맛집추천`, `${gu}가볼만한곳`);
-  }
-  if (sido) {
-    tags.push(`${sido}맛집`);
-    if (dish) tags.push(`${sido}${dish}`, `${sido}${dish}맛집`);
-    tags.push(`${sido}맛집투어`, `${sido}가볼만한곳`);
-  }
-
-  // ③ 음식 종류
-  if (dish) tags.push(dish, `${dish}맛집`, `${dish}추천`, `${dish}전문점`);
-
-  // ④ 대표 메뉴 (첫 메뉴만 — 매우 구체적인 검색어)
-  const firstMenu = String(menu ?? "").split(",")[0].replace(/\s+/g, "").replace(/[()]/g, "");
-  if (firstMenu.length >= 2 && firstMenu.length <= 12) tags.push(firstMenu);
-
-  // ⑤ 상황·큐레이션 태그
-  tags.push(
-    "맛집추천", "로컬맛집", "노포맛집", "맛집탐방", "맛스타그램", "먹스타그램",
-    "오늘뭐먹지", "먹킷리스트", "맛집저장", "국내맛집"
-  );
-
-  // 중복 제거 + 개수 제한(28 — 인스타 권장 30 이하) + # 접두
   return [...new Set(tags)]
     .filter((t) => t && t.length >= 2)
-    .slice(0, 28)
+    .slice(0, 5)
     .map((t) => `#${t.replace(/\s+/g, "")}`)
     .join(" ");
 }
-
 /** 주소에서 지역 태그용 시/도 축약형·시군구 추출 (비정상 주소면 빈 값) */
 function regionHint(address: string): { sido: string; gu: string } {
   const parts = (address ?? "").split(/\s+/);
