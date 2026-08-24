@@ -1,0 +1,43 @@
+name: 월간 쇼츠 벤치마크 리포트
+
+on:
+  schedule:
+    - cron: "17 1 1 * *" # 매월 1일 UTC 01:17 = KST 10:17
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # 리포트 커밋용
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: 의존성 설치
+        run: npm ci
+      - name: 벤치마크 실행 (전체 + 최근 성과 상위 음식)
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+        run: |
+          mkdir -p benchmark-reports
+          OUT="benchmark-reports/$(date +%Y-%m).md"
+          echo "# 맛집 쇼츠 벤치마크 $(date +%Y-%m)" > "$OUT"
+          for q in "맛집" "국밥 맛집" "냉면 맛집"; do
+            echo -e "\n## 검색어: $q\n" >> "$OUT"
+            npx tsx scripts/benchmark-shorts.mjs "$q" >> "$OUT" 2>&1 || echo "(실패: $q)" >> "$OUT"
+            sleep 5
+          done
+          echo "리포트: $OUT"
+      - name: 리포트 커밋
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add benchmark-reports/
+          git diff --cached --quiet || git commit -m "월간 쇼츠 벤치마크 리포트 ($(date +%Y-%m))"
+          git push
