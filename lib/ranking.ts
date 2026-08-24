@@ -1,10 +1,11 @@
-import { blogBuzz, buzzQuery } from "./naver";
+import { blogBuzz, cafeBuzz, buzzQuery } from "./naver";
 import { ytBuzz } from "./youtube";
 
 // 합성 인기 랭킹 — "진짜 순위 데이터" 3축 (2026-08 사용자 요청):
 //   ① 네이버 블로그 후기 수 (글 쓸 만큼 다녀간 사람의 양)
 //   ② 유튜브 버즈: 상위 영상 조회수 (방송·유명 먹방 출연이 그대로 잡힘)
 //   ③ 네이버 지역검색 리뷰순(sort=comment) 상위 진입 보너스 (방문자 리뷰 기반)
+//   ④ 네이버 카페글 수 (맘카페·지역카페 실방문 후기 — 실측: 봉피양 2,005 vs 무명 0)
 // 각 신호는 자릿수가 달라 log10으로 눌러 합산한다. 키 없음·호출 실패는 그 축만
 // 0점 처리 — 전 축이 죽으면 scored=false로 호출부가 수집 순서를 그대로 쓴다.
 
@@ -35,6 +36,7 @@ const norm = (s: string) => String(s).replace(/\([^)]*\)/g, "").replace(/\s+/g, 
 
 export interface RankedPlace {
   buzz: number; // 블로그 후기 수 (기존 필드명 유지 — 캡션·로그 호환)
+  cafe: number; // 카페글 수
   ytViews: number;
   commentPos: number; // 리뷰순 상위 진입 순위 (1~5, 미진입 0)
   score: number;
@@ -55,6 +57,7 @@ export async function rankComposite<T extends { name: string; address?: string; 
   for (const p of places) {
     const q = buzzQuery(p.name, p.address);
     const blog = (await blogBuzz(q)) ?? 0;
+    const cafe = (await cafeBuzz(q)) ?? 0;
     const yt = await ytBuzz(q);
 
     let commentPos = 0;
@@ -73,17 +76,18 @@ export async function rankComposite<T extends { name: string; address?: string; 
     // 0.7로 눌러 균형, 리뷰순 진입은 1위 +1.5 ~ 5위 +0.3.
     const score =
       Math.log10(blog + 1) +
+      0.5 * Math.log10(cafe + 1) +
       0.7 * Math.log10((yt?.topViews ?? 0) + 1) +
       (commentPos > 0 ? (6 - commentPos) * 0.3 : 0);
 
-    out.push({ ...p, buzz: blog, ytViews: yt?.topViews ?? 0, commentPos, score });
+    out.push({ ...p, buzz: blog, cafe, ytViews: yt?.topViews ?? 0, commentPos, score });
   }
 
   const scored = out.some((p) => p.score > 0);
   out.sort((a, b) => b.score - a.score);
 
   const parts = [
-    out.some((p) => p.buzz > 0) ? "네이버 후기" : "",
+    out.some((p) => p.buzz > 0 || p.cafe > 0) ? "네이버 후기" : "",
     out.some((p) => p.ytViews > 0) ? "유튜브 조회수" : "",
     out.some((p) => p.commentPos > 0) ? "방문자 리뷰" : "",
   ].filter(Boolean);

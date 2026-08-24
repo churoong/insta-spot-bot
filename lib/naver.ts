@@ -86,6 +86,22 @@ export async function blogBuzz(query: string): Promise<number | null> {
 }
 
 /** 가게 인기도 조회용 검색어 — 지역을 붙여야 동명 업소와 안 섞인다 */
+/** 카페글 수 — blogBuzz와 동일하되 cafearticle 엔드포인트 (맘카페·지역카페 후기) */
+export async function cafeBuzz(query: string): Promise<number | null> {
+  const id = process.env.NAVER_CLIENT_ID, secret = process.env.NAVER_CLIENT_SECRET;
+  if (!id || !secret) return null;
+  try {
+    const r = await fetch(
+      `https://openapi.naver.com/v1/search/cafearticle.json?query=${encodeURIComponent(query)}&display=1`,
+      { headers: { "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret }, signal: AbortSignal.timeout(10000) }
+    );
+    const j: any = await r.json();
+    return typeof j.total === "number" ? j.total : null;
+  } catch {
+    return null;
+  }
+}
+
 export function buzzQuery(name: string, address?: string): string {
   const region = String(address ?? "").split(/\s+/)[1] || String(address ?? "").split(/\s+/)[0] || "";
   const clean = String(name).replace(/\[[^\]]*\]/g, "").trim();
