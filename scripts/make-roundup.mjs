@@ -1319,7 +1319,10 @@ async function main() {
       await composeIntroCard(sharpMod, theme, places, theme.titleResolved, rankBasis)
     );
     cards.push(intro);
-    narration.push(`${theme.titleResolved}. ${ranked.length}위부터 공개합니다`);
+    // 컷 길이 = 나레이션 길이 비례. 인트로가 제목 전체(~30자)를 읽으면 첫 식당까지
+    // 5초 가까이 걸린다("넘어가는 시간이 너무 길다" 피드백). 제목은 인트로 카드가
+    // 이미 보여주므로 음성은 짧게 치고 바로 순위로 들어간다.
+    narration.push(`${theme.food || theme.keyword} 맛집 톱${ranked.length}, ${ranked.length}위부터 갑니다`);
 
     for (let i = 0; i < ranked.length; i++) {
       const rank = ranked.length - i; // N위 → 1위
@@ -1460,7 +1463,7 @@ async function main() {
     for (let i = 0; i < cards.length; i++) {
       const secs = voiceWav
         ? Math.max((voiceDur * (weights[i] ?? 1)) / wsum, 1.4)
-        : i === 0 ? 3.0 : 2.6;
+        : i === 0 ? 2.2 : 2.6; // 무음 폴백도 인트로는 짧게
       const out = path.join(TMP, `c_clip_${i}.mp4`);
       const d = Math.round(secs * 30);
       await ff([
