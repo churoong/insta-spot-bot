@@ -39,6 +39,7 @@
     { "key": "galchi", "food": "갈치", "keyword": "갈치", "region": "전국", "count": 6, "emoji": "🐟", "tags": [ "갈치조림", "갈치구이", "갈치맛집" ] },
     { "key": "gimbap", "food": "김밥", "keyword": "김밥", "region": "전국", "count": 6, "emoji": "🍙", "tags": [ "김밥", "김밥맛집", "분식맛집" ] },
     { "key": "daege", "food": "대게", "keyword": "대게", "region": "전국", "count": 6, "emoji": "🦀", "tags": [ "대게", "대게맛집", "영덕대게" ] },
-    { "key": "baeksuk", "food": "백숙", "keyword": "백숙", "region": "전국", "count": 6, "emoji": "🍗", "tags": [ "백숙", "닭백숙", "보양식" ] }
+    { "key": "baeksuk", "food": "백숙", "keyword": "백숙", "region": "전국", "count": 6, "emoji": "🍗", "tags": [ "백숙", "닭백숙", "보양식" ] },
+    { "key": "gogiguksu-jeju", "food": "고기국수", "keyword": "고기국수", "areaCode": 39, "region": "제주", "count": 6, "emoji": "🍜", "tags": [ "고기국수", "제주고기국수", "제주맛집" ] }
   ]
 }

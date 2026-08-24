@@ -186,6 +186,49 @@ function weightedOrder(all, weights, exclude = []) {
   ];
 }
 
+// ===== 비짓제주 API (제주관광공사 — 음식점 1,869곳, 사진·태그·소개 포함) =====
+// 제주 한정 테마(areaCode=39)의 수집 풀 보강용. TourAPI 제주 풀은 흑돼지 9곳으로
+// 6칸도 못 채웠는데, 이 소스가 흑돼지 201곳·물회 80곳·갈치 156곳을 준다(2026-08 실측).
+// api.visitjeju.net은 data.go.kr이 아니라 Actions에서 직접 호출 가능(프록시 불필요).
+
+let jejuCache = null;
+async function jejuPlaces(keyword) {
+  if (!process.env.JEJU_API_KEY) return [];
+  if (!jejuCache) {
+    jejuCache = [];
+    for (let p = 1; p <= 19; p++) {
+      for (let a = 0; a < 3; a++) {
+        try {
+          const r = await fetch(
+            `https://api.visitjeju.net/vsjApi/contents/searchList?apiKey=${process.env.JEJU_API_KEY}&locale=kr&category=c4&page=${p}`,
+            { signal: AbortSignal.timeout(30000) }
+          );
+          const j = await r.json();
+          jejuCache.push(...(j.items ?? []));
+          break;
+        } catch { await new Promise((s) => setTimeout(s, 1200)); } // 페이지 단위 재시도, 일부 실패해도 풀은 충분
+      }
+      await new Promise((s) => setTimeout(s, 200));
+    }
+    console.log(`[jeju] 캐시: ${jejuCache.length}곳`);
+  }
+  const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+  const BAD = /(카페|커피|디저트|베이커리|빵집|브런치|주점|술집|펍)/;
+  return jejuCache
+    .filter((it) => it.repPhoto?.photoid?.imgpath)
+    .filter((it) => !BAD.test(`${it.title} ${it.tag ?? ""}`))
+    .filter((it) => `${it.title} ${it.alltag ?? ""} ${it.introduction ?? ""}`.includes(keyword))
+    .map((it) => ({
+      contentId: `jeju-${it.contentsid}`,
+      name: clean(it.title),
+      address: clean(it.roadaddress || it.address),
+      region: shortRegion(it.roadaddress || it.address),
+      imageUrl: String(it.repPhoto.photoid.imgpath),
+      // 태그는 공식 메타데이터라 설명 근거로 붙여준다 (메뉴 필드는 없음 — 지어내기 방지 위해 비움)
+      overview: `${clean(it.introduction)}${it.tag ? ` (키워드: ${clean(it.tag)})` : ""}`.slice(0, 300),
+    }));
+}
+
 // ===== 부산맛집 API (비짓부산 미식투어 437곳 — 사진·대표메뉴·영업시간·소개 포함) =====
 // 부산 한정 테마(areaCode=6)의 수집 풀 보강용. TourAPI 부산 풀은 돼지국밥 8곳·밀면
 // 6곳으로 얇았는데, 이 소스가 각각 19곳·15곳을 더 준다(2026-08 실측).
@@ -229,7 +272,11 @@ async function photoKoreaPhoto(keyword) {
       { keyword, numOfRows: "30", pageNo: "1", arrange: "A" },
       "photogallery"
     );
-    const good = (items ?? []).filter((it) => it.galWebImageUrl);
+    // 검색이 촬영지·태그까지 잡아 관광지 컷이 섞인다(실측: "흑돼지" → 휴애리 자연생활공원).
+    // 제목에 키워드가 든 사진만 — 없으면 배경 교체를 포기(식당 사진 유지)하는 게 안전.
+    const good = (items ?? []).filter(
+      (it) => it.galWebImageUrl && String(it.galTitle ?? "").includes(keyword)
+    );
     if (!good.length) return null;
     const pick = good.slice(0, 10)[Math.floor(Math.random() * Math.min(10, good.length))];
     return {
@@ -245,8 +292,11 @@ async function photoKoreaPhoto(keyword) {
 
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
 async function collectPlaces(theme, limit) {
-  // 부산 테마는 부산맛집 API(사진·메뉴·소개 보장)를 풀 앞에 합류
-  const extra = theme.areaCode === 6 ? await busanPlaces(theme.keyword) : [];
+  // 지역 한정 테마는 지자체 관광 API(사진 보장)를 풀 앞에 합류
+  const extra =
+    theme.areaCode === 6 ? await busanPlaces(theme.keyword)
+    : theme.areaCode === 39 ? await jejuPlaces(theme.keyword)
+    : [];
   const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
   if (theme.areaCode) params.areaCode = String(theme.areaCode);
   let items = await tourCall("searchKeyword2", params);
@@ -258,10 +308,9 @@ async function collectPlaces(theme, limit) {
   const names = new Set();
   for (const b of extra.sort(() => Math.random() - 0.5)) {
     if (picked.length >= (limit ?? theme.count)) break;
-    const rg = b.region;
-    const perR = theme.areaCode ? 4 : 2;
-    if ((seen[rg] ?? 0) >= perR) continue;
-    seen[rg] = (seen[rg] ?? 0) + 1;
+    // 지자체 보강 소스는 지역 상한을 안 건다 — 제주는 시군구가 2개뿐이라 4곳 상한이면
+    // 풀이 9곳으로 잘려 비전 탈락 후 6칸을 못 채운다(실측). 테마 자체가 지역 한정이라
+    // 카드가 같은 지역이어도 자연스럽다.
     names.add(b.name.replace(/s+/g, ""));
     picked.push(b);
   }
@@ -303,8 +352,8 @@ async function markHundredYear(db, places) {
 /** 가게별 이미지 중 Gemini 비전으로 음식 사진 선택 (실패 시 기존 유지) */
 async function pickFoodImage(place, food) {
   try {
-    // busan- 소스는 TourAPI 콘텐츠가 아니라 추가 이미지 조회가 없다 — 대표 1장만 검사
-    const items = place.contentId.startsWith("busan-")
+    // 지자체 소스(busan-·jeju-)는 TourAPI 콘텐츠가 아니라 추가 이미지 조회가 없다 — 대표 1장만 검사
+    const items = /^(busan|jeju)-/.test(place.contentId)
       ? []
       : await tourCall("detailImage2", {
           contentId: place.contentId, imageYN: "Y", numOfRows: "15",
@@ -327,8 +376,12 @@ async function pickFoodImage(place, food) {
       try {
         const res = await fetch(c.small, { signal: AbortSignal.timeout(15000) });
         if (!res.ok) continue;
-        const b = Buffer.from(await res.arrayBuffer());
-        if (b.length > 900_000) continue;
+        let b = Buffer.from(await res.arrayBuffer());
+        // 비짓제주는 webp, 일부 원본은 4MB급 — JPEG로 통일·축소해서 비전에 넘긴다
+        if (b.length > 900_000 || !(b[0] === 0xff && b[1] === 0xd8)) {
+          const sharp = (await import("sharp")).default;
+          b = await sharp(b).resize(720, 720, { fit: "inside" }).jpeg({ quality: 78 }).toBuffer();
+        }
         valid.push(c);
         parts.push({ inlineData: { mimeType: "image/jpeg", data: b.toString("base64") } });
       } catch { /* skip */ }
@@ -428,7 +481,7 @@ async function enrichPlaces(places) {
   const clean = (v) =>
     String(v ?? "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   for (const p of places) {
-    if (p.contentId.startsWith("busan-")) continue; // 부산 API가 메뉴·소개·시간을 이미 줬다
+    if (/^(busan|jeju)-/.test(p.contentId)) continue; // 지자체 API가 소개(·메뉴)를 이미 줬고 TourAPI 조회도 불가
     try {
       const it = (await tourCall("detailIntro2", { contentId: p.contentId, contentTypeId: "39" }))[0] ?? {};
       const menu = (clean(it.firstmenu) || clean(it.treatmenu))
@@ -1103,7 +1156,7 @@ async function main() {
     const forced = all.find((t) => t.key === process.env.ROUNDUP_THEME);
     if (forced) {
       console.log("테마 강제:", forced.key);
-      const got = await collectPlaces(forced, 16);
+      const got = await collectPlaces(forced, forced.areaCode ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
       console.log(`[${forced.key}] 수집 풀: ${got.length}곳`);
       if (got.length < 4) throw new Error("강제 테마 수집 부족");
       theme = forced;
@@ -1120,7 +1173,7 @@ async function main() {
   let best = null;
   for (let t = 0; !theme && t < Math.min(5, ordered.length); t++) {
     const cand = ordered[t];
-    const got = await collectPlaces(cand, 16);
+    const got = await collectPlaces(cand, cand.areaCode ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
     console.log(`[${cand.key}] 수집 풀: ${got.length}곳`);
     if (got.length >= 10) { theme = cand; places = got; break; }
     if (!best || got.length > best.places.length) best = { theme: cand, places: got };
