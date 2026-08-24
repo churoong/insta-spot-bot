@@ -588,11 +588,15 @@ ${bgm.attribution}`; // CC BY 4.0 — 저작자 표시 의무
   });
 
   // 8) 릴스 발행 → 성공 시 완료 상태로 갱신
-  // 트렌딩 음악이 있으면 FB 경로로 첨부 발행(나레이션 100 + 음악 30), 실패 시 자동 폴백
+  // 일반 릴스는 트라이얼로 발행(TRIAL_REELS=0으로 끌 수 있음) — 도달 105~140에
+  // 갇혀 있던 포맷이라 비팔로워 풀에서 테스트하고 성과 통과분만 전체공개(자동)한다.
+  // 모음집·큐레이션은 검증된 포맷이라 정식 발행 유지(make-roundup은 trial 미사용).
+  const trial = process.env.TRIAL_REELS !== "0";
   const mediaId = await publishReelSmart(
     videoUrl,
     caption,
-    igMusic ? { audioId: igMusic.id, audioVolume: voiceTrack ? 30 : 100, videoVolume: 100 } : null
+    igMusic ? { audioId: igMusic.id, audioVolume: voiceTrack ? 30 : 100, videoVolume: 100 } : null,
+    { trial }
   );
   console.log("✅ 릴스 발행 완료! media id:", mediaId);
   await db.execute({

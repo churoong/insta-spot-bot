@@ -197,13 +197,33 @@ export async function publishImage(imageUrl: string, caption: string): Promise<s
  * 릴스(동영상) 발행: video_url로 REELS 컨테이너 생성 → 처리 대기 → 발행.
  * 동영상은 이미지보다 처리 시간이 길어 대기를 넉넉히(최대 ~4분) 둔다.
  */
-export async function publishReel(videoUrl: string, caption: string): Promise<string> {
-  const container = await graphPost(`${igUserId()}/media`, {
+export async function publishReel(
+  videoUrl: string,
+  caption: string,
+  opts: { trial?: boolean } = {}
+): Promise<string> {
+  // 트라이얼 릴스(2025-12 API 지원, Instagram Login 포함): 비팔로워에게만 72시간
+  // 테스트 노출, SS_PERFORMANCE면 성과 기준 통과 시 자동 전체공개(graduation).
+  // 계정 요건(팔로워 1천+ 등) 미달이면 컨테이너 생성이 에러 — 일반 발행으로 폴백.
+  const base: Record<string, unknown> = {
     media_type: "REELS",
     video_url: videoUrl,
     caption,
     share_to_feed: true,
-  });
+  };
+  let container;
+  if (opts.trial) {
+    try {
+      container = await graphPost(`${igUserId()}/media`, {
+        ...base,
+        trial_params: { graduation_strategy: "SS_PERFORMANCE" },
+      });
+      console.log("[publish] 트라이얼 릴스 컨테이너 생성 (비팔로워 테스트 → 성과 시 자동 전체공개)");
+    } catch (e) {
+      console.error("[publish] 트라이얼 생성 실패 — 일반 릴스로 폴백:", String(e).slice(0, 160));
+    }
+  }
+  if (!container) container = await graphPost(`${igUserId()}/media`, base);
 
   // 동영상 처리 대기 (인코딩 검증에 수십 초~수 분)
   const id = String(container.id);
@@ -260,7 +280,12 @@ export interface ReelMusic {
 }
 
 /** graph.facebook.com으로 릴스 발행 — music이 있으면 audio_configuration 첨부 */
-async function publishReelFb(videoUrl: string, caption: string, music: ReelMusic | null): Promise<string> {
+async function publishReelFb(
+  videoUrl: string,
+  caption: string,
+  music: ReelMusic | null,
+  trial = false
+): Promise<string> {
   const igId = process.env.FB_IG_USER_ID!;
   const params: Record<string, unknown> = {
     media_type: "REELS",
@@ -268,6 +293,7 @@ async function publishReelFb(videoUrl: string, caption: string, music: ReelMusic
     caption,
     share_to_feed: true,
   };
+  if (trial) params.trial_params = { graduation_strategy: "SS_PERFORMANCE" };
   if (music) {
     params.audio_configuration = {
       audio_id: music.audioId,
@@ -300,17 +326,18 @@ async function publishReelFb(videoUrl: string, caption: string, music: ReelMusic
 export async function publishReelSmart(
   videoUrl: string,
   caption: string,
-  music: ReelMusic | null
+  music: ReelMusic | null,
+  opts: { trial?: boolean } = {}
 ): Promise<string> {
   if (music && fbConfigured()) {
     try {
-      const id = await publishReelFb(videoUrl, caption, music);
+      const id = await publishReelFb(videoUrl, caption, music, opts.trial);
       console.log("[publish] FB 경로 발행 (라이브러리 음악 첨부):", id);
       return id;
     } catch (e) {
       console.error("[publish] 음악 첨부 발행 실패 — 음악 없이 재시도:", String(e).slice(0, 200));
       try {
-        const id = await publishReelFb(videoUrl, caption, null);
+        const id = await publishReelFb(videoUrl, caption, null, opts.trial);
         console.log("[publish] FB 경로 발행 (음악 없음):", id);
         return id;
       } catch (e2) {
@@ -318,7 +345,7 @@ export async function publishReelSmart(
       }
     }
   }
-  return publishReel(videoUrl, caption);
+  return publishReel(videoUrl, caption, opts);
 }
 
 /** 댓글에 대한 비공개 답장(Private Reply) — 댓글 작성자에게 DM 발송 */
