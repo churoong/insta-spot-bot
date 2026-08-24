@@ -1262,17 +1262,21 @@ async function main() {
   let rankBasis = "";
   if (STYLE === "countdown") {
     try {
-      const { rankByBuzz } = await import("../lib/naver.ts");
-      const res = await rankByBuzz(places);
+      // 3축 합성 랭킹: 블로그 후기 수 + 유튜브 상위 조회수 + 네이버 리뷰순 진입.
+      // 유튜브·리뷰순 키가 없거나 실패하면 그 축만 0점 — 블로그 단독과 동등하게 동작.
+      const { rankComposite } = await import("../lib/ranking.ts");
+      const res = await rankComposite(places, theme.keyword);
       if (res?.scored) {
         places = res.ranked; // 1위가 앞
-        rankBasis = "블로그 후기";
+        rankBasis = res.basis;
         console.log(
-          "후기 수 기준 순위:",
-          places.map((p) => `${p.name}(${p.buzz})`).join(" > ")
+          "합성 순위:",
+          places
+            .map((p) => `${p.name}(블로그${p.buzz}·YT${Math.round(p.ytViews / 1000)}k${p.commentPos ? `·리뷰${p.commentPos}위` : ""})`)
+            .join(" > ")
         );
       } else {
-        console.log("후기 데이터 없음 — 수집 순서 사용");
+        console.log("랭킹 데이터 없음 — 수집 순서 사용");
       }
     } catch (e) {
       console.error("후기 랭킹 실패(수집 순서 사용):", String(e).slice(0, 100));

@@ -45,4 +45,6 @@ jobs:
           # 인스타 라이브러리 음악 첨부용 (Audio API — FB 로그인 경로). 미설정이면 CC BGM 폴백.
           FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
           FB_IG_USER_ID: ${{ secrets.FB_IG_USER_ID }}
+          # 합성 랭킹(유튜브 버즈)용 — 없으면 블로그 후기 단독으로 폴백
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
