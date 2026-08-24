@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Spot } from "./tourapi";
 
 /**
@@ -15,7 +14,8 @@ import type { Spot } from "./tourapi";
  * 블로그 후기 수 게이트(minBuzz)가 사실상의 생존 검증을 겸한다.
  */
 
-const FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data", "seoul-food.json");
+// Vercel 번들에서는 import.meta.url이 .next 청크를 가리켜 상대 경로가 깨진다 — cwd 기준(폰트와 동일 방식)
+const FILE = path.join(process.cwd(), "data", "seoul-food.json");
 
 // 순수 음식점만 (사용자 정책: 카페·제과·주점 제외). "기타"는 카페류가 많아 통째로 제외.
 const BAD_CAT = /(카페|커피|다방|제과|제빵|베이커리|아이스크림|디저트|찻집|호프|주점|술집|유흥|단란|노래|뷔페|출장|기타|패스트푸드)/;
