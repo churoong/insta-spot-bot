@@ -278,11 +278,20 @@ async function photoKoreaPhoto(keyword) {
       (it) => it.galWebImageUrl && String(it.galTitle ?? "").includes(keyword)
     );
     if (!good.length) return null;
-    const pick = good.slice(0, 10)[Math.floor(Math.random() * Math.min(10, good.length))];
+    // 제목 필터만으론 부족 — "보쌈골목"처럼 키워드가 든 거리·시장 전경이 통과한다
+    // (실측: 보쌈 히어로 배경이 골목 사진으로 나감). 비전 음식 검사 통과분만 쓴다.
+    const { pickFoodImages } = await import("../lib/vision.ts");
+    const shuffled = good.slice(0, 8).sort(() => Math.random() - 0.5);
+    const foodUrls = await pickFoodImages(shuffled.map((it) => String(it.galWebImageUrl)), 3);
+    if (!foodUrls.length) {
+      console.log("[photokorea] 음식 컷 없음(관광 전경뿐) — 기존 배경 유지");
+      return null;
+    }
+    const pick = good.find((it) => String(it.galWebImageUrl) === foodUrls[0]);
     return {
-      url: String(pick.galWebImageUrl),
-      photographer: String(pick.galPhotographer ?? "").trim(),
-      title: String(pick.galTitle ?? "").trim(),
+      url: foodUrls[0],
+      photographer: String(pick?.galPhotographer ?? "").trim(),
+      title: String(pick?.galTitle ?? "").trim(),
     };
   } catch (e) {
     console.error("[photokorea] 검색 실패(기존 배경 유지):", String(e).slice(0, 80));
@@ -695,7 +704,7 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
 
   // 제목: 4:5로 잘려도 살아남는 위치(CT 아래)에, 모자이크 띠와 그리드 사이
   const tp = theme.coverParts ?? {
-    top: "", main: theme.food || theme.keyword, sub: `${theme.suffix || "맛집"} ${places.length}선`,
+    top: "", main: theme.food || theme.keyword, sub: `${places.length}대 ${theme.suffix || "맛집"}`,
   };
   const mainLen = Math.max(1, [...tp.main].length);
   const ms = Math.min(132, Math.floor(950 / mainLen));
@@ -757,7 +766,7 @@ async function composeHeroCover(theme, places, bgUrl = null) {
     .toBuffer();
 
   const tp = theme.coverParts ?? {
-    top: "", main: theme.food || theme.keyword, sub: `${theme.suffix || "맛집"} ${places.length}선`,
+    top: "", main: theme.food || theme.keyword, sub: `${places.length}대 ${theme.suffix || "맛집"}`,
   };
   const mainLen = Math.max(1, [...tp.main].length);
   const ms = Math.min(215, Math.floor(980 / mainLen));
@@ -825,7 +834,10 @@ function buildPunchyTitle(theme, n) {
     `놓치면 후회하는`,
   ];
   const top = tops[Math.floor(Math.random() * tops.length)];
-  const sub = `${sfx} ${n}선`;
+  // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의
+  // "N대 맛집"을 기본으로 하고 "TOP N"을 섞는다.
+  const subs = [`${n}대 ${sfx}`, `${sfx} TOP ${n}`];
+  const sub = subs[Math.floor(Math.random() * subs.length)];
   return { text: `${top} ${f} ${sub}`, top, main: f, sub };
 }
 
