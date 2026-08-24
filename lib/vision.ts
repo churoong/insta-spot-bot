@@ -17,7 +17,7 @@ export async function pickFoodImages(urls: string[], max = 10): Promise<string[]
       try {
         const res = await fetch(u, { signal: AbortSignal.timeout(15000) });
         if (!res.ok) continue;
-        let b = Buffer.from(await res.arrayBuffer());
+        let b: Buffer = Buffer.from(await res.arrayBuffer());
         // 서울 DB 등은 4MB급 원본이라 그냥 버리면 후보가 전멸한다(실측) — 줄여서 검사.
         // 비짓제주 등 webp 소스는 JPEG로 변환(Gemini에 jpeg mime으로 보내므로).
         if (b.length > 900_000 || !(b[0] === 0xff && b[1] === 0xd8)) {
