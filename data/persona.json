@@ -3,7 +3,7 @@
   "name": "먹짱",
   "tagline": "전국 노포만 20년, 맛집 앞에선 솔직해집니다",
   "_voice_설명": "voice는 Gemini TTS 목소리. 여성 밝은 계열: Leda(발랄) Aoede(산뜻) Laomedeia(경쾌) Zephyr(밝음). 남성: Fenrir(흥분) Puck(경쾌). voiceSpeed는 말 속도 배율(1=원본).",
-  "voice": "Leda",
+  "voice": "Laomedeia",
   "voiceDirection": "인기 쇼츠 내레이션처럼 빠르고 또렷하게, 자신감 있는 톤으로. 문장 끝을 힘 있게 살리고 늘어지지 않게 읽어줘",
   "voiceSpeed": 1.18,
   "captionStyle": [
