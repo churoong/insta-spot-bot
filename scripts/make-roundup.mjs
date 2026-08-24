@@ -47,7 +47,7 @@ function shortRegion(addr) {
  *    발행이 통째로 실패한 적이 있다. 그래서 Vercel 프록시(/api/tour-proxy)를
  *    1순위로 쓰고, 실패하면 직접 호출로 폴백한다. 각 경로마다 2회씩 재시도.
  */
-async function tourCall(endpoint, params) {
+async function tourCall(endpoint, params, svc) {
   const base = (process.env.APP_BASE_URL || "https://insta-spot-bot.vercel.app").replace(/\/$/, "");
   const secret = process.env.CRON_SECRET;
 
@@ -55,7 +55,7 @@ async function tourCall(endpoint, params) {
   if (secret) {
     for (let i = 0; i < 2; i++) {
       try {
-        const pq = new URLSearchParams({ endpoint, ...params });
+        const pq = new URLSearchParams({ endpoint, ...(svc ? { svc } : {}), ...params });
         const r = await fetch(`${base}/api/tour-proxy?${pq}`, {
           headers: { Authorization: `Bearer ${secret}` },
           signal: AbortSignal.timeout(40000),
@@ -78,10 +78,16 @@ async function tourCall(endpoint, params) {
         serviceKey: process.env.TOUR_API_KEY,
         MobileOS: "ETC", MobileApp: "instaSpotBot", _type: "json", ...params,
       });
-      const res = await fetch(`${TOUR}/${endpoint}?${qs}`, { signal: AbortSignal.timeout(20000) });
+      const BASES = {
+        korservice2: TOUR,
+        photogallery: "https://apis.data.go.kr/B551011/PhotoGalleryService1",
+        busanfood: "https://apis.data.go.kr/6260000/FoodService",
+      };
+      const base2 = BASES[svc ?? "korservice2"];
+      const res = await fetch(`${base2}/${endpoint}?${qs}`, { signal: AbortSignal.timeout(20000) });
       if (!res.ok) throw new Error(`TourAPI ${endpoint} HTTP ${res.status}`);
       const json = await res.json();
-      const items = json?.response?.body?.items?.item;
+      const items = svc === "busanfood" ? json?.getFoodKr?.item : json?.response?.body?.items?.item;
       return Array.isArray(items) ? items : items ? [items] : [];
     } catch (e) {
       lastErr = e;
@@ -180,8 +186,67 @@ function weightedOrder(all, weights, exclude = []) {
   ];
 }
 
+// ===== 부산맛집 API (비짓부산 미식투어 437곳 — 사진·대표메뉴·영업시간·소개 포함) =====
+// 부산 한정 테마(areaCode=6)의 수집 풀 보강용. TourAPI 부산 풀은 돼지국밥 8곳·밀면
+// 6곳으로 얇았는데, 이 소스가 각각 19곳·15곳을 더 준다(2026-08 실측).
+
+let busanCache = null;
+async function busanPlaces(keyword) {
+  if (!busanCache) {
+    try {
+      busanCache = await tourCall("getFoodKr", { pageNo: "1", numOfRows: "500", resultType: "json" }, "busanfood");
+    } catch (e) {
+      console.error("[busan] 수집 실패(건너뜀):", String(e).slice(0, 100));
+      busanCache = [];
+    }
+  }
+  const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+  return busanCache
+    .filter((it) => `${it.MAIN_TITLE} ${it.RPRSNTV_MENU} ${it.ITEMCNTNTS}`.includes(keyword))
+    .filter((it) => it.MAIN_IMG_NORMAL)
+    .map((it) => ({
+      contentId: `busan-${it.UC_SEQ}`,
+      name: clean(it.MAIN_TITLE),
+      address: `부산 ${clean(it.GUGUN_NM)} ${clean(it.ADDR1)}`,
+      region: `부산 ${clean(it.GUGUN_NM).replace(/(구|군)$/, "")}`,
+      imageUrl: String(it.MAIN_IMG_NORMAL),
+      // 설명·캡션 재료가 이미 갖춰져 있어 enrichPlaces의 TourAPI 조회가 불필요
+      menu: clean(it.RPRSNTV_MENU).slice(0, 60),
+      overview: clean(it.ITEMCNTNTS).slice(0, 300),
+      hours: clean(it.USAGE_DAY_WEEK_AND_TIME).slice(0, 80),
+    }));
+}
+
+/**
+ * 포토코리아(관광공사 관광사진, 공공누리 1유형) — 표지 배경용 음식 사진.
+ * TourAPI 식당 원본보다 촬영 품질이 압도적이라 표지 첫인상이 좋아진다.
+ * 출처표시 의무가 있어 캡션에 크레딧 라인을 붙인다. 실패하면 null(기존 배경 유지).
+ */
+async function photoKoreaPhoto(keyword) {
+  try {
+    const items = await tourCall(
+      "gallerySearchList1",
+      { keyword, numOfRows: "30", pageNo: "1", arrange: "A" },
+      "photogallery"
+    );
+    const good = (items ?? []).filter((it) => it.galWebImageUrl);
+    if (!good.length) return null;
+    const pick = good.slice(0, 10)[Math.floor(Math.random() * Math.min(10, good.length))];
+    return {
+      url: String(pick.galWebImageUrl),
+      photographer: String(pick.galPhotographer ?? "").trim(),
+      title: String(pick.galTitle ?? "").trim(),
+    };
+  } catch (e) {
+    console.error("[photokorea] 검색 실패(기존 배경 유지):", String(e).slice(0, 80));
+    return null;
+  }
+}
+
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
 async function collectPlaces(theme, limit) {
+  // 부산 테마는 부산맛집 API(사진·메뉴·소개 보장)를 풀 앞에 합류
+  const extra = theme.areaCode === 6 ? await busanPlaces(theme.keyword) : [];
   const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
   if (theme.areaCode) params.areaCode = String(theme.areaCode);
   let items = await tourCall("searchKeyword2", params);
@@ -190,12 +255,23 @@ async function collectPlaces(theme, limit) {
   );
   const seen = {};
   const picked = [];
+  const names = new Set();
+  for (const b of extra.sort(() => Math.random() - 0.5)) {
+    if (picked.length >= (limit ?? theme.count)) break;
+    const rg = b.region;
+    const perR = theme.areaCode ? 4 : 2;
+    if ((seen[rg] ?? 0) >= perR) continue;
+    seen[rg] = (seen[rg] ?? 0) + 1;
+    names.add(b.name.replace(/s+/g, ""));
+    picked.push(b);
+  }
   // 시군구 편중 방지 상한. 지역 한정 테마(areaCode)는 시군구 수 자체가 적어
   // 2곳으로 묶으면 6곳을 채울 수 없다 (제주=제주시·서귀포시 2개뿐 → 최대 4곳).
   const perRegion = theme.areaCode ? 4 : 2;
   for (const it of items.sort(() => Math.random() - 0.5)) {
     const rg = shortRegion(it.addr1);
     if ((seen[rg] ?? 0) >= perRegion) continue;
+    if (names.has(String(it.title).replace(/[[^]]*]/g, "").replace(/s+/g, "").trim())) continue; // 부산 API와 중복
     seen[rg] = (seen[rg] ?? 0) + 1;
     picked.push({
       contentId: String(it.contentid),
@@ -227,9 +303,12 @@ async function markHundredYear(db, places) {
 /** 가게별 이미지 중 Gemini 비전으로 음식 사진 선택 (실패 시 기존 유지) */
 async function pickFoodImage(place, food) {
   try {
-    const items = await tourCall("detailImage2", {
-      contentId: place.contentId, imageYN: "Y", numOfRows: "15",
-    });
+    // busan- 소스는 TourAPI 콘텐츠가 아니라 추가 이미지 조회가 없다 — 대표 1장만 검사
+    const items = place.contentId.startsWith("busan-")
+      ? []
+      : await tourCall("detailImage2", {
+          contentId: place.contentId, imageYN: "Y", numOfRows: "15",
+        });
     const cands = [
       { url: place.imageUrl, small: place.imageUrl },
       ...items
@@ -349,6 +428,7 @@ async function enrichPlaces(places) {
   const clean = (v) =>
     String(v ?? "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   for (const p of places) {
+    if (p.contentId.startsWith("busan-")) continue; // 부산 API가 메뉴·소개·시간을 이미 줬다
     try {
       const it = (await tourCall("detailIntro2", { contentId: p.contentId, contentTypeId: "39" }))[0] ?? {};
       const menu = (clean(it.firstmenu) || clean(it.treatmenu))
@@ -435,7 +515,7 @@ JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개
  * 릴스용 표지(1080x1920): 원본 인포그래픽 그리드 스타일 유지(사진+번호+이름+지역칩+한줄소개),
  * 배경만 음식 사진(어둡고 따뜻한 오버레이)으로 먹음직스럽게. 릴스 규격에 딱 맞음.
  */
-async function composeReelCover(theme, places, dark = false) {
+async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   // dark=true면 흰 카드 대신 반투명 다크 카드. 어느 쪽이 유입이 좋은지 비교하려고
   // 두 배색을 같은 레이아웃으로 유지한다(레이아웃 차이가 섞이면 비교가 안 된다).
   const PAL = dark
@@ -471,7 +551,7 @@ async function composeReelCover(theme, places, dark = false) {
   // 배경: 음식 사진 풀블리드 + 오버레이. 블러는 원본에 박힌 타 블로그 워터마크를
   // 뭉개기 위한 것(배경은 장식일 뿐이라 카드가 도드라지는 효과도 있다).
   const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
-  const bgRes = await fetch(bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
+  const bgRes = await fetch(bgUrl ?? bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
   if (!bgRes.ok) throw new Error("릴스 배경 사진 실패");
   const bgPhoto = await sharp(Buffer.from(await bgRes.arrayBuffer()))
     .resize(W, H, { fit: "cover" })
@@ -607,14 +687,14 @@ async function composeReelCover(theme, places, dark = false) {
  * 그리드형(기존·다크)과 달리 썸네일에서 음식이 크게 보이는 대신 6곳 정보는 안 보인다.
  * 어느 쪽이 유입에 유리한지 비교하려고 나란히 돌린다.
  */
-async function composeHeroCover(theme, places) {
+async function composeHeroCover(theme, places, bgUrl = null) {
   const sharp = (await import("sharp")).default;
   const W = 1080, H = 1920;
   const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285 — 4:5로 잘려도 살아남는 위쪽 경계
   const CH = Math.round(W * 5 / 4); // 1350
 
   const p = places.find((x) => x.foodPicked) ?? places[0];
-  const res = await fetch(p.imageUrl, { signal: AbortSignal.timeout(20000) });
+  const res = await fetch(bgUrl ?? p.imageUrl, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error("히어로 배경 사진 실패");
   // 그리드형과 달리 사진 자체가 주인공이라 블러를 넣지 않는다
   const bgPhoto = await sharp(Buffer.from(await res.arrayBuffer()))
@@ -1018,6 +1098,19 @@ async function main() {
   console.log("테마 시도 순서:", ordered.slice(0, 3).map((t) => t.key).join(" → "));
 
   let theme = null, places = [];
+  // ROUNDUP_THEME=키 를 주면 그 테마만 시도 (테스트·수동 발행용)
+  if (process.env.ROUNDUP_THEME) {
+    const forced = all.find((t) => t.key === process.env.ROUNDUP_THEME);
+    if (forced) {
+      console.log("테마 강제:", forced.key);
+      const got = await collectPlaces(forced, 16);
+      console.log(`[${forced.key}] 수집 풀: ${got.length}곳`);
+      if (got.length < 4) throw new Error("강제 테마 수집 부족");
+      theme = forced;
+      places = got;
+    }
+  }
+
   // 표지 한 장에 6칸(2열x3행)까지만 — 8칸이면 셀이 좁아 상호명·설명이 잘리고
   // 피드에서 확대하기 전엔 아무것도 안 읽힌다(실측).
   //
@@ -1025,7 +1118,7 @@ async function main() {
   // 딱 6곳만 모인 테마(예: 제주 흑돼지 9곳)를 잡으면 6칸을 못 채워 그날 발행이
   // 통째로 날아간다. 여유가 있는 테마를 먼저 쓰고, 전부 얇으면 그중 제일 큰 풀을 쓴다.
   let best = null;
-  for (let t = 0; t < Math.min(5, ordered.length); t++) {
+  for (let t = 0; !theme && t < Math.min(5, ordered.length); t++) {
     const cand = ordered[t];
     const got = await collectPlaces(cand, 16);
     console.log(`[${cand.key}] 수집 풀: ${got.length}곳`);
@@ -1136,6 +1229,7 @@ async function main() {
 
   const cards = []; // countdown에서 쓸 카드 파일들
   let coverStyle = null; // grid 계열에서 쓴 표지 스타일 (성과 비교용)
+  let pkBg = null; // 포토코리아 배경 (쓰면 캡션에 출처표시 의무)
   const narration = []; // 카드와 1:1 대응하는 나레이션 문장
   let reelCover = null;
   if (STYLE === "countdown") {
@@ -1186,10 +1280,13 @@ async function main() {
       coverStyle = STYLES[(ci.rows.length ? Number(ci.rows[0].value) : 0) % STYLES.length];
     }
     console.log("표지 스타일:", coverStyle);
+    // 표지 배경은 포토코리아 전문가 컷 우선 (공공누리 1유형 — 캡션에 크레딧 필수)
+    pkBg = await photoKoreaPhoto(theme.keyword);
+    if (pkBg) console.log(`포토코리아 배경: ${pkBg.title}${pkBg.photographer ? " ⓒ" + pkBg.photographer : ""}`);
     reelCover =
       coverStyle === "hero"
-        ? await composeHeroCover(theme, places)
-        : await composeReelCover(theme, places, coverStyle === "dark");
+        ? await composeHeroCover(theme, places, pkBg?.url)
+        : await composeReelCover(theme, places, coverStyle === "dark", pkBg?.url);
   }
 
   if (DRY) {
@@ -1356,11 +1453,15 @@ async function main() {
   const reelUrl = await uploadPublic(reelMp4);
   console.log("모음집 릴스 업로드:", reelUrl);
   const { publishReelSmart } = await import("../lib/instagram.ts");
+  let finalCaption = caption;
+  if (pkBg) finalCaption += `
+📷 표지 배경: 한국관광공사 포토코리아${pkBg.photographer ? ` ⓒ${pkBg.photographer}` : ""}`;
+  if (bgm) finalCaption += `
+${bgm.attribution}`;
   // countdown은 나레이션이 주인공(음악 30), grid는 음악이 주인공(100)
   const mediaId = await publishReelSmart(
     reelUrl,
-    bgm ? `${caption}
-${bgm.attribution}` : caption,
+    finalCaption,
     igMusic
       ? { audioId: igMusic.id, audioVolume: STYLE === "countdown" ? 30 : 100, videoVolume: 100 }
       : null

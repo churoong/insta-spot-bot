@@ -24,6 +24,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "invalid endpoint" }, { status: 400 });
   }
 
+  // 중계 대상 서비스 화이트리스트. 소스 다변화(2026-08)로 국문관광정보 외에
+  // 부산맛집·포토코리아도 Actions에서 우회 접근이 필요해졌다.
+  const SERVICES: Record<string, { base: string; extract: (j: any) => unknown }> = {
+    korservice2: {
+      base: "https://apis.data.go.kr/B551011/KorService2",
+      extract: (j) => j?.response?.body?.items?.item,
+    },
+    photogallery: {
+      base: "https://apis.data.go.kr/B551011/PhotoGalleryService1",
+      extract: (j) => j?.response?.body?.items?.item,
+    },
+    busanfood: {
+      base: "https://apis.data.go.kr/6260000/FoodService",
+      extract: (j) => j?.getFoodKr?.item,
+    },
+  };
+  const svc = SERVICES[sp.get("svc") ?? "korservice2"];
+  if (!svc) {
+    return NextResponse.json({ error: "invalid svc" }, { status: 400 });
+  }
+
   const qs = new URLSearchParams({
     serviceKey: process.env.TOUR_API_KEY ?? "",
     MobileOS: "ETC",
@@ -31,20 +52,17 @@ export async function GET(req: NextRequest) {
     _type: "json",
   });
   for (const [k, v] of sp.entries()) {
-    if (k === "endpoint") continue;
+    if (k === "endpoint" || k === "svc") continue;
     qs.set(k, v);
   }
 
   try {
-    const res = await fetch(
-      `https://apis.data.go.kr/B551011/KorService2/${endpoint}?${qs}`,
-      { signal: AbortSignal.timeout(20000) }
-    );
+    const res = await fetch(`${svc.base}/${endpoint}?${qs}`, { signal: AbortSignal.timeout(20000) });
     if (!res.ok) {
       return NextResponse.json({ error: `TourAPI HTTP ${res.status}` }, { status: 502 });
     }
     const json = await res.json();
-    const items = json?.response?.body?.items?.item;
+    const items = svc.extract(json);
     return NextResponse.json({ items: Array.isArray(items) ? items : items ? [items] : [] });
   } catch (e) {
     return NextResponse.json({ error: String(e).slice(0, 200) }, { status: 502 });
