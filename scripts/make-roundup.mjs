@@ -514,6 +514,7 @@ ${places
   .map((p, i) => {
     const b = [`${i + 1}. ${p.name} (${p.region})`];
     if (p.menu) b.push(`   대표메뉴: ${p.menu}`);
+    if (p.goodPrice?.price) b.push(`   착한가격업소(정부 지정): ${p.goodPrice.menu} ${p.goodPrice.price.toLocaleString()}원`);
     if (p.overview) b.push(`   소개: ${p.overview.slice(0, 240)}`);
     return b.join("\n");
   })
@@ -696,7 +697,8 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
       <rect x="${CX + IN + 10}" y="${base - 44}" width="${chipW}" height="34" rx="17" fill="#000000" fill-opacity="0.6"/>
       <text x="${CX + IN + 10 + chipW / 2}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="700" fill="#ffffff" text-anchor="middle">📍 ${esc(p.region)}</text>
       ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
-      <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : ""}
+      <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : p.goodPrice ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#c8f3d4" fill-opacity="0.95"/>
+      <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#0d6b33" text-anchor="middle">착한가격</text>` : ""}
       <text x="${CX + IN + 2}" y="${base + 44}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
       ${dl.map((ln, k) => `<circle cx="${CX + IN + 10}" cy="${base + 76 + k * 31}" r="4.5" fill="${PAL.accent}"/><text x="${CX + IN + 24}" y="${base + 83 + k * 31}" font-family="${FONT}" font-size="23" fill="${PAL.desc}">${esc(ln)}</text>`).join("")}
     </g>`;
@@ -1109,10 +1111,15 @@ function buildCaption(theme, places, descending = false, ep = null) {
    ${p.detail || p.desc}`;
   });
   const hundredCount = places.filter((p) => p.hundred).length;
+  const goodShops = places.filter((p) => p.goodPrice);
   const hundredLine =
-    hundredCount > 0
-      ? `🏅 표시된 ${hundredCount}곳은 중소벤처기업부 인증 '백년가게'예요!\n\n`
-      : "";
+    (hundredCount > 0
+      ? `🏅 표시된 ${hundredCount}곳은 중소벤처기업부 인증 '백년가게'예요!\n`
+      : "") +
+    (goodShops.length > 0
+      ? `💰 ${goodShops.map((p) => p.name).join(", ")}: 정부 지정 '착한가격업소'예요!\n`
+      : "") +
+    (hundredCount > 0 || goodShops.length > 0 ? "\n" : "");
   // 2025-12부터 게시물당 해시태그 5개 제한 — 테마 태그(최대 3) + 큐레이션 2개만.
   // 검색 유입은 해시태그가 아니라 첫 줄의 [음식+맛집] 키워드가 담당한다.
   const tags = [...(theme.tags ?? []).slice(0, 3), "맛집추천", "맛집리스트"]
@@ -1234,6 +1241,8 @@ async function main() {
   // 백년가게 대조 (배지·캡션용)
   await markHundredYear(db, places);
   console.log(`백년가게: ${places.filter((p) => p.hundred).length}곳`);
+  const { markGoodPrice } = await import("../lib/goodprice.ts");
+  console.log(`착한가격업소: ${markGoodPrice(places)}곳`);
 
   // 한줄평+상세설명 먼저 (비전 호출이 분당 한도를 소모하기 전에)
   // 모든 AI(Gemini→Groq)가 실패하면 저품질 기본 문구로 내보내지 않고 발행 자체를 건너뜀
