@@ -5,6 +5,8 @@ import { generateCaption, generateNarration, generateHook } from "@/lib/caption"
 import { pickPerformingKeyword } from "@/lib/performance";
 import { searchMapUrl } from "@/lib/kakao";
 import { blogBuzz, buzzQuery } from "@/lib/naver";
+import { fetchSeoulCandidates, seoulAvailable } from "@/lib/seoulfood";
+import { pickFoodImages } from "@/lib/vision";
 
 // 캡션 생성 + 비전 사진 선별이 60초를 넘을 수 있음
 export const maxDuration = 300;
@@ -39,10 +41,15 @@ export async function GET(req: NextRequest) {
     for (let attempt = 0; attempt < 5; attempt++) {
       let cands: Awaited<ReturnType<typeof fetchCandidates>> = [];
       try {
+        // 소스 다변화(2026-08): 서울 음식관광 DB(자체 사진 보유)가 준비돼 있으면
+        // 1/4 확률로 섞는다. 나머지는 기존 TourAPI 두 경로.
+        const r = Math.random();
         cands =
-          Math.random() < 0.5
-            ? await fetchByFoodKeyword(await pickPerformingKeyword())
-            : await fetchCandidates();
+          seoulAvailable() && r < 0.25
+            ? await fetchSeoulCandidates()
+            : r < 0.625
+              ? await fetchByFoodKeyword(await pickPerformingKeyword())
+              : await fetchCandidates();
       } catch (e) {
         console.error(`[reel-candidate] 후보 수집 실패(시도 ${attempt + 1}):`, String(e).slice(0, 120));
         continue;
@@ -68,11 +75,16 @@ export async function GET(req: NextRequest) {
 
           // 음식 사진이 없어도 발행 가능(디자인 카드로 대체)하지만, 사진이 있는 곳을
           // 우선하기 위해 앞쪽 후보에서는 사진 있는 곳만 고르고, 뒤로 갈수록 허용한다.
-          const imgs = await fetchQuizImages(s.contentId, s.imageUrl, s.category);
+          // 서울 소스는 사진을 이미 갖고 있다 — TourAPI 이미지 조회 대신
+          // 같은 비전 선별만 돌린다. 상세(overview·메뉴)도 TourAPI 전용이라 건너뜀.
+          const isSeoul = s.contentId.startsWith("seoul-");
+          const imgs = isSeoul
+            ? await pickFoodImages(s.imageUrls)
+            : await fetchQuizImages(s.contentId, s.imageUrl, s.category);
           if (imgs.length < 1 && attempt < 2) continue;
 
-          s.overview = await fetchOverview(s.contentId);
-          const info = await fetchFoodInfo(s.contentId);
+          if (!isSeoul) s.overview = await fetchOverview(s.contentId);
+          const info = isSeoul ? { menu: "", hours: "" } : await fetchFoodInfo(s.contentId);
           const cap = await generateCaption(s, { menu: info.menu, hours: info.hours });
           if (!cap) {
             // 캡션 실패 원인은 다양(AI 한도·규칙 위반 등). 한 곳 실패로 포기하지 않고
