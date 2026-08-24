@@ -827,6 +827,8 @@ function buildPunchyTitle(theme, n) {
   const r = theme.region || "전국";
   const f = theme.food || theme.keyword;
   const sfx = theme.suffix || "맛집";
+  // 상위 쇼츠 벤치마크(2026-08): "경악·반전·극단" 수식어가 조회수 상위 공식 —
+  // 거짓 없는 선에서 극단형을 몇 개 추가해 순환
   const tops = [
     `${r}에서 제일 맛있는`,
     `죽기 전에 꼭 먹어야 할`,
@@ -834,6 +836,9 @@ function buildPunchyTitle(theme, n) {
     `줄 서서라도 먹는`,
     `${r} 사람들이 인정한`,
     `놓치면 후회하는`,
+    `웨이팅이 끊이질 않는`,
+    `현지인들이 숨겨온`,
+    `요즘 난리 난`,
   ];
   const top = tops[Math.floor(Math.random() * tops.length)];
   // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의

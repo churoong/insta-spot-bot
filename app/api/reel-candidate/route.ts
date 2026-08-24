@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
           // 4문장(약 11~14초)으로 짧게 간다. 짧은 영상은 반복 재생도 걸린다.
           const narration = await generateNarration(s, { menu: info.menu, lines: 4 });
           // 첫 화면 텍스트 훅 카드 문구 (사진이 아니라 '문구'로 스크롤을 멈추게 함)
-          const hook = await generateHook(s, { menu: info.menu });
+          const hook = await generateHook(s, { menu: info.menu, goodPrice: gp });
 
           const region = String(s.address ?? "").split(/\s+/).slice(0, 2).join(" ");
           return NextResponse.json({

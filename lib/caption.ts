@@ -110,17 +110,24 @@ ${persona.captionStyle.map((s: string) => `- ${s}`).join("\n")}
  * 사진 퀄리티에 기대지 않고 '문구'로 스크롤을 멈추게 하는 게 목적.
  * 실패하면 null → 호출부가 기본 훅으로 대체.
  */
-export async function generateHook(spot: Spot, opts: { menu?: string } = {}): Promise<string | null> {
+export async function generateHook(
+  spot: Spot,
+  opts: { menu?: string; goodPrice?: { menu: string; price: number } } = {}
+): Promise<string | null> {
   const name = cleanName(spot.name);
   const { sido, gu } = regionHint(spot.address);
   // 패턴을 자유 선택에 맡기면 모델이 "미쳤다" 하나로 수렴한다(실측: 4연속 감탄 폭발).
   // 코드에서 랜덤 지정해야 감탄형·숫자형·추상형이 실제로 섞여 나온다.
-  const pick = 1 + Math.floor(Math.random() * 7);
+  // 착한가격 데이터가 있으면 가성비 충격(8번)을 우선 배정 — 상위 쇼츠 벤치마크에서
+  // "단돈 만원"류 극단 가성비 훅이 최상위권 공식이었다 (실데이터라 허위 숫자 아님).
+  const gp = opts.goodPrice?.price ? opts.goodPrice : undefined;
+  const pick = gp && Math.random() < 0.6 ? 8 : 1 + Math.floor(Math.random() * 7);
   const prompt = `인스타 릴스 첫 화면에 크게 띄울 '훅 문구' 하나만 만들어줘.
 스크롤을 멈추고 "이게 뭔데?" 하고 끝까지 보게 만드는 게 목적이야.
 
 가게: ${name} (${[sido, gu].filter(Boolean).join(" ") || "지역"})
 ${opts.menu ? `대표 메뉴: ${opts.menu}` : ""}
+${gp ? `착한가격업소(정부 지정): ${gp.menu} ${gp.price.toLocaleString()}원 — 사실 데이터` : ""}
 설명: ${(spot.overview || "").slice(0, 500) || "(없음)"}
 
 ⭐가장 중요한 원칙: 설명하지 말고 내지르듯이. 릴스에서 통하는 짧고 센 감탄.
@@ -139,6 +146,8 @@ ${opts.menu ? `대표 메뉴: ${opts.menu}` : ""}
 5) 역대급 조합 — "역대급 국물 클라스", "웨이팅 역대급인 골목집"
 6) 추상 비유 — 맛을 엉뚱한 것에 빗대: "이 국물은 사실상 반칙", "숟가락이 안 멈추는 맛", "한입에 무장해제"
 7) 감성 한 줄 — 기분·순간을 건드림: "월요일을 버티게 하는 맛", "겨울이 기다려지는 국물", "어른의 소울푸드"
+8) 가성비 충격 — 실제 가격으로 세게: "단돈 7,500원에 이 비주얼", "만원도 안 되는 한 상"
+   ⚠️ 위에 착한가격 실데이터가 있을 때만. 가격 숫자는 그 데이터의 숫자 그대로.
 
 규칙:
 - 6~18자. 딱 한 줄. 짧을수록 좋다.
@@ -158,7 +167,7 @@ ${opts.menu ? `대표 메뉴: ${opts.menu}` : ""}
   const BAD_ENDING = /(습니다|합니다|입니다|어요|아요|해요|예요|세요|네요|겁니다|됩니다)\s*[.!?]?$/;
   // 훅에 쓰인 숫자는 실제 데이터(설명·메뉴·상호명)에 있는 것만 허용.
   // 실측: 숫자 패턴을 지정받으면 예시의 "200그릇"을 그대로 베껴 없는 숫자를 지어냈다.
-  const factText = `${spot.overview ?? ""} ${opts.menu ?? ""} ${spot.name}`;
+  const factText = `${spot.overview ?? ""} ${opts.menu ?? ""} ${spot.name} ${gp ? `${gp.price} ${gp.price.toLocaleString()}` : ""}`;
   const numbersOk = (line: string) =>
     (line.match(/\d+/g) ?? []).every((n) => factText.includes(n));
   for (let attempt = 0; attempt < 2; attempt++) {
