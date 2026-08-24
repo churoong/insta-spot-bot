@@ -7,6 +7,7 @@ import { searchMapUrl } from "@/lib/kakao";
 import { blogBuzz, buzzQuery } from "@/lib/naver";
 import { fetchSeoulCandidates, seoulAvailable } from "@/lib/seoulfood";
 import { pickFoodImages } from "@/lib/vision";
+import { markGoodPrice } from "@/lib/goodprice";
 
 // 캡션 생성 + 비전 사진 선별이 60초를 넘을 수 있음
 export const maxDuration = 300;
@@ -28,6 +29,15 @@ export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
   if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  // 번들 파일 추적 검증용 진단 (배포 후 ?diag=1 — 데이터 파일이 실제로 번들에 있는지)
+  if (req.nextUrl.searchParams.get("diag") === "1") {
+    const { fetchSeoulCandidates } = await import("@/lib/seoulfood");
+    const seoulPool = (await fetchSeoulCandidates(9999)).length;
+    const gpProbe: any = { name: "돈까스보라", address: "서울특별시 종로구 대학로5길 5" };
+    markGoodPrice([gpProbe]);
+    return NextResponse.json({ seoulPool, goodpriceOk: Boolean(gpProbe.goodPrice) });
   }
 
   try {
@@ -85,7 +95,17 @@ export async function GET(req: NextRequest) {
 
           if (!isSeoul) s.overview = await fetchOverview(s.contentId);
           const info = isSeoul ? { menu: "", hours: "" } : await fetchFoodInfo(s.contentId);
-          const cap = await generateCaption(s, { menu: info.menu, hours: info.hours });
+          // 착한가격업소면 캡션 첫 훅과 정보 블록에 반영 (가격은 TourAPI에 없는 팩트)
+          markGoodPrice([s as any]);
+          const gp = (s as any).goodPrice as { menu: string; price: number } | undefined;
+          const cap = await generateCaption(s, {
+            menu: info.menu,
+            hours: info.hours,
+            goodPrice: gp,
+            featuredBy: gp
+              ? `정부가 지정한 착한가격업소${gp.price ? `(${gp.menu} ${gp.price.toLocaleString()}원)` : ""}`
+              : undefined,
+          });
           if (!cap) {
             // 캡션 실패 원인은 다양(AI 한도·규칙 위반 등). 한 곳 실패로 포기하지 않고
             // 다음 후보를 시도하되, 연속 실패가 많으면 AI 문제로 보고 중단한다.

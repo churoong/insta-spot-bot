@@ -22,6 +22,8 @@ export interface CaptionOpts {
   menu?: string;
   /** 영업시간 */
   hours?: string;
+  /** 착한가격업소 정보 (정부 지정 — 정보 블록에 메뉴·가격 표기) */
+  goodPrice?: { menu: string; price: number };
 }
 
 /**
@@ -94,6 +96,9 @@ ${persona.captionStyle.map((s: string) => `- ${s}`).join("\n")}
     `📍 ${name}${regionText ? ` (${regionText})` : ""}`,
     opts.menu ? `📋 대표 메뉴 · ${opts.menu}` : "",
     opts.hours ? `⏰ ${opts.hours}` : "",
+    opts.goodPrice
+      ? `💰 정부 지정 착한가격업소${opts.goodPrice.price ? ` · ${opts.goodPrice.menu} ${opts.goodPrice.price.toLocaleString()}원` : ""}`
+      : "",
   ].filter(Boolean);
   const infoBlock = `${infoLines.join("\n")}\n\n`;
 
