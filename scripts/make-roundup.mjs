@@ -543,8 +543,11 @@ JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개
 
     // 표지 문구는 개조식(명사 종결) 항목 목록. 문자열로 오면 문장부호로 쪼개 항목화한다.
     const trimPhrase = (v) => {
-      const t = String(v ?? "").trim().replace(/[.·]+$/, "");
-      return [...t].length <= 22 ? t : [...t].slice(0, 22).join("").replace(/\s*\S*$/, "");
+      let t = String(v ?? "").trim().replace(/[.·]+$/, "");
+      if ([...t].length > 20) t = [...t].slice(0, 20).join("").replace(/\s*\S*$/, "");
+      // 잘린 자리(또는 원문)에 조사가 남으면 미완성 문장처럼 보인다 — 꼬리 조사 제거
+      // (실측 감사: "정성스러운 육수의", "넓은 주차 공간과", "삶아내는 쫄깃")
+      return t.replace(/(의|과|와|은|는|이|가|을|를|에|로|도)$/, "").trim();
     };
     const toLines = (v) => {
       const raw = Array.isArray(v) ? v : String(v ?? "").split(/(?<=[.!?])\s+|\s*[·|]\s*/);
@@ -776,7 +779,8 @@ async function composeHeroCover(theme, places, bgUrl = null) {
   // 제목 덩어리를 4:5 화면 한가운데에 둔다 (윗줄 + 음식명 + 배지)
   const BLOCK = 46 + ms + 20 + 84;
   const bs = CT + Math.round((CH - BLOCK) / 2);
-  const regions = places.map((x) => x.region.split(" ")[1] || x.region).join("  ·  ");
+  // "동·서" 같은 단독 구 이름은 어느 도시인지 모호하다 — 전체 지역명("인천 동")으로
+  const regions = [...new Set(places.map((x) => x.region))].join(" · ");
 
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -902,8 +906,12 @@ async function composeRankCard(sharp, place, rank) {
   const bg = await bgFrame(sharp, place.imageUrl, 0.62, 0);
   const nameLines = wrapLines(place.name, 11, 2);
   const nameSize = nameLines.length === 2 ? 78 : 92;
+  const clip = (l) => {
+    let t = [...l].length > 18 ? [...l].slice(0, 18).join("").replace(/s*S*$/, "") : l;
+    return t.replace(/(의|과|와|은|는|이|가|을|를|에|로|도)$/, "").trim(); // 꼬리 조사 제거
+  };
   const descLines = place.descLines?.length
-    ? place.descLines.slice(0, 2).map((l) => ([...l].length > 16 ? [...l].slice(0, 16).join("") : l))
+    ? place.descLines.slice(0, 2).map(clip)
     : wrapLines(place.desc || "", 16, 2);
   const boxTop = RH - 760;
   const svg = Buffer.from(
