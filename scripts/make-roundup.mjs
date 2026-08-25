@@ -1338,6 +1338,7 @@ async function main() {
   const cards = []; // countdown에서 쓸 카드 파일들
   let coverStyle = null; // grid 계열에서 쓴 표지 스타일 (성과 비교용)
   let pkBg = null; // 포토코리아 배경 (쓰면 캡션에 출처표시 의무)
+  let heroSecondCover = null; // hero 2컷째(그리드) — 히어로 단독은 정보가 없어서
   const narration = []; // 카드와 1:1 대응하는 나레이션 문장
   let reelCover = null;
   if (STYLE === "countdown") {
@@ -1394,10 +1395,14 @@ async function main() {
     // 표지 배경은 포토코리아 전문가 컷 우선 (공공누리 1유형 — 캡션에 크레딧 필수)
     pkBg = await photoKoreaPhoto(theme.keyword);
     if (pkBg) console.log(`포토코리아 배경: ${pkBg.title}${pkBg.photographer ? " ⓒ" + pkBg.photographer : ""}`);
-    reelCover =
-      coverStyle === "hero"
-        ? await composeHeroCover(theme, places, pkBg?.url)
-        : await composeReelCover(theme, places, coverStyle === "dark", pkBg?.url);
+    if (coverStyle === "hero") {
+      // 히어로 단독은 "표지만 나오고 식당 영상이 없다"(실측 8/24 감자탕 피드백).
+      // 히어로 2.5초 → 6칸 그리드 5.5초 2컷으로 임팩트와 정보를 둘 다 가져간다.
+      reelCover = await composeHeroCover(theme, places, pkBg?.url);
+      heroSecondCover = await composeReelCover(theme, places, false, pkBg?.url);
+    } else {
+      reelCover = await composeReelCover(theme, places, coverStyle === "dark", pkBg?.url);
+    }
   }
 
   if (DRY) {
@@ -1544,14 +1549,30 @@ async function main() {
   } else {
     // 리스트 표지 → 8초 고정 세로 릴스 (기존 모음집).
     // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
-    // 사진 한 장을 그대로 보여주는 편이 낫다.
+    // hero는 표지 2.5초 + 그리드 5.5초 2컷 — 히어로 단독은 식당 정보가 영상에
+    // 하나도 없어서 "표지만 나온다"는 피드백을 받았다(8/24 감자탕).
     const gridAudio = bgm
       ? ["-stream_loop", "-1", "-i", bgm.path]
       : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
+    let videoSrc = reelCover;
+    if (heroSecondCover) {
+      const c1 = path.join(TMP, "hero_c1.mp4");
+      const c2 = path.join(TMP, "hero_c2.mp4");
+      await ff(["-y", "-loop", "1", "-i", reelCover, "-vf", "fps=30,format=yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "2.5", c1]);
+      await ff(["-y", "-loop", "1", "-i", heroSecondCover, "-vf", "fps=30,format=yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "5.5", c2]);
+      const list = path.join(TMP, "hero_list.txt");
+      fs.writeFileSync(list, [c1, c2].map((c) => `file '${c}'`).join("\n"));
+      const joined = path.join(TMP, "hero_joined.mp4");
+      await ff(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", joined]);
+      videoSrc = joined;
+    }
     // ⚠️ "-t 8"을 입력 사이에 두면 다음 입력(BGM)에 붙어 버려, 무한 루프 BGM과
     //    -shortest가 만나 렌더가 영원히 안 끝난다(실측 5분 타임아웃). 출력 옵션으로.
     await ff([
-      "-y", "-loop", "1", "-i", reelCover,
+      "-y",
+      ...(heroSecondCover ? ["-i", videoSrc] : ["-loop", "1", "-i", videoSrc]),
       ...gridAudio,
       "-filter_complex",
       `[0:v]fps=30,format=yuv420p[v]${bgm ? ";[1:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,
