@@ -1280,11 +1280,29 @@ async function main() {
   const STYLE = process.env.ROUNDUP_STYLE === "countdown" ? "countdown" : "grid";
   const sharpMod = (await import("sharp")).default;
 
+  // 표지 3안 순환 결정을 먼저 한다 — hero는 카운트다운형(표지→6위→…→1위)으로
+  // 렌더하므로 랭킹·캡션 단계 전에 스타일을 알아야 한다.
+  // (히어로 단독 표지는 "식당 영상이 없다"(8/24 감자탕), 2컷 절충도 부족하다는
+  //  피드백으로 순차 공개형으로 확정 — 흑돼지 큐레이션과 같은 구성)
+  let coverStyle = null;
+  if (STYLE !== "countdown") {
+    const STYLES = ["classic", "hero", "dark"];
+    if (process.env.COVER_STYLE && STYLES.includes(process.env.COVER_STYLE)) {
+      coverStyle = process.env.COVER_STYLE; // 시안 확인용 수동 지정
+    } else {
+      const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
+      coverStyle = STYLES[(ci.rows.length ? Number(ci.rows[0].value) : 0) % STYLES.length];
+    }
+    console.log("표지 스타일:", coverStyle);
+  }
+  // 카운트다운형 렌더(순위 공개 시퀀스)를 타는 모드: 큐레이션 + hero 모음집
+  const cdMode = STYLE === "countdown" || coverStyle === "hero";
+
   // 순위 근거: 네이버 '블로그 후기 수'. 실제 방문·후기가 많을수록 인기 있는 집이라
   // 임의 순서가 아닌 근거 있는 랭킹이 된다. (데이터랩은 신규 등록이 막혀 사용 불가)
   // 키가 없거나 실패하면 수집 순서를 그대로 쓴다.
   let rankBasis = "";
-  if (STYLE === "countdown") {
+  if (cdMode) {
     try {
       // 3축 합성 랭킹: 블로그 후기 수 + 유튜브 상위 조회수 + 네이버 리뷰순 진입.
       // 유튜브·리뷰순 키가 없거나 실패하면 그 축만 0점 — 블로그 단독과 동등하게 동작.
@@ -1317,7 +1335,7 @@ async function main() {
   }
 
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
-  const ranked = STYLE === "countdown" ? [...places].reverse() : places;
+  const ranked = cdMode ? [...places].reverse() : places;
 
   // 에피소드 번호 = 지금까지 발행된 모음집·큐레이션 수 + 1 (시리즈 브랜딩)
   let ep = null;
@@ -1330,19 +1348,22 @@ async function main() {
 
   // ⚠️ 캡션은 순위가 확정된 뒤에 만든다(정렬 전에 만들면 번호가 영상과 어긋남).
   //    카운트다운은 영상과 같은 순서로 N위 → 1위 내림차순 표기.
-  const caption =
-    STYLE === "countdown"
-      ? buildCaption(theme, ranked, true, ep)
-      : buildCaption(theme, places, false, ep);
+  const caption = cdMode
+    ? buildCaption(theme, ranked, true, ep)
+    : buildCaption(theme, places, false, ep);
 
   const cards = []; // countdown에서 쓸 카드 파일들
-  let coverStyle = null; // grid 계열에서 쓴 표지 스타일 (성과 비교용)
   let pkBg = null; // 포토코리아 배경 (쓰면 캡션에 출처표시 의무)
-  let heroSecondCover = null; // hero 2컷째(그리드) — 히어로 단독은 정보가 없어서
   const narration = []; // 카드와 1:1 대응하는 나레이션 문장
   let reelCover = null;
-  if (STYLE === "countdown") {
+  if (cdMode) {
     const intro = path.join(TMP, "c_intro.jpg");
+    if (coverStyle === "hero") {
+      // hero 인트로 = 히어로 풀샷 표지 (포토코리아 우선)
+      pkBg = await photoKoreaPhoto(theme.keyword);
+      if (pkBg) console.log(`포토코리아 배경: ${pkBg.title}${pkBg.photographer ? " ⓒ" + pkBg.photographer : ""}`);
+      fs.copyFileSync(await composeHeroCover(theme, places, pkBg?.url), intro);
+    } else
     fs.writeFileSync(
       intro,
       await composeIntroCard(sharpMod, theme, places, theme.titleResolved, rankBasis)
@@ -1382,31 +1403,15 @@ async function main() {
     } catch { /* 아웃트로는 없어도 됨 */ }
     console.log(`카운트다운 카드 ${cards.length}장 생성`);
   } else {
-    // 표지 3안을 번갈아 발행하고 어느 쪽이 유입이 좋은지 나중에 조회수로 비교한다.
-    // 랜덤이 아니라 순환이라 같은 횟수만큼 노출된다(표본 수를 맞춰야 비교가 된다).
-    const STYLES = ["classic", "hero", "dark"];
-    if (process.env.COVER_STYLE && STYLES.includes(process.env.COVER_STYLE)) {
-      coverStyle = process.env.COVER_STYLE; // 시안 확인용 수동 지정
-    } else {
-      const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
-      coverStyle = STYLES[(ci.rows.length ? Number(ci.rows[0].value) : 0) % STYLES.length];
-    }
-    console.log("표지 스타일:", coverStyle);
-    // 표지 배경은 포토코리아 전문가 컷 우선 (공공누리 1유형 — 캡션에 크레딧 필수)
+    // classic·dark: 6칸 그리드 단일컷. 배경은 포토코리아 전문가 컷 우선
+    // (공공누리 1유형 — 캡션에 크레딧 필수). 스타일 결정은 위(main 초입)에서 완료.
     pkBg = await photoKoreaPhoto(theme.keyword);
     if (pkBg) console.log(`포토코리아 배경: ${pkBg.title}${pkBg.photographer ? " ⓒ" + pkBg.photographer : ""}`);
-    if (coverStyle === "hero") {
-      // 히어로 단독은 "표지만 나오고 식당 영상이 없다"(실측 8/24 감자탕 피드백).
-      // 히어로 2.5초 → 6칸 그리드 5.5초 2컷으로 임팩트와 정보를 둘 다 가져간다.
-      reelCover = await composeHeroCover(theme, places, pkBg?.url);
-      heroSecondCover = await composeReelCover(theme, places, false, pkBg?.url);
-    } else {
-      reelCover = await composeReelCover(theme, places, coverStyle === "dark", pkBg?.url);
-    }
+    reelCover = await composeReelCover(theme, places, coverStyle === "dark", pkBg?.url);
   }
 
   if (DRY) {
-    if (STYLE === "countdown") {
+    if (cdMode) {
       fs.copyFileSync(cards[0], "countdown-intro-preview.jpg");
       if (cards[1]) fs.copyFileSync(cards[1], "countdown-rank-preview.jpg");
       console.log("DRY — countdown-intro-preview.jpg / countdown-rank-preview.jpg 저장");
@@ -1459,7 +1464,7 @@ async function main() {
       p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
     });
 
-  if (STYLE === "countdown") {
+  if (cdMode) {
     // 카드들을 순서대로 이어붙임 (인트로 3초, 순위 카드 2.6초, 아웃트로 2.6초)
     // 나레이션 음성 — TTS는 릴스당 1회만 호출(무료 한도 보호). 실패하면 무음 진행.
     const persona = JSON.parse(
@@ -1554,25 +1559,10 @@ async function main() {
     const gridAudio = bgm
       ? ["-stream_loop", "-1", "-i", bgm.path]
       : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
-    let videoSrc = reelCover;
-    if (heroSecondCover) {
-      const c1 = path.join(TMP, "hero_c1.mp4");
-      const c2 = path.join(TMP, "hero_c2.mp4");
-      await ff(["-y", "-loop", "1", "-i", reelCover, "-vf", "fps=30,format=yuv420p",
-        "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "2.5", c1]);
-      await ff(["-y", "-loop", "1", "-i", heroSecondCover, "-vf", "fps=30,format=yuv420p",
-        "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "5.5", c2]);
-      const list = path.join(TMP, "hero_list.txt");
-      fs.writeFileSync(list, [c1, c2].map((c) => `file '${c}'`).join("\n"));
-      const joined = path.join(TMP, "hero_joined.mp4");
-      await ff(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", joined]);
-      videoSrc = joined;
-    }
     // ⚠️ "-t 8"을 입력 사이에 두면 다음 입력(BGM)에 붙어 버려, 무한 루프 BGM과
     //    -shortest가 만나 렌더가 영원히 안 끝난다(실측 5분 타임아웃). 출력 옵션으로.
     await ff([
-      "-y",
-      ...(heroSecondCover ? ["-i", videoSrc] : ["-loop", "1", "-i", videoSrc]),
+      "-y", "-loop", "1", "-i", reelCover,
       ...gridAudio,
       "-filter_complex",
       `[0:v]fps=30,format=yuv420p[v]${bgm ? ";[1:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,
@@ -1595,7 +1585,7 @@ ${bgm.attribution}`;
     reelUrl,
     finalCaption,
     igMusic
-      ? { audioId: igMusic.id, audioVolume: STYLE === "countdown" ? 30 : 100, videoVolume: 100 }
+      ? { audioId: igMusic.id, audioVolume: cdMode ? 30 : 100, videoVolume: 100 } // 나레이션 있는 형식은 음악을 낮게
       : null
   );
   console.log("✅ 모음집 릴스 발행:", mediaId);
