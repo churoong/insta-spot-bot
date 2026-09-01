@@ -280,31 +280,25 @@ async function main() {
   const { publishReelSmart } = await import("../lib/instagram.ts");
   await initDb();
 
-  // 발행 간격 가드 — GitHub Actions 스케줄은 자주 누락되므로(실측: 하루 4회 중 1회만
-  // 실행) 스케줄을 촘촘히 걸어두고, 최근에 이미 발행했으면 여기서 조용히 종료한다.
-  // 이러면 누락된 회차는 다음 스케줄이 자연히 커버하고 과다 발행도 막힌다.
-  //
-  // 1200분(20시간) = 하루 1개. 일반 릴스는 도달 105~144·시청 2초로 성과가 없어
-  // 모음집(8초, 완주율 94%) 쪽으로 비중을 옮겼다(2026-08).
+  // KST '오늘 1회' 가드 + 아침 발행 창(08~12시) — 이전의 20시간 롤링 간격 가드는
+  // 크론 지연과 결합하면 발행 시각이 날마다 표류했다(실측 8/27~9/1: 08시→13시→22시).
+  // 날짜 기준 가드는 표류하지 않고, 창 밖에 도착한 지연 런은 조용히 스킵돼
+  // 다음 슬롯(또는 다음 날)이 커버한다. 하루 1개 정책은 그대로.
   // category=릴스만 세는 이유: 모음집·큐레이션까지 함께 세면 저녁 모음집이
-  // 다음 날 아침 릴스를 막아 발행 시각이 계속 밀린다.
-  const gapMin = Number(process.env.MIN_GAP_MIN || 1200);
-  const recent = await db.execute({
-    sql: `SELECT created_at FROM posts
+  // 다음 날 아침 릴스를 막는다.
+  const force = process.env.MIN_GAP_MIN === "0" || process.env.QUIET_HOURS_OFF === "1"; // 수동 실행용
+  const today = await db.execute({
+    sql: `SELECT 1 FROM posts
           WHERE status IN ('published','publishing') AND category = '릴스'
-            AND created_at >= datetime('now', ?)
-          ORDER BY id DESC LIMIT 1`,
-    args: [`-${gapMin} minutes`],
+            AND date(created_at, '+9 hours') = date('now', '+9 hours') LIMIT 1`,
   });
-  if (recent.rows.length > 0) {
-    console.log(`⏭️ 최근 ${gapMin}분 내 발행됨 — 이번 회차 건너뜀`);
+  if (!force && today.rows.length > 0) {
+    console.log("⏭️ 오늘(KST) 이미 발행됨 — 이번 회차 건너뜀");
     return;
   }
-
-  // 심야(KST 00~07)에는 발행하지 않음
   const kstHour = (new Date().getUTCHours() + 9) % 24;
-  if (process.env.QUIET_HOURS_OFF !== "1" && kstHour < 8) {
-    console.log(`⏭️ KST 심야(${kstHour}시) — 발행 건너뜀`);
+  if (!force && (kstHour < 8 || kstHour >= 12)) {
+    console.log(`⏭️ 아침 발행 창(KST 08~12시) 밖 — 현재 ${kstHour}시, 건너뜀`);
     return;
   }
 

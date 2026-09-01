@@ -4,39 +4,57 @@ on:
   workflow_dispatch: # 수동 실행 (테스트용)
     inputs:
       force:
-        description: "발행 간격(150분) 무시하고 즉시 발행"
+        description: "발행 창·하루 1회 가드 무시하고 즉시 발행"
         type: boolean
         default: false
   schedule:
-    # GitHub Actions 스케줄은 자주 누락된다(실측: 하루 4회 중 1회만 실행).
-    # 그래서 촘촘히 걸어두고 — 스크립트가 MIN_GAP_MIN(기본 150분) 내 발행이 있으면
-    # 스스로 건너뛰므로 과다 발행은 없고, 누락된 회차는 다음 스케줄이 커버한다.
-    # KST 활동 시간대(08~23시)에만 시도. 심야는 스크립트가 추가로 막는다.
-    - cron: "13 23,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14 * * *" # 매시 KST 08:13~23:13
+    # 아침(KST 08~12시) 창에만 발행 — 스크립트가 창 밖·중복 런을 스스로 건너뛴다.
+    # 크론 지연 실측(2026-08-19~09-01): 정상기 20~60분, 혼잡기 4~11.5시간 + 슬롯
+    # 드롭(하루 16슬롯 중 2~4개만 실행, UTC 00:13은 2주간 0회). 그래서 30분 간격으로
+    # 촘촘히 깔아 "그날 처음 실행되는 창 안 슬롯"이 발행을 차지하게 한다.
+    - cron: "13,43 23 * * *" # KST 08:13·08:43 목표
+    - cron: "13,43 0,1,2 * * *" # KST 09:13~11:43 (지연·드롭 대비, 창 12시 전 마감)
 
 jobs:
   reel:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # 스크립트에도 같은 게이트가 있지만, 여기서 미리 자르면 창 밖 런이
+      # npm ci·ffmpeg 설치 없이 수 초 만에 끝나 무료 분당량을 아낀다 (프라이빗 저장소).
+      - name: 발행 창 게이트 (KST 08~12시, 수동 실행은 통과)
+        id: gate
+        run: |
+          H=$(TZ=Asia/Seoul date +%-H)
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$H" -ge 8 ] && [ "$H" -lt 12 ]; }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "발행 창 밖(KST ${H}시) — 스킵. 창 안 도착 슬롯이 발행 담당."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
 
       - name: ffmpeg + 한글 폰트 설치
+        if: steps.gate.outputs.go == '1'
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-nanum fonts-noto-cjk
 
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
         with:
           node-version: 22
 
       - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
         run: npm ci
 
       - name: 릴스 생성·발행
+        if: steps.gate.outputs.go == '1'
         run: npx tsx scripts/make-reel.mjs
         env:
-          # force 입력 시 간격 가드 해제(테스트용). 빈 값이면 스크립트 기본 150분 적용.
+          # force 입력 시 발행 창·하루 1회 가드 해제(테스트용). "0"이 오버라이드 신호.
           MIN_GAP_MIN: ${{ inputs.force && '0' || '' }}
           TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

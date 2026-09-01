@@ -31,6 +31,15 @@ async function main() {
     }
   }
 
+  // 하루 1회(KST) 가드 — 지연 대비로 크론을 여러 슬롯에 깔면서(2026-09-02) 같은 날
+  // 두 슬롯이 발행 창 안에 도착할 수 있게 됐다. 스토리는 하루 1개만.
+  const kstToday = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const last = await db.execute("SELECT value FROM config WHERE key='story_last_kst_date'");
+  if (!DRY && last.rows.length > 0 && String(last.rows[0].value) === kstToday) {
+    console.log("오늘(KST) 스토리 이미 발행됨 — 건너뜀");
+    return;
+  }
+
   // 20시간 이상 지난 미공개 퀴즈 게시물 중 반응 1위
   const r = await db.execute(
     `SELECT id, place_name, address, category, image_url, image_urls, like_count, comment_count
@@ -88,6 +97,10 @@ async function main() {
   console.log("✅ 정답 공개 스토리 발행:", storyId);
 
   await db.execute({ sql: "UPDATE posts SET revealed = 1 WHERE id = ?", args: [p.id] });
+  await db.execute({
+    sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('story_last_kst_date', ?, datetime('now'))",
+    args: [kstToday],
+  });
   console.log("완료:", p.place_name);
 }
 

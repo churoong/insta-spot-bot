@@ -3,34 +3,54 @@ name: 모음집 자동 발행
 on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
-    # 매주 화·목·토. GitHub Actions 무료 스케줄러는 정시(특히 :00)에 혼잡해 수십 분~수 시간 지연됨.
-    # → 어중간한 분 + 이르게 예약해 지연돼도 저녁 시간대(18~20시 KST)에 올라가도록 함.
-    # GitHub 크론이 수 시간씩 밀려 심야 발행되던 문제(실측 8/27~31) — 촘촘히 걸고
-    # 스크립트의 하루 1회 가드가 중복을 막는다. 첫 성공 회차가 그날 발행을 차지.
-    - cron: "23 9 * * *"  # KST 18:23 목표
-    - cron: "23 10 * * *" # KST 19:23 (1차 누락 대비)
-    - cron: "23 11 * * *" # KST 20:23 (2차 누락 대비)
+    # 크론 지연 실측(2026-08-19~09-01): 정상기 22~44분, 혼잡기 4~11.6시간(중앙값 ~5h).
+    # 게다가 지연이 크론 간격을 넘으면 GitHub이 뒤 슬롯을 드롭해 3중 크론이 무력화됐다.
+    # → 목표(KST 18:23)보다 최대 5시간 앞서 1시간 간격으로 깔고, 아래 게이트가
+    #   "KST 18~22시 창 안에 도착한 첫 런"만 통과시킨다. 정상기엔 9:23 슬롯이,
+    #   혼잡기엔 이른 슬롯의 지연 도착분이 발행을 담당. 하루 1회 가드는 스크립트에.
+    - cron: "23 4 * * *"  # KST 13:23 발화 → 5h 지연 시 18:23 도착
+    - cron: "23 5 * * *"
+    - cron: "23 6 * * *"
+    - cron: "23 7 * * *"
+    - cron: "23 8 * * *"
+    - cron: "23 9 * * *"  # 정상기 담당 (KST 18:23 목표)
+    - cron: "23 10 * * *" # 마지막 안전망 (KST 19:23 목표)
 
 jobs:
   roundup:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: 발행 창 게이트 (KST 18~22시, 수동 실행은 통과)
+        id: gate
+        run: |
+          H=$(TZ=Asia/Seoul date +%-H)
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$H" -ge 18 ] && [ "$H" -lt 22 ]; }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "발행 창 밖(KST ${H}시) — 스킵. 창 안에 도착하는 다른 슬롯이 발행 담당."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
 
       - name: 폰트·ffmpeg 설치 (인포그래픽·표지 릴스 렌더링용)
+        if: steps.gate.outputs.go == '1'
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk fonts-nanum fonts-noto-color-emoji ffmpeg
 
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
         with:
           node-version: 22
 
       - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
         run: npm ci
 
       - name: 모음집 생성·발행
+        if: steps.gate.outputs.go == '1'
         run: npx tsx scripts/make-roundup.mjs
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}

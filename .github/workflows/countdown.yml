@@ -3,33 +3,49 @@ name: 큐레이션(카운트다운) 자동 발행
 on:
   workflow_dispatch: {} # 수동 실행 (테스트용)
   schedule:
-    # 매주 월·금. GitHub Actions 무료 스케줄러는 정시(특히 :00)에 혼잡해 수십 분~수 시간 지연됨.
-    # → 어중간한 분 + 이르게 예약해 지연돼도 저녁 시간대(18~20시 KST)에 올라가도록 함.
-    # 크론 지연 대비 3중 — 스크립트의 하루 1회 가드가 중복 발행을 막는다
-    - cron: "41 3 * * 1,5" # KST 12:41 목표 (월·금)
-    - cron: "41 4 * * 1,5" # KST 13:41
-    - cron: "41 5 * * 1,5" # KST 14:41
+    # 월·금 KST 12:41 목표. 크론 지연 실측(8/27~9/1): 4~10시간 + 슬롯 드롭(3중 크론이
+    # 하루 1런만 발화). → 목표보다 최대 5시간 앞서 촘촘히 깔고, 게이트가 "KST 월·금
+    # 12~16시 창 안 도착 런"만 통과시킨다. 하루 1회 가드는 스크립트에.
+    - cron: "41 22,23 * * 0,4" # KST 월·금 07:41·08:41 발화 → 4~8h 지연분이 창 도착
+    - cron: "41 0,1,2 * * 1,5" # KST 월·금 09:41~11:41
+    - cron: "41 3 * * 1,5"     # 정상기 담당 (KST 12:41 목표)
+    - cron: "41 4,5,6 * * 1,5" # KST 13:41~15:41 안전망
 
 jobs:
   countdown:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: 발행 창 게이트 (KST 월·금 12~16시, 수동 실행은 통과)
+        id: gate
+        run: |
+          H=$(TZ=Asia/Seoul date +%-H); D=$(TZ=Asia/Seoul date +%u)
+          if [ "${{ github.event_name }}" != "schedule" ] || { { [ "$D" = "1" ] || [ "$D" = "5" ]; } && [ "$H" -ge 12 ] && [ "$H" -lt 16 ]; }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "발행 창 밖(KST 요일$D ${H}시) — 스킵. 창 안 도착 슬롯이 발행 담당."
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
 
       - name: 폰트·ffmpeg 설치 (인포그래픽·표지 릴스 렌더링용)
+        if: steps.gate.outputs.go == '1'
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk fonts-nanum fonts-noto-color-emoji ffmpeg
 
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
         with:
           node-version: 22
 
       - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
         run: npm ci
 
       - name: 모음집 생성·발행
+        if: steps.gate.outputs.go == '1'
         run: npx tsx scripts/make-roundup.mjs
         env:
           ROUNDUP_STYLE: countdown

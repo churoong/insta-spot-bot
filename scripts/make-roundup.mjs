@@ -1290,8 +1290,9 @@ async function main() {
 
   // 하루 1회 가드 — GitHub 크론이 5~11시간씩 밀려(실측 8/27~31) 저녁 발행이
   // 심야로 밀렸다. 릴스처럼 크론을 촘촘히 걸고, 오늘 이미 발행했으면 조용히 종료.
-  // (같은 형식만 검사 — 정오 큐레이션이 저녁 모음집을 막으면 안 된다)
-  {
+  // (같은 형식만 검사 — 정오 큐레이션이 저녁 모음집을 막으면 안 된다. DRY는 발행이
+  //  없으니 가드 대상이 아님 — 로컬 미리보기 검증이 실발행에 막히면 안 된다)
+  if (!DRY) {
     const prefix =
       process.env.ROUNDUP_STYLE === "countdown" ? "countdown-%"
       : process.env.ROUNDUP_STYLE === "carousel" ? "carousel-%"
@@ -1545,10 +1546,11 @@ async function main() {
     }
     const outro = path.join(TMP, "c_outro.jpg");
     try {
-      // 아웃트로 대신 도장깨기 체크리스트 — 저장할 이유를 마지막에 시각화
-      fs.copyFileSync(await composeChecklistCard(sharpMod, theme, ranked), outro);
+      // 체크리스트 카드는 릴스에서 제외 (사용자 피드백 2026-09-02 "너무 이상하다")
+      // — 캐러셀 마지막 장에만 유지. 릴스 아웃트로는 기존 카드로.
+      fs.writeFileSync(outro, await composeOutroCard(sharpMod, places, theme.titleResolved));
       cards.push(outro);
-      narration.push("오늘 브리핑 끝. 저장해두고 도장 깨세요");
+      narration.push("오늘 브리핑 끝. 저장해두고 하나씩 가보세요");
     } catch { /* 아웃트로는 없어도 됨 */ }
     console.log(`카운트다운 카드 ${cards.length}장 생성`);
   } else {
@@ -1760,26 +1762,17 @@ async function main() {
     }
     console.log(`카운트다운 릴스 렌더 완료 (${clips.length}컷${voiceWav ? ", 음성 포함" : ""})`);
   } else {
-    // 리스트 표지 5.5초 + 도장깨기 체크리스트 2.5초 (정지컷 2장, 줌인 없음 유지).
-    // 체크리스트가 "저장할 이유"를 마지막에 못박는다 — 저장이 이 계정의 승부 지표.
-    const checklist = await composeChecklistCard(sharpMod, theme, places);
-    const g1 = path.join(TMP, "g_c1.mp4");
-    const g2 = path.join(TMP, "g_c2.mp4");
-    await ff(["-y", "-loop", "1", "-i", reelCover, "-vf", "fps=30,format=yuv420p",
-      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "5.5", g1]);
-    await ff(["-y", "-loop", "1", "-i", checklist, "-vf", "fps=30,format=yuv420p",
-      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "2.5", g2]);
-    const glist = path.join(TMP, "g_list.txt");
-    fs.writeFileSync(glist, [g1, g2].map((c) => `file '${c}'`).join("\n"));
-    const gjoined = path.join(TMP, "g_joined.mp4");
-    await ff(["-y", "-f", "concat", "-safe", "0", "-i", glist, "-c", "copy", gjoined]);
+    // 리스트 표지 → 8초 고정 세로 릴스 (기존 모음집).
+    // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
+    // 체크리스트 2컷은 사용자 피드백("너무 이상하다", 2026-09-02)으로 제외 —
+    // 체크리스트 카드는 캐러셀 마지막 장에만 남는다.
     const gridAudio = bgm
       ? ["-stream_loop", "-1", "-i", bgm.path]
       : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
     // ⚠️ "-t 8"을 입력 사이에 두면 다음 입력(BGM)에 붙어 버려, 무한 루프 BGM과
     //    -shortest가 만나 렌더가 영원히 안 끝난다(실측 5분 타임아웃). 출력 옵션으로.
     await ff([
-      "-y", "-i", gjoined,
+      "-y", "-loop", "1", "-i", reelCover,
       ...gridAudio,
       "-filter_complex",
       `[0:v]fps=30,format=yuv420p[v]${bgm ? ";[1:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,
