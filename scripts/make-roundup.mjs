@@ -1302,7 +1302,10 @@ async function main() {
   //  피드백으로 순차 공개형으로 확정 — 흑돼지 큐레이션과 같은 구성)
   let coverStyle = null;
   if (STYLE !== "countdown") {
-    const STYLES = ["classic", "hero", "dark"];
+    // 표지 실험 판정(2026-09-01, 스타일별 4건): classic 평균 2,205(돌파 3/4) vs
+    // dark 210(0/4) vs hero 142(0/2) — 검증된 승자 classic에 몰고 hero만 주 1회
+    // 실험 유지, dark는 제외. (되돌리려면 배열만 바꾸면 됨)
+    const STYLES = ["classic", "classic", "classic", "hero", "classic", "classic", "classic"];
     if (process.env.COVER_STYLE && STYLES.includes(process.env.COVER_STYLE)) {
       coverStyle = process.env.COVER_STYLE; // 시안 확인용 수동 지정
     } else {
@@ -1614,7 +1617,7 @@ ${bgm.attribution}`;
   // (수동 지정 COVER_STYLE로 돌린 회차는 표본을 흔들지 않도록 포인터를 건드리지 않는다)
   if (coverStyle && !process.env.COVER_STYLE) {
     const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
-    const next = ((ci.rows.length ? Number(ci.rows[0].value) : 0) + 1) % 3;
+    const next = ((ci.rows.length ? Number(ci.rows[0].value) : 0) + 1) % 7; // classic 6 : hero 1 주기
     await db.execute({
       sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
       args: ["cover_idx", String(next)],
