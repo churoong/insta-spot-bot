@@ -1173,6 +1173,22 @@ async function main() {
     }
   }
 
+  // 하루 1회 가드 — GitHub 크론이 5~11시간씩 밀려(실측 8/27~31) 저녁 발행이
+  // 심야로 밀렸다. 릴스처럼 크론을 촘촘히 걸고, 오늘 이미 발행했으면 조용히 종료.
+  // (같은 형식만 검사 — 정오 큐레이션이 저녁 모음집을 막으면 안 된다)
+  {
+    const prefix = process.env.ROUNDUP_STYLE === "countdown" ? "countdown-%" : "roundup-%";
+    const today = await db.execute({
+      sql: `SELECT 1 FROM posts WHERE content_id LIKE ? AND status IN (published,publishing)
+              AND date(created_at) = date(now) LIMIT 1`,
+      args: [prefix],
+    });
+    if (today.rows.length) {
+      console.log("오늘 이미 발행됨 — 이번 회차 건너뜀");
+      return;
+    }
+  }
+
   // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
   // 모음집(grid)과 큐레이션(countdown)은 포인터를 따로 둬 같은 테마가 겹치지 않게 함
   const IDX_KEY = process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx" : "roundup_idx";
