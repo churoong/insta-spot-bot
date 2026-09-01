@@ -287,11 +287,11 @@ async function main() {
   // category=릴스만 세는 이유: 모음집·큐레이션까지 함께 세면 저녁 모음집이
   // 다음 날 아침 릴스를 막는다.
   const force = process.env.MIN_GAP_MIN === "0" || process.env.QUIET_HOURS_OFF === "1"; // 수동 실행용
-  const today = await db.execute({
-    sql: `SELECT 1 FROM posts
-          WHERE status IN ('published','publishing') AND category = '릴스'
-            AND date(created_at, '+9 hours') = date('now', '+9 hours') LIMIT 1`,
-  });
+  const today = await db.execute(
+    `SELECT 1 FROM posts
+     WHERE status IN ('published','publishing') AND category = '릴스'
+       AND date(created_at, '+9 hours') = date('now', '+9 hours') LIMIT 1`
+  );
   if (!force && today.rows.length > 0) {
     console.log("⏭️ 오늘(KST) 이미 발행됨 — 이번 회차 건너뜀");
     return;
