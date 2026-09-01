@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { buildDmText, buildReplyText } from "@/lib/caption";
+import { buildDmText, buildReplyText, buildMapListDm } from "@/lib/caption";
 import { sendPrivateReply, replyToComment } from "@/lib/instagram";
 import { fetchNearby } from "@/lib/tourapi";
 
@@ -70,7 +70,9 @@ export async function POST(req: NextRequest) {
       log(`text="${text}" media=${mediaId} from=${fromId}/@${username}`);
 
       if (fromId === process.env.IG_USER_ID) { log("skip: 내 계정 댓글"); continue; }
-      if (!text.includes(keyword)) {
+      // 모음집 지도 요청 — "지도" 키워드는 리스트 전체+지도 링크 DM (팔로우 전환 장치)
+      const isMapReq = text.includes("지도");
+      if (!text.includes(keyword) && !isMapReq) {
         // 키워드가 아닌 일반 댓글은 "팔로워 추천 모음"으로 수집 (모음집 후보 발굴용)
         if (text.trim().length >= 2) {
           await db
@@ -99,11 +101,18 @@ export async function POST(req: NextRequest) {
       if (post.rows.length === 0) { log(`skip: 게시물 못찾음(media=${mediaId})`); continue; }
 
       try {
-        // 근처 추천 2곳 (좌표 있을 때만, 실패해도 DM은 발송)
         const p = post.rows[0] as any;
-        const nearby =
-          p.mapx && p.mapy ? await fetchNearby(String(p.mapx), String(p.mapy), String(p.place_name)) : [];
-        await sendPrivateReply(commentId, buildDmText(p, nearby));
+        let dmText: string;
+        if (isMapReq && String(p.category) === "모음집") {
+          // 모음집의 address 컬럼에는 "N. 상호 — 주소" 줄들이 저장돼 있다
+          dmText = buildMapListDm(String(p.place_name), String(p.address ?? ""));
+        } else {
+          // 근처 추천 2곳 (좌표 있을 때만, 실패해도 DM은 발송)
+          const nearby =
+            p.mapx && p.mapy ? await fetchNearby(String(p.mapx), String(p.mapy), String(p.place_name)) : [];
+          dmText = buildDmText(p, nearby);
+        }
+        await sendPrivateReply(commentId, dmText);
         await db.execute({
           sql: "INSERT INTO dm_log (comment_id, ig_media_id, username) VALUES (?, ?, ?)",
           args: [commentId, mediaId, username],

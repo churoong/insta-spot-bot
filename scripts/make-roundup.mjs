@@ -711,6 +711,12 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
       <text x="${CX + IN + 36}" y="${CY + IN + 47}" font-family="${FONT}" font-size="31" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
       <rect x="${CX + IN + 10}" y="${base - 44}" width="${chipW}" height="34" rx="17" fill="#000000" fill-opacity="0.6"/>
       <text x="${CX + IN + 10 + chipW / 2}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="700" fill="#ffffff" text-anchor="middle">📍 ${esc(p.region)}</text>
+      ${p.buzz || p.ytViews ? (() => {
+        const t = [p.buzz ? `후기 ${fmtK(p.buzz)}` : "", p.ytViews ? `YT ${fmtK(p.ytViews)}` : ""].filter(Boolean).join("·");
+        const w = t.length * 12 + 34;
+        return `<rect x="${CX + CARD_W - IN - w - 2}" y="${base - 44}" width="${w}" height="34" rx="17" fill="#000000" fill-opacity="0.62"/>
+      <text x="${CX + CARD_W - IN - w / 2 - 2}" y="${base - 20}" font-family="${FONT}" font-size="18" font-weight="700" fill="#ffe9a8" text-anchor="middle">🔎 ${esc(t)}</text>`;
+      })() : ""}
       ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : p.goodPrice ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#c8f3d4" fill-opacity="0.95"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#0d6b33" text-anchor="middle">착한가격</text>` : ""}
@@ -912,6 +918,52 @@ function buildPunchyTitle(theme, n) {
 // ===== 카운트다운 릴스용 카드 (한 곳씩 크게 공개 → 1위 보려고 끝까지 봄) =====
 
 const RW = 1080, RH = 1920;
+
+/**
+ * 도장깨기 체크리스트 카드 (1080x1920, 콘텐츠는 4:5 안전영역 안).
+ * 저장·재열람을 유도하는 마지막 카드 — "저장할 이유"를 체크박스로 시각화한다.
+ * (2026 트렌드: 저장·DM공유가 도달의 핵심 신호. 리스트형 저장 문화 정착)
+ */
+async function composeChecklistCard(sharp, theme, places) {
+  const W = 1080, H = 1920, CT = 285, CH = 1350;
+  const f = theme.food || theme.keyword;
+  const rowH = Math.min(150, Math.floor((CH - 420) / places.length));
+  const rows = places
+    .map((p, i) => {
+      const y = CT + 320 + i * rowH;
+      const nm = coverName(p.name);
+      return `
+      <rect x="90" y="${y}" width="64" height="64" rx="14" fill="none" stroke="#d92121" stroke-width="5"/>
+      <text x="186" y="${y + 46}" font-family="${FONT}" font-size="40" font-weight="800" fill="#2b1d18">${i + 1}. ${esc(nm)}</text>
+      <text x="${W - 90}" y="${y + 44}" font-family="${FONT}" font-size="28" font-weight="700" fill="#8a5a44" text-anchor="end">${esc(p.region)}</text>`;
+    })
+    .join("");
+  const svg = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <rect width="${W}" height="${H}" fill="#fdf8f3"/>
+      <rect x="0" y="0" width="${W}" height="${CT}" fill="#f3e8df"/>
+      <rect x="0" y="${CT + CH}" width="${W}" height="${H - CT - CH}" fill="#f3e8df"/>
+      <text x="${W / 2}" y="${CT + 120}" font-family="${FONT}" font-size="76" font-weight="900" fill="#b81414" text-anchor="middle">📌 도장깨기 리스트</text>
+      <text x="${W / 2}" y="${CT + 190}" font-family="${FONT}" font-size="40" font-weight="700" fill="#6b5348" text-anchor="middle">${esc(f)} 편 — 다녀온 곳을 체크하세요</text>
+      <line x1="90" y1="${CT + 232}" x2="${W - 90}" y2="${CT + 232}" stroke="#e3d3c8" stroke-width="3"/>
+      ${rows}
+      <text x="${W / 2}" y="${CT + CH - 96}" font-family="${FONT}" font-size="36" font-weight="800" fill="#2b1d18" text-anchor="middle">저장해두고 하나씩 ✔ 도장 깨기</text>
+      <text x="${W / 2}" y="${CT + CH - 40}" font-family="${FONT}" font-size="26" fill="#a08a7d" text-anchor="middle">전체 주소·지도는 캡션과 댓글 '지도'에서 · @${HANDLE}</text>
+    </svg>`
+  );
+  const out = path.join(TMP, "checklist.jpg");
+  await sharp(svg).jpeg({ quality: 90 }).toFile(out);
+  return out;
+}
+
+/** 수치 축약 — 2796→2.8천, 292000→29만 (데이터 배지용) */
+function fmtK(n) {
+  n = Number(n) || 0;
+  if (n >= 100000000) return (n / 100000000).toFixed(1).replace(/.0$/, "") + "억";
+  if (n >= 10000) return (n / 10000).toFixed(1).replace(/.0$/, "") + "만";
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/.0$/, "") + "천";
+  return String(n);
+}
 
 /** 텍스트를 지정 글자수로 줄바꿈 */
 function wrapLines(text, per, maxLines) {
@@ -1172,7 +1224,7 @@ function engagementLine(theme, count) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function buildCaption(theme, places, descending = false, ep = null) {
+function buildCaption(theme, places, descending = false, ep = null, basis = "") {
   // 공개형 — "어디야→DM" 유도 문구 없음. 참여(추천 댓글)·저장 유도만.
   // descending: 카운트다운 영상과 같은 순서(N위 → 1위)로 번호를 매긴다.
   const lines = places.map((p, i) => {
@@ -1198,12 +1250,20 @@ function buildCaption(theme, places, descending = false, ep = null) {
     .join(" ");
   // EP 넘버링(시리즈 브랜딩)과 다음 편 예고 — "다음 편을 놓치기 싫어서"가 팔로우의
   // 메커니즘. 단 "팔로우하면 공개" 같은 조건형은 참여 낚시로 강등되므로 예고만 한다.
+  // 저장 CTA는 TPO형·타깃 지정형 순환 — 저장·DM공유가 2026 도달의 핵심 신호.
+  const saveCta = [
+    `📌 나중에 못 찾지 않게 지금 저장해 두세요!`,
+    `📌 출장·여행 갈 때 꺼내볼 수 있게 저장해 두세요!`,
+    `📌 ${theme.keyword}에 진심인 친구에게 이 리스트를 보내주세요!`,
+  ][Math.floor(Math.random() * 3)];
   return (
     `🔥 ${ep ? `전국맛집로드 EP.${ep} | ` : ""}${theme.titleResolved || theme.title}\n\n` +
     `${lines.join("\n")}\n\n` +
     hundredLine +
-    `💬 ${engagementLine(theme, places.length)}\n\n` +
-    `📌 나중에 못 찾지 않게 지금 저장해 두세요!\n` +
+    (basis ? `🔎 선정 기준: ${basis} 실데이터 집계\n\n` : "") +
+    `💬 ${engagementLine(theme, places.length)}\n` +
+    `🗺 ${places.length}곳 지도 링크가 필요하면 댓글에 '지도'라고 남겨주세요\n\n` +
+    `${saveCta}\n` +
     `⏰ 내일 저녁 6시, 다음 편으로 이어집니다\n\n` +
     `${tags}\n\n📷 사진·정보 출처: 한국관광공사 TourAPI`
   );
@@ -1386,9 +1446,12 @@ async function main() {
   // 임의 순서가 아닌 근거 있는 랭킹이 된다. (데이터랩은 신규 등록이 막혀 사용 불가)
   // 키가 없거나 실패하면 수집 순서를 그대로 쓴다.
   let rankBasis = "";
-  if (cdMode) {
+  {
+    // "데이터 검증" 콘셉트(2026-09 트렌드 반영): 랭킹을 카운트다운뿐 아니라 grid·
+    // 캐러셀에도 적용 — 카드에 근거 수치(블로그·유튜브)를 배지로 노출하고 셀 순서도
+    // 인기순이 된다. 우리만 가진 4축 실데이터가 콘셉트 차별화의 핵심.
     try {
-      // 3축 합성 랭킹: 블로그 후기 수 + 유튜브 상위 조회수 + 네이버 리뷰순 진입.
+      // 4축 합성 랭킹: 블로그 후기 수 + 카페글 + 유튜브 상위 조회수 + 네이버 리뷰순 진입.
       // 유튜브·리뷰순 키가 없거나 실패하면 그 축만 0점 — 블로그 단독과 동등하게 동작.
       const { rankComposite } = await import("../lib/ranking.ts");
       const res = await rankComposite(places, theme.keyword);
@@ -1433,8 +1496,8 @@ async function main() {
   // ⚠️ 캡션은 순위가 확정된 뒤에 만든다(정렬 전에 만들면 번호가 영상과 어긋남).
   //    카운트다운은 영상과 같은 순서로 N위 → 1위 내림차순 표기.
   const caption = cdMode
-    ? buildCaption(theme, ranked, true, ep)
-    : buildCaption(theme, places, false, ep);
+    ? buildCaption(theme, ranked, true, ep, rankBasis)
+    : buildCaption(theme, places, false, ep, rankBasis);
 
   const cards = []; // countdown에서 쓸 카드 파일들
   let pkBg = null; // 포토코리아 배경 (쓰면 캡션에 출처표시 의무)
@@ -1456,7 +1519,8 @@ async function main() {
     // 컷 길이 = 나레이션 길이 비례. 인트로가 제목 전체(~30자)를 읽으면 첫 식당까지
     // 5초 가까이 걸린다("넘어가는 시간이 너무 길다" 피드백). 제목은 인트로 카드가
     // 이미 보여주므로 음성은 짧게 치고 바로 순위로 들어간다.
-    narration.push(`${theme.food || theme.keyword} 맛집 톱${ranked.length}, ${ranked.length}위부터 갑니다`);
+    // 시그니처 오프닝 — 목소리 캐릭터를 계정 자산화(뉴스 브리핑 포맷)
+    narration.push(`맛집 브리핑, ${theme.food || theme.keyword} 톱${ranked.length}. ${ranked.length}위부터 갑니다`);
 
     for (let i = 0; i < ranked.length; i++) {
       const rank = ranked.length - i; // N위 → 1위
@@ -1481,9 +1545,10 @@ async function main() {
     }
     const outro = path.join(TMP, "c_outro.jpg");
     try {
-      fs.writeFileSync(outro, await composeOutroCard(sharpMod, places, theme.titleResolved));
+      // 아웃트로 대신 도장깨기 체크리스트 — 저장할 이유를 마지막에 시각화
+      fs.copyFileSync(await composeChecklistCard(sharpMod, theme, ranked), outro);
       cards.push(outro);
-      narration.push("저장해두고 하나씩 가보세요");
+      narration.push("오늘 브리핑 끝. 저장해두고 도장 깨세요");
     } catch { /* 아웃트로는 없어도 됨 */ }
     console.log(`카운트다운 카드 ${cards.length}장 생성`);
   } else {
@@ -1554,6 +1619,15 @@ async function main() {
       }
     }
     if (imgs.length < 4) throw new Error("캐러셀 카드 부족");
+    // 마지막 장 = 도장깨기 체크리스트 (저장 유도, 4:5 크롭)
+    try {
+      const cl = await composeChecklistCard(sharpMod, theme, places);
+      const cl45 = path.join(TMP, "car_checklist.jpg");
+      await sharpMod(cl).extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 }).toFile(cl45);
+      imgs.push(cl45);
+    } catch (e) {
+      console.error("체크리스트 장 실패(제외):", String(e).slice(0, 80));
+    }
     const urls = [];
     for (const f of imgs) urls.push(await uploadPublic(f));
     let carCaption = caption;
@@ -1686,17 +1760,26 @@ async function main() {
     }
     console.log(`카운트다운 릴스 렌더 완료 (${clips.length}컷${voiceWav ? ", 음성 포함" : ""})`);
   } else {
-    // 리스트 표지 → 8초 고정 세로 릴스 (기존 모음집).
-    // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
-    // hero는 표지 2.5초 + 그리드 5.5초 2컷 — 히어로 단독은 식당 정보가 영상에
-    // 하나도 없어서 "표지만 나온다"는 피드백을 받았다(8/24 감자탕).
+    // 리스트 표지 5.5초 + 도장깨기 체크리스트 2.5초 (정지컷 2장, 줌인 없음 유지).
+    // 체크리스트가 "저장할 이유"를 마지막에 못박는다 — 저장이 이 계정의 승부 지표.
+    const checklist = await composeChecklistCard(sharpMod, theme, places);
+    const g1 = path.join(TMP, "g_c1.mp4");
+    const g2 = path.join(TMP, "g_c2.mp4");
+    await ff(["-y", "-loop", "1", "-i", reelCover, "-vf", "fps=30,format=yuv420p",
+      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "5.5", g1]);
+    await ff(["-y", "-loop", "1", "-i", checklist, "-vf", "fps=30,format=yuv420p",
+      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", "2.5", g2]);
+    const glist = path.join(TMP, "g_list.txt");
+    fs.writeFileSync(glist, [g1, g2].map((c) => `file '${c}'`).join("\n"));
+    const gjoined = path.join(TMP, "g_joined.mp4");
+    await ff(["-y", "-f", "concat", "-safe", "0", "-i", glist, "-c", "copy", gjoined]);
     const gridAudio = bgm
       ? ["-stream_loop", "-1", "-i", bgm.path]
       : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
     // ⚠️ "-t 8"을 입력 사이에 두면 다음 입력(BGM)에 붙어 버려, 무한 루프 BGM과
     //    -shortest가 만나 렌더가 영원히 안 끝난다(실측 5분 타임아웃). 출력 옵션으로.
     await ff([
-      "-y", "-loop", "1", "-i", reelCover,
+      "-y", "-i", gjoined,
       ...gridAudio,
       "-filter_complex",
       `[0:v]fps=30,format=yuv420p[v]${bgm ? ";[1:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,

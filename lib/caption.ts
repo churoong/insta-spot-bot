@@ -2,6 +2,7 @@ import type { Spot } from "./tourapi";
 import { FOOD_KEYWORDS } from "./tourapi";
 import { llmText } from "./llm";
 import persona from "@/data/persona.json";
+import { searchMapUrl } from "./kakao";
 
 const SOURCE_LINE = "📷 사진·정보 출처: 한국관광공사 TourAPI";
 
@@ -228,6 +229,31 @@ ${persona.narrationStyle.map((s: string) => `- ${s}`).join("\n")}
   if (lines.length < 2) return null;
   if (lines.some((l) => /[一-鿿]/.test(l))) return null; // 한자 혼입 시 음성 생략
   return lines.slice(0, want);
+}
+
+
+/**
+ * 모음집 "지도" 댓글용 DM — 리스트 전체 + 지도 링크 + 팔로우 전환 마무리.
+ * addressLines: posts.address에 저장된 "N. 상호 — 주소" 줄들.
+ */
+export function buildMapListDm(title: string, addressLines: string): string {
+  const rows = addressLines
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((l) => {
+      const m = l.match(/^\d+\.\s*(.+?)\s*—\s*(.+)$/);
+      if (!m) return l;
+      const name = m[1].trim();
+      const region = m[2].split(/\s+/).slice(0, 2).join(" ");
+      return `${l}\n   🗺 ${searchMapUrl(name, region)}`;
+    });
+  return (
+    `📌 ${title}\n전체 리스트와 지도 링크 보내드려요!\n\n` +
+    rows.join("\n") +
+    `\n\n다음 편 리스트도 받아보시려면 팔로우해 두세요 🙌`
+  );
 }
 
 /** 게시물명에서 음식 종류 추출 (SEO 본문·해시태그용) */
