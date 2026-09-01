@@ -1179,8 +1179,8 @@ async function main() {
   {
     const prefix = process.env.ROUNDUP_STYLE === "countdown" ? "countdown-%" : "roundup-%";
     const today = await db.execute({
-      sql: `SELECT 1 FROM posts WHERE content_id LIKE ? AND status IN (published,publishing)
-              AND date(created_at) = date(now) LIMIT 1`,
+      sql: `SELECT 1 FROM posts WHERE content_id LIKE ? AND status IN ('published','publishing')
+              AND date(created_at) = date('now') LIMIT 1`,
       args: [prefix],
     });
     if (today.rows.length) {
