@@ -40,6 +40,21 @@
     { "key": "gimbap", "food": "김밥", "keyword": "김밥", "region": "전국", "count": 6, "emoji": "🍙", "tags": [ "김밥", "김밥맛집", "분식맛집" ] },
     { "key": "daege", "food": "대게", "keyword": "대게", "region": "전국", "count": 6, "emoji": "🦀", "tags": [ "대게", "대게맛집", "영덕대게" ] },
     { "key": "baeksuk", "food": "백숙", "keyword": "백숙", "region": "전국", "count": 6, "emoji": "🍗", "tags": [ "백숙", "닭백숙", "보양식" ] },
-    { "key": "gogiguksu-jeju", "food": "고기국수", "keyword": "고기국수", "areaCode": 39, "region": "제주", "count": 6, "emoji": "🍜", "tags": [ "고기국수", "제주고기국수", "제주맛집" ] }
+    { "key": "gogiguksu-jeju", "food": "고기국수", "keyword": "고기국수", "areaCode": 39, "region": "제주", "count": 6, "emoji": "🍜", "tags": [ "고기국수", "제주고기국수", "제주맛집" ] },
+    { "key": "sundae-sudo", "food": "순대국", "keyword": "순대", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍲", "tags": [ "순대국", "순대국밥", "국밥맛집" ] },
+    { "key": "sundae-yeongnam", "food": "순대국", "keyword": "순대", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍲", "tags": [ "순대국", "순대국밥", "국밥맛집" ] },
+    { "key": "sundae-honam", "food": "순대국", "keyword": "순대", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍲", "tags": [ "순대국", "순대국밥", "국밥맛집" ] },
+    { "key": "haejangguk-sudo", "food": "해장국", "keyword": "해장국", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍲", "tags": [ "해장국", "해장맛집", "국물맛집" ] },
+    { "key": "haejangguk-yeongnam", "food": "해장국", "keyword": "해장국", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍲", "tags": [ "해장국", "해장맛집", "국물맛집" ] },
+    { "key": "haejangguk-honam", "food": "해장국", "keyword": "해장국", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍲", "tags": [ "해장국", "해장맛집", "국물맛집" ] },
+    { "key": "gukbap-sudo", "food": "국밥", "keyword": "국밥", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍲", "tags": [ "국밥", "국밥맛집", "해장맛집" ] },
+    { "key": "gukbap-yeongnam", "food": "국밥", "keyword": "국밥", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍲", "tags": [ "국밥", "국밥맛집", "해장맛집" ] },
+    { "key": "gukbap-honam", "food": "국밥", "keyword": "국밥", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍲", "tags": [ "국밥", "국밥맛집", "해장맛집" ] },
+    { "key": "naengmyeon-sudo", "food": "냉면", "keyword": "냉면", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍜", "tags": [ "냉면", "냉면맛집", "평양냉면" ] },
+    { "key": "naengmyeon-yeongnam", "food": "냉면", "keyword": "냉면", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍜", "tags": [ "냉면", "냉면맛집", "평양냉면" ] },
+    { "key": "naengmyeon-honam", "food": "냉면", "keyword": "냉면", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍜", "tags": [ "냉면", "냉면맛집", "평양냉면" ] },
+    { "key": "jjamppong-sudo", "food": "짬뽕", "keyword": "짬뽕", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍜", "tags": [ "짬뽕", "짬뽕맛집", "중식맛집" ] },
+    { "key": "jjamppong-yeongnam", "food": "짬뽕", "keyword": "짬뽕", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍜", "tags": [ "짬뽕", "짬뽕맛집", "중식맛집" ] },
+    { "key": "jjamppong-honam", "food": "짬뽕", "keyword": "짬뽕", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍜", "tags": [ "짬뽕", "짬뽕맛집", "중식맛집" ] }
   ]
 }

@@ -301,14 +301,24 @@ async function photoKoreaPhoto(keyword) {
 
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
 async function collectPlaces(theme, limit) {
+  // 지역 시리즈(2026-09): areaCodes 배열로 여러 시도를 묶는다 (영남=부산·대구·울산·경북·경남 등).
+  // TourAPI는 areaCode를 하나만 받아 코드별로 호출해 합친다.
+  const codes = theme.areaCodes ?? (theme.areaCode ? [theme.areaCode] : [null]);
   // 지역 한정 테마는 지자체 관광 API(사진 보장)를 풀 앞에 합류
-  const extra =
-    theme.areaCode === 6 ? await busanPlaces(theme.keyword)
-    : theme.areaCode === 39 ? await jejuPlaces(theme.keyword)
-    : [];
-  const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
-  if (theme.areaCode) params.areaCode = String(theme.areaCode);
-  let items = await tourCall("searchKeyword2", params);
+  const extra = [
+    ...(codes.includes(6) ? await busanPlaces(theme.keyword) : []),
+    ...(codes.includes(39) ? await jejuPlaces(theme.keyword) : []),
+  ];
+  let items = [];
+  for (const c of codes) {
+    const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
+    if (c) params.areaCode = String(c);
+    try {
+      items.push(...(await tourCall("searchKeyword2", params)));
+    } catch (e) {
+      console.error(`[collect] areaCode=${c} 실패(건너뜀):`, String(e).slice(0, 80));
+    }
+  }
   items = items.filter(
     (it) => it.firstimage && (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3")
   );
@@ -325,7 +335,7 @@ async function collectPlaces(theme, limit) {
   }
   // 시군구 편중 방지 상한. 지역 한정 테마(areaCode)는 시군구 수 자체가 적어
   // 2곳으로 묶으면 6곳을 채울 수 없다 (제주=제주시·서귀포시 2개뿐 → 최대 4곳).
-  const perRegion = theme.areaCode ? 4 : 2;
+  const perRegion = theme.areaCode || theme.areaCodes ? 4 : 2;
   for (const it of items.sort(() => Math.random() - 0.5)) {
     const rg = shortRegion(it.addr1);
     if ((seen[rg] ?? 0) >= perRegion) continue;
@@ -826,6 +836,46 @@ function coverName(raw) {
 }
 
 /**
+ * 캐러셀용 식당 상세 카드 (1080x1350, 4:5).
+ * 저장형 포맷 실험(2026-09): 저장이 이 계정의 승부 지표인데 캐러셀은 릴스보다
+ * 저장·재열람에 강하고 배포 풀도 별개다. classic 그리드의 검증된 문법
+ * (흰 카드·빨간 포인트·개조식 불릿)을 카드 한 장 규격으로 옮긴 것.
+ */
+async function composeCarouselCard(sharp, place, idx) {
+  const W = 1080, H = 1350, PH_H = 780;
+  const res = await fetch(place.imageUrl, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error("카드 사진 실패");
+  const photo = await sharp(Buffer.from(await res.arrayBuffer()))
+    .resize(W, PH_H, { fit: "cover", position: "attention" })
+    .modulate({ saturation: 1.08 })
+    .jpeg({ quality: 88 })
+    .toBuffer();
+
+  const nm = coverName(place.name);
+  const ns = nm.length <= 8 ? 62 : nm.length <= 11 ? 52 : 42;
+  const dl = (place.descLines?.length ? place.descLines : wrapLines(place.desc ?? "", 24, 3)).slice(0, 3);
+  const chipW = place.region.length * 26 + 60;
+  const svg = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="${PH_H}" width="${W}" height="${H - PH_H}" fill="#ffffff"/>
+      <rect x="40" y="${PH_H - 44}" width="88" height="88" rx="22" fill="#d92121"/>
+      <text x="84" y="${PH_H + 18}" font-family="${FONT}" font-size="52" font-weight="800" fill="#fff" text-anchor="middle">${idx}</text>
+      <text x="160" y="${PH_H + 84}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      <rect x="160" y="${PH_H + 112}" width="${chipW}" height="52" rx="26" fill="#f6ede7"/>
+      <text x="${160 + chipW / 2}" y="${PH_H + 148}" font-family="${FONT}" font-size="30" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(place.region)}</text>
+      ${place.hundred ? `<rect x="${172 + chipW}" y="${PH_H + 112}" width="160" height="52" rx="26" fill="#fff3d6" stroke="#e8c66a" stroke-width="2"/>
+      <text x="${252 + chipW}" y="${PH_H + 148}" font-family="${FONT}" font-size="28" font-weight="800" fill="#9a7419" text-anchor="middle">백년가게</text>` : ""}
+      ${dl.map((ln, k) => `<circle cx="56" cy="${PH_H + 216 + k * 62}" r="8" fill="#d92121"/><text x="84" y="${PH_H + 228 + k * 62}" font-family="${FONT}" font-size="38" fill="#3a2a24">${esc(ln)}</text>`).join("")}
+      <text x="${W - 40}" y="${H - 32}" font-family="${FONT}" font-size="26" fill="#b8a89e" text-anchor="end">@${HANDLE}</text>
+    </svg>`
+  );
+  return sharp({ create: { width: W, height: H, channels: 3, background: "#ffffff" } })
+    .composite([{ input: photo, left: 0, top: 0 }, { input: svg, left: 0, top: 0 }])
+    .jpeg({ quality: 90 })
+    .toBuffer();
+}
+
+/**
  * 자극형 제목 — 표지에서 음식 이름(main)만 초대형으로 뽑아 쓰기 위해 3조각으로 나눠 준다.
  * text는 캡션·기록용 전체 문장.
  */
@@ -846,12 +896,17 @@ function buildPunchyTitle(theme, n) {
     `현지인들이 숨겨온`,
     `요즘 난리 난`,
   ];
-  const top = tops[Math.floor(Math.random() * tops.length)];
+  // 지역 시리즈(전국이 아닌 테마)는 지역이 정체성 — 대형 타이포에 지역 포함
+  // ("영남 순대국"). 이때 수식어는 지역 중복을 피해 무지역형만 쓴다.
+  const regional = r !== "전국";
+  const pool = regional ? tops.filter((t) => !t.includes(r)) : tops;
+  const top = pool[Math.floor(Math.random() * pool.length)];
+  const main = regional ? `${r} ${f}` : f;
   // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의
   // "N대 맛집"을 기본으로 하고 "TOP N"을 섞는다.
   const subs = [`${n}대 ${sfx}`, `${sfx} TOP ${n}`];
   const sub = subs[Math.floor(Math.random() * subs.length)];
-  return { text: `${top} ${f} ${sub}`, top, main: f, sub };
+  return { text: `${top} ${main} ${sub}`, top, main, sub };
 }
 
 // ===== 카운트다운 릴스용 카드 (한 곳씩 크게 공개 → 1위 보려고 끝까지 봄) =====
@@ -1177,7 +1232,10 @@ async function main() {
   // 심야로 밀렸다. 릴스처럼 크론을 촘촘히 걸고, 오늘 이미 발행했으면 조용히 종료.
   // (같은 형식만 검사 — 정오 큐레이션이 저녁 모음집을 막으면 안 된다)
   {
-    const prefix = process.env.ROUNDUP_STYLE === "countdown" ? "countdown-%" : "roundup-%";
+    const prefix =
+      process.env.ROUNDUP_STYLE === "countdown" ? "countdown-%"
+      : process.env.ROUNDUP_STYLE === "carousel" ? "carousel-%"
+      : "roundup-%";
     const today = await db.execute({
       sql: `SELECT 1 FROM posts WHERE content_id LIKE ? AND status IN ('published','publishing')
               AND date(created_at) = date('now') LIMIT 1`,
@@ -1191,7 +1249,10 @@ async function main() {
 
   // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
   // 모음집(grid)과 큐레이션(countdown)은 포인터를 따로 둬 같은 테마가 겹치지 않게 함
-  const IDX_KEY = process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx" : "roundup_idx";
+  const IDX_KEY =
+    process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx"
+    : process.env.ROUNDUP_STYLE === "carousel" ? "carousel_idx"
+    : "roundup_idx";
   const idxRow = await db.execute({
     sql: "SELECT value FROM config WHERE key = ?",
     args: [IDX_KEY],
@@ -1293,7 +1354,10 @@ async function main() {
   // 발행 스타일
   //  - grid(기본): 기존 모음집 — 리스트 인포그래픽 한 장을 릴스로
   //  - countdown: 큐레이션 — 인트로 + 순위 카드 순차 공개 + 아웃트로 (1위 보려고 끝까지 봄)
-  const STYLE = process.env.ROUNDUP_STYLE === "countdown" ? "countdown" : "grid";
+  const STYLE =
+    process.env.ROUNDUP_STYLE === "countdown" ? "countdown"
+    : process.env.ROUNDUP_STYLE === "carousel" ? "carousel"
+    : "grid";
   const sharpMod = (await import("sharp")).default;
 
   // 표지 3안 순환 결정을 먼저 한다 — hero는 카운트다운형(표지→6위→…→1위)으로
@@ -1301,7 +1365,8 @@ async function main() {
   // (히어로 단독 표지는 "식당 영상이 없다"(8/24 감자탕), 2컷 절충도 부족하다는
   //  피드백으로 순차 공개형으로 확정 — 흑돼지 큐레이션과 같은 구성)
   let coverStyle = null;
-  if (STYLE !== "countdown") {
+  if (STYLE === "carousel") coverStyle = "carousel"; // 성과 추적용 (cover_idx 순환과 무관)
+  if (STYLE === "grid") {
     // 표지 실험 판정(2026-09-01, 스타일별 4건): classic 평균 2,205(돌파 3/4) vs
     // dark 210(0/4) vs hero 142(0/2) — 검증된 승자 classic에 몰고 hero만 주 1회
     // 실험 유지, dark는 제외. (되돌리려면 배열만 바꾸면 됨)
@@ -1436,6 +1501,10 @@ async function main() {
       console.log("DRY — countdown-intro-preview.jpg / countdown-rank-preview.jpg 저장");
     } else {
       fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
+      if (STYLE === "carousel") {
+        fs.writeFileSync("carousel-card-preview.jpg", await composeCarouselCard(sharpMod, places[0], 1));
+        console.log("DRY — carousel-card-preview.jpg 저장");
+      }
       // 디자인 시안을 같은 데이터로 비교하려면 수집 결과가 필요하다(재수집하면 식당이 바뀜)
       fs.writeFileSync("roundup-dry-data.json", JSON.stringify({ theme, places }, null, 1));
       console.log("DRY 모드 — 발행 생략. roundup-reel-preview.jpg / roundup-dry-data.json 저장");
@@ -1446,7 +1515,7 @@ async function main() {
 
   // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커 선기록.
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const cid = `${STYLE === "countdown" ? "countdown" : "roundup"}-${theme.key}-${today}`;
+  const cid = `${STYLE === "countdown" ? "countdown" : STYLE === "carousel" ? "carousel" : "roundup"}-${theme.key}-${today}`;
   const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
   if (dup.rows.length) {
     console.log("오늘 이미 발행된 테마 — 스킵:", cid);
@@ -1464,6 +1533,52 @@ async function main() {
       coverStyle,
     ],
   });
+
+  // ===== 캐러셀(주간 저장형 포맷): 표지 4:5 크롭 + 식당별 상세 카드 → 사진집 발행 =====
+  if (STYLE === "carousel") {
+    const imgs = [];
+    const cover45 = path.join(TMP, "car_cover.jpg");
+    // 표지는 4:5 안전영역(중앙 1080x1350)에 콘텐츠가 설계돼 있어 크롭이 곧 캐러셀 규격
+    await sharpMod(reelCover)
+      .extract({ left: 0, top: 285, width: 1080, height: 1350 })
+      .jpeg({ quality: 90 })
+      .toFile(cover45);
+    imgs.push(cover45);
+    for (let i = 0; i < places.length; i++) {
+      const f = path.join(TMP, `car_${i}.jpg`);
+      try {
+        fs.writeFileSync(f, await composeCarouselCard(sharpMod, places[i], i + 1));
+        imgs.push(f);
+      } catch (e) {
+        console.error(`카드 ${i + 1} 실패(제외):`, String(e).slice(0, 80));
+      }
+    }
+    if (imgs.length < 4) throw new Error("캐러셀 카드 부족");
+    const urls = [];
+    for (const f of imgs) urls.push(await uploadPublic(f));
+    let carCaption = caption;
+    if (pkBg) carCaption += `\n📷 표지 배경: 한국관광공사 포토코리아${pkBg.photographer ? ` ⓒ${pkBg.photographer}` : ""}`;
+    const { publishCarousel } = await import("../lib/instagram.ts");
+    const mediaId = await publishCarousel(urls, carCaption);
+    console.log(`✅ 모음집 캐러셀 발행 (${imgs.length}장):`, mediaId);
+    await db.execute({
+      sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
+      args: [mediaId, cid],
+    });
+    try {
+      const { publishStory } = await import("../lib/instagram.ts");
+      console.log("📣 표지 스토리 공유:", await publishStory(await uploadPublic(reelCover)));
+    } catch (e) {
+      console.error("표지 스토리 실패(무시):", String(e).slice(0, 80));
+    }
+    const chosenIdx2 = all.findIndex((t) => t.key === theme.key);
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+      args: [IDX_KEY, String((chosenIdx2 + 1) % all.length)],
+    });
+    console.log("완료:", theme.titleResolved);
+    return;
+  }
 
   const reelMp4 = path.join(TMP, "roundup-reel.mp4");
   // BGM — CC BY 트랙(lib/bgm.ts). 무음 구간이 없어져 이탈이 줄고, 표지만 8초
@@ -1613,9 +1728,23 @@ ${bgm.attribution}`;
     args: [mediaId, cid],
   });
 
+  // 발행 직후 표지를 스토리로도 공유 — 팔로워 재도달 + 프로필 방문 루프.
+  // (표지는 이미 9:16이라 그대로 스토리 규격. 실패해도 본 발행에는 영향 없음)
+  try {
+    const coverJpg = reelCover ?? cards[0];
+    if (coverJpg) {
+      const { publishStory } = await import("../lib/instagram.ts");
+      const storyUrl = await uploadPublic(coverJpg);
+      const storyId = await publishStory(storyUrl);
+      console.log("📣 표지 스토리 공유:", storyId);
+    }
+  } catch (e) {
+    console.error("표지 스토리 실패(무시):", String(e).slice(0, 100));
+  }
+
   // 표지 스타일 포인터 이동 — 3안이 같은 횟수만큼 나가야 비교가 된다.
   // (수동 지정 COVER_STYLE로 돌린 회차는 표본을 흔들지 않도록 포인터를 건드리지 않는다)
-  if (coverStyle && !process.env.COVER_STYLE) {
+  if (STYLE === "grid" && coverStyle && !process.env.COVER_STYLE) {
     const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
     const next = ((ci.rows.length ? Number(ci.rows[0].value) : 0) + 1) % 7; // classic 6 : hero 1 주기
     await db.execute({

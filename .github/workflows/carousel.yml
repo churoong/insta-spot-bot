@@ -1,0 +1,53 @@
+name: 모음집 캐러셀 발행 (주간 저장형)
+
+on:
+  workflow_dispatch: {} # 수동 실행 (테스트용)
+  schedule:
+    # 매주 토요일 낮 — 저장형 캐러셀 실험(릴스와 배포 풀이 다름). 크론 지연 대비 3중,
+    # 스크립트의 하루 1회 가드(carousel- prefix)가 중복을 막는다.
+    - cron: "41 3 * * 6" # KST 12:41 목표
+    - cron: "41 4 * * 6" # KST 13:41
+    - cron: "41 5 * * 6" # KST 14:41
+
+jobs:
+  carousel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 폰트·ffmpeg 설치 (인포그래픽·표지 릴스 렌더링용)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-nanum fonts-noto-color-emoji ffmpeg
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 캐러셀 생성·발행
+        run: npx tsx scripts/make-roundup.mjs
+        env:
+          ROUNDUP_STYLE: carousel
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
+          JEJU_API_KEY: ${{ secrets.JEJU_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+          GROQ_MODEL: ${{ secrets.GROQ_MODEL }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          # 인스타 라이브러리 음악 첨부용 (Audio API — FB 로그인 경로). 미설정이면 CC BGM 폴백.
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+          FB_IG_USER_ID: ${{ secrets.FB_IG_USER_ID }}
+          # 합성 랭킹(유튜브 버즈)용 — 없으면 블로그 후기 단독으로 폴백
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
