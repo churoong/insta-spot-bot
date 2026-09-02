@@ -1569,8 +1569,17 @@ async function main() {
     } else {
       fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
       if (STYLE === "carousel") {
-        fs.writeFileSync("carousel-card-preview.jpg", await composeCarouselCard(sharpMod, places[0], 1));
-        console.log("DRY — carousel-card-preview.jpg 저장");
+        // 실발행과 동일한 전체 장 구성 미리보기 — 표지(4:5 크롭) + 식당 카드들 + 체크리스트
+        const pad = (n) => String(n).padStart(2, "0");
+        await sharpMod(reelCover).extract({ left: 0, top: 285, width: 1080, height: 1350 })
+          .jpeg({ quality: 90 }).toFile("carousel-preview-01-cover.jpg");
+        for (let i = 0; i < places.length; i++) {
+          fs.writeFileSync(`carousel-preview-${pad(i + 2)}-card.jpg`, await composeCarouselCard(sharpMod, places[i], i + 1));
+        }
+        const cl = await composeChecklistCard(sharpMod, theme, places);
+        await sharpMod(cl).extract({ left: 0, top: 285, width: 1080, height: 1350 })
+          .jpeg({ quality: 90 }).toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
+        console.log(`DRY — carousel-preview-01~${pad(places.length + 2)}.jpg 저장 (실발행과 동일 구성)`);
       }
       // 디자인 시안을 같은 데이터로 비교하려면 수집 결과가 필요하다(재수집하면 식당이 바뀜)
       fs.writeFileSync("roundup-dry-data.json", JSON.stringify({ theme, places }, null, 1));
