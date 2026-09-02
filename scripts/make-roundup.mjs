@@ -19,7 +19,8 @@ const HANDLE = process.env.IG_USERNAME || "tourist_710";
 // 본문·설명: Pretendard / 제목·상호명·순위: G마켓 산스 (쇼츠 썸네일 유행 서체).
 // 둘 다 assets/fonts/ 동봉 — 각 워크플로가 렌더 전에 설치한다. 미설치 환경은 Noto 폴백.
 const FONT = "'Pretendard','Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
-const TFONT = "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
+const TFONT = process.env.COVER_TFONT || // 시안 비교·A/B용 오버라이드
+  "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
 
 const SIDO_SHORT = {
   서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
