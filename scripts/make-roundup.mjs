@@ -16,7 +16,10 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "roundup-"));
 const TOUR = "https://apis.data.go.kr/B551011/KorService2";
 const DRY = process.env.ROUNDUP_DRY === "1";
 const HANDLE = process.env.IG_USERNAME || "tourist_710";
-const FONT = "'Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
+// 본문·설명: Pretendard / 제목·상호명·순위: G마켓 산스 (쇼츠 썸네일 유행 서체).
+// 둘 다 assets/fonts/ 동봉 — 각 워크플로가 렌더 전에 설치한다. 미설치 환경은 Noto 폴백.
+const FONT = "'Pretendard','Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
+const TFONT = "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
 
 const SIDO_SHORT = {
   서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
@@ -720,7 +723,7 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
       ${p.hundred ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#ffd54a" fill-opacity="0.92"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#6b4a06" text-anchor="middle">백년가게</text>` : p.goodPrice ? `<rect x="${CX + IN + 18 + chipW}" y="${base - 44}" width="104" height="34" rx="17" fill="#c8f3d4" fill-opacity="0.95"/>
       <text x="${CX + IN + 70 + chipW}" y="${base - 20}" font-family="${FONT}" font-size="19" font-weight="800" fill="#0d6b33" text-anchor="middle">착한가격</text>` : ""}
-      <text x="${CX + IN + 2}" y="${base + 44}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
+      <text x="${CX + IN + 2}" y="${base + 44}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
       ${dl.map((ln, k) => `<circle cx="${CX + IN + 10}" cy="${base + 76 + k * 31}" r="4.5" fill="${PAL.accent}"/><text x="${CX + IN + 24}" y="${base + 83 + k * 31}" font-family="${FONT}" font-size="23" fill="${PAL.desc}">${esc(ln)}</text>`).join("")}
     </g>`;
   }
@@ -730,7 +733,7 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
     top: "", main: theme.food || theme.keyword, sub: `${places.length}대 ${theme.suffix || "맛집"}`,
   };
   const mainLen = Math.max(1, [...tp.main].length);
-  const ms = Math.min(132, Math.floor(950 / mainLen));
+  const ms = Math.min(116, Math.floor(850 / mainLen));
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="hd" x1="0" y1="0" x2="0" y2="1">
@@ -745,10 +748,10 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
     <rect x="0" y="${BAND_H}" width="${W}" height="${H - BAND_H}" fill="#1a0d08" fill-opacity="${PAL.scrim}"/>
     <rect x="0" y="0" width="${W}" height="${BAND_H}" fill="url(#bandFade)"/>
     ${dark ? "" : `<rect x="0" y="${BAND_H}" width="${W}" height="${HEADER_END - BAND_H}" fill="url(#hd)"/>`}
-    <text x="${W / 2}" y="${CT + 44}" font-family="${FONT}" font-size="30" font-weight="700" fill="${PAL.top}" text-anchor="middle">${esc(tp.top)}</text>
-    <text x="${W / 2}" y="${CT + 52 + Math.round(ms * 0.86)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
+    <text x="${W / 2}" y="${CT + 44}" font-family="${TFONT}" font-size="30" font-weight="700" fill="${PAL.top}" text-anchor="middle">${esc(tp.top)}</text>
+    <text x="${W / 2}" y="${CT + 52 + Math.round(ms * 0.86)}" font-family="${TFONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#3a0f06" stroke-width="6" paint-order="stroke">${esc(tp.main)}</text>
     ${PAL.subBadge ? `<rect x="${W / 2 - 130}" y="${HEADER_END - 60}" width="260" height="52" rx="26" fill="${PAL.accent}"/>` : ""}
-    <text x="${W / 2}" y="${HEADER_END - 22}" font-family="${FONT}" font-size="${PAL.subBadge ? 35 : 38}" font-weight="900" fill="${PAL.sub}" text-anchor="middle">${esc(tp.sub)}</text>
+    <text x="${W / 2}" y="${HEADER_END - 22}" font-family="${TFONT}" font-size="${PAL.subBadge ? 35 : 38}" font-weight="900" fill="${PAL.sub}" text-anchor="middle">${esc(tp.sub)}</text>
     ${bgCells}
     <text x="${W / 2}" y="${H - 24}" font-family="${FONT}" font-size="24" font-weight="800" fill="#ffffff" text-anchor="middle">📌 저장해두고 하나씩 정복해 보세요 · <tspan fill="${PAL.footer}" font-weight="400" font-size="20">@${HANDLE}</tspan></text>
   </svg>`;
@@ -810,7 +813,7 @@ async function composeHeroCover(theme, places, bgUrl = null) {
     <rect x="0" y="0" width="${W}" height="${H}" fill="#120703" fill-opacity="0.42"/>
     <rect x="0" y="${CT + Math.round(CH * 0.55)}" width="${W}" height="${H - CT - Math.round(CH * 0.55)}" fill="url(#bt)"/>
     <text x="${W / 2}" y="${bs + 40}" font-family="${FONT}" font-size="40" font-weight="700" fill="#ffcdb3" text-anchor="middle">${esc(tp.top)}</text>
-    <text x="${W / 2}" y="${bs + 46 + Math.round(ms * 0.86)}" font-family="${FONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#2a0a03" stroke-width="8" paint-order="stroke">${esc(tp.main)}</text>
+    <text x="${W / 2}" y="${bs + 46 + Math.round(ms * 0.86)}" font-family="${TFONT}" font-size="${ms}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#2a0a03" stroke-width="8" paint-order="stroke">${esc(tp.main)}</text>
     <rect x="${W / 2 - 175}" y="${bs + 66 + ms}" width="350" height="84" rx="42" fill="#d92121"/>
     <text x="${W / 2}" y="${bs + 125 + ms}" font-family="${FONT}" font-size="52" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(tp.sub)}</text>
     <text x="${W / 2}" y="${CT + CH - 122}" font-family="${FONT}" font-size="31" font-weight="700" fill="#ffd9c9" text-anchor="middle">${esc(regions)}</text>
@@ -866,7 +869,7 @@ async function composeCarouselCard(sharp, place, idx) {
       <rect x="0" y="${PH_H}" width="${W}" height="${H - PH_H}" fill="#ffffff"/>
       <rect x="40" y="${PH_H - 44}" width="88" height="88" rx="22" fill="#d92121"/>
       <text x="84" y="${PH_H + 18}" font-family="${FONT}" font-size="52" font-weight="800" fill="#fff" text-anchor="middle">${idx}</text>
-      <text x="160" y="${PH_H + 84}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
+      <text x="160" y="${PH_H + 84}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#b81414">${esc(nm)}</text>
       <rect x="160" y="${PH_H + 112}" width="${chipW}" height="52" rx="26" fill="#f6ede7"/>
       <text x="${160 + chipW / 2}" y="${PH_H + 148}" font-family="${FONT}" font-size="30" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(place.region)}</text>
       ${place.hundred ? `<rect x="${172 + chipW}" y="${PH_H + 112}" width="160" height="52" rx="26" fill="#fff3d6" stroke="#e8c66a" stroke-width="2"/>
@@ -943,7 +946,7 @@ async function composeChecklistCard(sharp, theme, places) {
       <rect width="${W}" height="${H}" fill="#fdf8f3"/>
       <rect x="0" y="0" width="${W}" height="${CT}" fill="#f3e8df"/>
       <rect x="0" y="${CT + CH}" width="${W}" height="${H - CT - CH}" fill="#f3e8df"/>
-      <text x="${W / 2}" y="${CT + 120}" font-family="${FONT}" font-size="76" font-weight="900" fill="#b81414" text-anchor="middle">📌 도장깨기 리스트</text>
+      <text x="${W / 2}" y="${CT + 120}" font-family="${TFONT}" font-size="76" font-weight="900" fill="#b81414" text-anchor="middle">📌 도장깨기 리스트</text>
       <text x="${W / 2}" y="${CT + 190}" font-family="${FONT}" font-size="40" font-weight="700" fill="#6b5348" text-anchor="middle">${esc(f)} 편 — 다녀온 곳을 체크하세요</text>
       <line x1="90" y1="${CT + 232}" x2="${W - 90}" y2="${CT + 232}" stroke="#e3d3c8" stroke-width="3"/>
       ${rows}
@@ -1001,7 +1004,7 @@ async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
       ${lines
         .map(
           (l, i) =>
-            `<text x="${RW / 2}" y="${startY + i * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">${esc(l)}</text>`
+            `<text x="${RW / 2}" y="${startY + i * lineH}" font-family="${TFONT}" font-size="${size}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">${esc(l)}</text>`
         )
         .join("")}
       <text x="${RW / 2}" y="${startY + lines.length * lineH + 40}" font-family="${FONT}" font-size="48" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">끝까지 보고 저장하세요</text>
@@ -1027,13 +1030,13 @@ async function composeRankCard(sharp, place, rank) {
     `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
       <!-- 순위 뱃지 -->
       <circle cx="${RW / 2}" cy="330" r="118" fill="#d92121" stroke="#fff" stroke-width="10"/>
-      <text x="${RW / 2}" y="${330 + 46}" font-family="${FONT}" font-size="120" font-weight="900" fill="#fff" text-anchor="middle">${rank}</text>
+      <text x="${RW / 2}" y="${330 + 46}" font-family="${TFONT}" font-size="120" font-weight="900" fill="#fff" text-anchor="middle">${rank}</text>
       <!-- 하단 정보 박스 -->
       <rect x="0" y="${boxTop}" width="${RW}" height="${RH - boxTop - 300}" fill="#000" fill-opacity="0.5"/>
       ${nameLines
         .map(
           (l, i) =>
-            `<text x="${RW / 2}" y="${boxTop + 110 + i * Math.round(nameSize * 1.2)}" font-family="${FONT}" font-size="${nameSize}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="7" paint-order="stroke">${esc(l)}</text>`
+            `<text x="${RW / 2}" y="${boxTop + 110 + i * Math.round(nameSize * 1.2)}" font-family="${TFONT}" font-size="${nameSize}" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="7" paint-order="stroke">${esc(l)}</text>`
         )
         .join("")}
       <text x="${RW / 2}" y="${boxTop + 110 + nameLines.length * Math.round(nameSize * 1.2) + 20}" font-family="${FONT}" font-size="52" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">${esc(place.region || "")}${place.hundred ? " · 백년가게" : ""}</text>
@@ -1053,7 +1056,7 @@ async function composeOutroCard(sharp, places, title) {
   const bg = await bgFrame(sharp, places[0].imageUrl, 0.35, 12);
   const svg = Buffer.from(
     `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
-      <text x="${RW / 2}" y="${RH / 2 - 60}" font-family="${FONT}" font-size="104" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">저장 필수</text>
+      <text x="${RW / 2}" y="${RH / 2 - 60}" font-family="${TFONT}" font-size="104" font-weight="900" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="9" paint-order="stroke">저장 필수</text>
       <text x="${RW / 2}" y="${RH / 2 + 70}" font-family="${FONT}" font-size="58" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="6" paint-order="stroke">${esc(wrapLines(title, 16, 1)[0] || "")}</text>
       <text x="${RW / 2}" y="${RH / 2 + 180}" font-family="${FONT}" font-size="50" font-weight="700" fill="#fff" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">@${esc(HANDLE)}</text>
     </svg>`
@@ -1134,7 +1137,7 @@ async function composeCover(theme, places) {
     <g>
       <rect x="${x + PAD + 8}" y="${y + PAD + 10}" width="44" height="44" rx="12" fill="#d92121"/>
       <text x="${x + PAD + 30}" y="${y + PAD + 42}" font-family="${FONT}" font-size="28" font-weight="800" fill="#fff" text-anchor="middle">${i + 1}</text>
-      <text x="${x + PAD + 62}" y="${y + PAD + 40}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
+      <text x="${x + PAD + 62}" y="${y + PAD + 40}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="${PAL.name}">${esc(nm)}</text>
       <rect x="${x + PAD + 8}" y="${y + PAD + 58}" width="${chipW}" height="34" rx="17" fill="#f6ede7"/>
       <text x="${x + PAD + 8 + chipW / 2}" y="${y + PAD + 82}" font-family="${FONT}" font-size="20" font-weight="700" fill="#8a5a44" text-anchor="middle">📍 ${esc(p.region)}</text>
       ${p.hundred ? `<rect x="${x + PAD + 8 + chipW + 8}" y="${y + PAD + 58}" width="110" height="34" rx="17" fill="#fff3d6" stroke="#e8c66a" stroke-width="1.5"/>
@@ -1148,7 +1151,7 @@ async function composeCover(theme, places) {
   const titleSize = titleText.length <= 11 ? 58 : titleText.length <= 14 ? 50 : 43;
   const bgSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${W}" height="${HEADER}" fill="#d92121"/>
-    <text x="${W / 2}" y="80" font-family="${FONT}" font-size="${titleSize}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(titleText)}</text>
+    <text x="${W / 2}" y="80" font-family="${TFONT}" font-size="${titleSize}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(titleText)}</text>
     <text x="${W / 2}" y="138" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffd9d9" text-anchor="middle">✦ 저장해두고 하나씩 정복해 보세요 ✦</text>
     ${bgCells}
     <rect x="0" y="${H - FOOTER}" width="${W}" height="${FOOTER}" fill="#2b2323"/>
@@ -1193,7 +1196,7 @@ async function composeSlide(place, rank) {
     <rect x="0" y="${H - BAR}" width="${W}" height="${BAR}" fill="#000000" fill-opacity="0.66"/>
     <rect x="28" y="${H - BAR + 30}" width="64" height="64" rx="16" fill="#d92121"/>
     <text x="60" y="${H - BAR + 75}" font-family="${FONT}" font-size="38" font-weight="800" fill="#fff" text-anchor="middle">${rank}</text>
-    <text x="116" y="${H - BAR + 60}" font-family="${FONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+    <text x="116" y="${H - BAR + 60}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
     <text x="116" y="${H - BAR + 100}" font-family="${FONT}" font-size="26" fill="#e5d8d8">📍 ${esc(place.region)}${place.hundred ? " · 백년가게 인증" : ""}</text>
     <text x="44" y="${H - BAR + 158}" font-family="${FONT}" font-size="29" font-weight="600" fill="#ffffff">${esc(d1)}</text>
     ${d2 ? `<text x="44" y="${H - BAR + 202}" font-family="${FONT}" font-size="29" font-weight="600" fill="#ffffff">${esc(d2)}</text>` : ""}
