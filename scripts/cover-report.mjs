@@ -37,7 +37,7 @@ async function main() {
 
   const rows = (
     await db.execute(
-      `SELECT content_id, cover_style, ig_media_id, created_at
+      `SELECT content_id, cover_style, title_font, ig_media_id, created_at
          FROM posts
         WHERE category = '모음집' AND status = 'published'
           AND ig_media_id IS NOT NULL AND cover_style IS NOT NULL
@@ -51,17 +51,21 @@ async function main() {
   }
 
   const stat = Object.fromEntries(STYLES.map((s) => [s, []]));
+  const fontStat = {}; // 서체 A/B (title_font 기록이 있는 회차만)
   console.log("── 회차별 ──");
   for (const r of rows) {
     const ins = await insights(String(r.ig_media_id));
     const style = String(r.cover_style);
     if (ins && stat[style]) stat[style].push(ins);
+    const font = r.title_font ? String(r.title_font) : null;
+    if (ins && font && font !== "manual") (fontStat[font] ??= []).push(ins);
     const day = String(r.created_at ?? "").slice(0, 10);
     console.log(
       `${day} | ${(LABEL[style] ?? style).padEnd(13)} | 조회 ${String(ins?.views ?? "-").padStart(6)}` +
         ` | 도달 ${String(ins?.reach ?? "-").padStart(5)} | 저장 ${String(ins?.saved ?? "-").padStart(3)}` +
         ` | 공유 ${String(ins?.shares ?? "-").padStart(3)}` +
         ` | 시청 ${ins?.ig_reels_avg_watch_time ? (ins.ig_reels_avg_watch_time / 1000).toFixed(1) + "s" : "-"}` +
+        (font ? ` | ${font}` : "") +
         ` | ${r.content_id}`
     );
   }
@@ -89,6 +93,27 @@ async function main() {
     console.log(
       `\n⚠️ 가장 적은 스타일의 표본이 ${n}건입니다. 조회수 편차가 커서 스타일당 5건은 모여야 판단할 수 있습니다.`
     );
+  }
+
+  // 서체 A/B (2026-09-02~): G마켓 산스 vs 잘난체 — 그리드 모음집 교대 발행분만 집계
+  const fonts = Object.keys(fontStat);
+  if (fonts.length) {
+    console.log("\n── 서체별 평균 (A/B) ──");
+    for (const f of fonts) {
+      const a = fontStat[f];
+      console.log(
+        `${f.padEnd(8)} | 표본 ${String(a.length).padStart(2)}건` +
+          ` | 조회 ${Math.round(avg(a, "views")).toString().padStart(6)}` +
+          ` | 도달 ${Math.round(avg(a, "reach")).toString().padStart(5)}` +
+          ` | 저장 ${avg(a, "saved").toFixed(1).padStart(4)}` +
+          ` | 공유 ${avg(a, "shares").toFixed(1).padStart(4)}` +
+          ` | 시청 ${(avg(a, "ig_reels_avg_watch_time") / 1000).toFixed(1)}s`
+      );
+    }
+    const fn = Math.min(...fonts.map((f) => fontStat[f].length));
+    if (fonts.length < 2 || fn < 5) {
+      console.log("⚠️ 서체당 5건은 모여야 판단 가능 (교대 발행이라 열흘쯤 걸립니다).");
+    }
   }
 }
 

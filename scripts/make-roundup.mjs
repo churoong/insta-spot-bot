@@ -19,8 +19,14 @@ const HANDLE = process.env.IG_USERNAME || "tourist_710";
 // 본문·설명: Pretendard / 제목·상호명·순위: G마켓 산스 (쇼츠 썸네일 유행 서체).
 // 둘 다 assets/fonts/ 동봉 — 각 워크플로가 렌더 전에 설치한다. 미설치 환경은 Noto 폴백.
 const FONT = "'Pretendard','Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
-const TFONT = process.env.COVER_TFONT || // 시안 비교·A/B용 오버라이드
+// 제목 서체 — 기본 G마켓 산스. COVER_TFONT env는 시안용 수동 지정, main()의
+// 서체 A/B(G마켓 vs 잘난체 교대)가 회차별로 재할당한다 (let인 이유).
+let TFONT = process.env.COVER_TFONT ||
   "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
+const FONT_AB = {
+  gmarket: "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif",
+  jalnan: "'Jalnan','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif",
+};
 
 const SIDO_SHORT = {
   서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
@@ -1279,6 +1285,8 @@ async function main() {
     fs.readFileSync(new URL("../data/roundup-themes.json", import.meta.url), "utf8")
   );
   await initDb();
+  // 서체 A/B 기록용 컬럼 (없으면 추가 — 이미 있으면 조용히 무시)
+  try { await db.execute("ALTER TABLE posts ADD COLUMN title_font TEXT"); } catch { /* 존재함 */ }
 
   // 발행 쿨다운(행동차단 회복) 중이면 모음집도 쉼 — 시도 반복이 차단을 연장시킴
   if (!DRY) {
@@ -1444,6 +1452,19 @@ async function main() {
     }
     console.log("표지 스타일:", coverStyle);
   }
+
+  // 표지 서체 A/B (2026-09-02 사용자 지시): G마켓 산스 vs 잘난체 — 그리드 모음집에서만
+  // 발행마다 교대. 판정은 cover-report.mjs의 서체별 평균. 수동 COVER_TFONT 회차는
+  // 표본을 흔들지 않도록 A/B에서 제외(포인터도 안 움직임).
+  const manualFont = Boolean(process.env.COVER_TFONT);
+  let titleFont = manualFont ? "manual" : "gmarket";
+  if (STYLE === "grid" && !manualFont) {
+    const fi = await db.execute("SELECT value FROM config WHERE key = 'font_idx'");
+    titleFont = (fi.rows.length ? Number(fi.rows[0].value) : 0) % 2 === 0 ? "gmarket" : "jalnan";
+    TFONT = FONT_AB[titleFont];
+    console.log("표지 서체:", titleFont);
+  }
+
   // 카운트다운형 렌더(순위 공개 시퀀스)를 타는 모드: 큐레이션 + hero 모음집
   const cdMode = STYLE === "countdown" || coverStyle === "hero";
 
@@ -1602,8 +1623,8 @@ async function main() {
     return;
   }
   await db.execute({
-    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status, cover_style)
-          VALUES (?, ?, ?, '모음집', ?, ?, 'publishing', ?)`,
+    sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status, cover_style, title_font)
+          VALUES (?, ?, ?, '모음집', ?, ?, 'publishing', ?, ?)`,
     args: [
       cid,
       theme.titleResolved,
@@ -1611,6 +1632,7 @@ async function main() {
       places[0].imageUrl,
       caption,
       coverStyle,
+      titleFont,
     ],
   });
 
@@ -1839,6 +1861,15 @@ ${bgm.attribution}`;
     await db.execute({
       sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
       args: ["cover_idx", String(next)],
+    });
+  }
+
+  // 서체 A/B 포인터 이동 — 두 서체가 같은 횟수만큼 나가야 비교가 된다.
+  if (STYLE === "grid" && !manualFont) {
+    const fi = await db.execute("SELECT value FROM config WHERE key = 'font_idx'");
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+      args: ["font_idx", String(((fi.rows.length ? Number(fi.rows[0].value) : 0) + 1) % 2)],
     });
   }
 

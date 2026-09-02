@@ -8,4 +8,7 @@
   ※ noonnu CDN 배포본(woff)을 sfnt로 복원한 파일 — 누락돼 있던 family name
   레코드("Gmarket Sans")와 OS/2 굵기(500/700)를 보정함.
 
+- **여기어때 잘난체** (Jalnan.otf) — © 여기어때컴퍼니. 무료 사용·재배포 허용(판매 금지).
+  https://www.goodchoice.kr/font — noonnu CDN 배포본(JalnanOTF00.woff)을 sfnt로 복원, name 레코드(Jalnan) 보정.
+
 렌더 환경(GitHub Actions)에서는 각 워크플로가 이 폴더를 ~/.fonts에 설치한다.
