@@ -364,7 +364,57 @@ async function photoKoreaPhoto(keyword) {
 }
 
 /** 테마에 맞는 식당 수집 (사진 + 공공누리 Type1/3, 시군구당 최대 2곳) */
+/**
+ * 지역편(mode:"area") 수집 — 음식을 하나로 묶지 않고 "그 동네 맛집" (2026-09-03 사용자 지시).
+ * 시·군·구(areaBasedList2) 또는 좌표 반경(locationBasedList2, 상권 1.5km)으로 음식점(39)을
+ * 긁는다. 실측 풀: 강릉 67·경주 94·수원 188·강남 159 / 성수 121·을지로 52·익선 48 (사진 보유).
+ * 같은 동네라 시군구 상한은 걸지 않는다. 지자체 보강 소스·포토코리아는 안 쓴다.
+ */
+async function collectAreaPlaces(theme, limit) {
+  const t = theme.tour ?? {};
+  const params = { contentTypeId: "39", numOfRows: "200", arrange: "O" };
+  let ep = "areaBasedList2";
+  if (t.mapX && t.mapY) {
+    ep = "locationBasedList2";
+    Object.assign(params, { mapX: String(t.mapX), mapY: String(t.mapY), radius: String(t.radius ?? 1500) });
+  } else {
+    Object.assign(params, { areaCode: String(t.areaCode), sigunguCode: String(t.sigunguCode) });
+  }
+  let items = [];
+  try {
+    items = await tourCall(ep, params);
+  } catch (e) {
+    console.error(`[collect:area] ${theme.key} 실패:`, String(e).slice(0, 80));
+    return [];
+  }
+  // 순수 음식점만 (사용자 정책: 카페·제과·주점 제외). 지역편은 음식 키워드가 없어
+  // 카페·디저트가 그대로 섞여 들어온다(실측: 강릉 풀의 절반이 카페) — 분류코드와 상호로 거른다.
+  //   cat3 A05020900 카페/전통찻집, A05021000 클럽
+  const AREA_BAD_CAT = /^A0502(0900|1000)/;
+  const AREA_BAD_NAME = /(카페|까페|cafe|coffee|커피|로스터|베이커리|bakery|제과|빵집|디저트|dessert|케이크|도넛|와플|아이스크림|젤라또|치즈|초콜|티하우스|찻집|다방|와인바|펍|pub|호프|바\b|주점|술집|포차|맥주)/i;
+  items = items.filter(
+    (it) =>
+      it.firstimage &&
+      (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3") &&
+      !AREA_BAD_CAT.test(String(it.cat3 ?? "")) &&
+      !AREA_BAD_NAME.test(String(it.title ?? ""))
+  );
+  const picked = [];
+  for (const it of items.sort(() => Math.random() - 0.5)) {
+    picked.push({
+      contentId: String(it.contentid),
+      name: String(it.title).replace(/\[[^\]]*\]/g, "").trim(),
+      address: [it.addr1, it.addr2].filter(Boolean).join(" "),
+      region: shortRegion(it.addr1),
+      imageUrl: toHttps(it.firstimage),
+    });
+    if (picked.length >= (limit ?? theme.count)) break;
+  }
+  return picked;
+}
+
 async function collectPlaces(theme, limit) {
+  if (theme.mode === "area") return collectAreaPlaces(theme, limit);
   // 지역 시리즈(2026-09): areaCodes 배열로 여러 시도를 묶는다 (영남=부산·대구·울산·경북·경남 등).
   // TourAPI는 areaCode를 하나만 받아 코드별로 호출해 합친다.
   const codes = theme.areaCodes ?? (theme.areaCode ? [theme.areaCode] : [null]);
@@ -581,7 +631,7 @@ async function enrichPlaces(places) {
 
 /** 한줄평(표지용) + 상세 설명(슬라이드용) 생성 — 모든 AI 실패 시 null(모음집 발행 스킵) */
 async function makeDescriptions(theme, places) {
-  const prompt = `인스타 맛집 카드뉴스 문구를 만들어줘. 주제: "${theme.keyword} 맛집 모음"
+  const prompt = `인스타 맛집 카드뉴스 문구를 만들어줘. 주제: "${theme.mode === "area" ? theme.keyword + " 일대 맛집 모음 (음식 종류는 제각각 — 각 집의 대표 메뉴를 앞세워)" : theme.keyword + " 맛집 모음"}"
 
 식당 정보:
 ${places
@@ -638,7 +688,7 @@ JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개
       const i = Math.max(cut.lastIndexOf("."), cut.lastIndexOf("!"), cut.lastIndexOf("?"));
       return i > max * 0.5 ? cut.slice(0, i + 1) : cut.replace(/\s*\S*$/, "") + "…";
     };
-    const fbLines = [`${theme.keyword} 한 가지로 이어온 노포`, "현지에서 오래 사랑받아온 집"];
+    const fbLines = [theme.mode === "area" ? "동네 사람들이 오래 찾은 집" : `${theme.keyword} 한 가지로 이어온 노포`, "현지에서 오래 사랑받아온 집"];
     const fbDetail = `${theme.keyword} 하나로 오랜 시간 사랑받아온, 믿고 찾아갈 수 있는 곳이에요.`;
     return places.map((_, i) => {
       const lines = toLines(arr[i]?.s);
@@ -945,6 +995,14 @@ async function composeCarouselCard(sharp, place, idx) {
  * text는 캡션·기록용 전체 문장.
  */
 function buildPunchyTitle(theme, n) {
+  if (theme.mode === "area") {
+    // 지역편: 대형 타이포 = 동네 이름 ("성수동" / "강릉"), 수식어는 무지역형만
+    const tops = [`죽기 전에 꼭 먹어야 할`, `아는 사람만 간다는`, `줄 서서라도 먹는`, `놓치면 후회하는`, `웨이팅이 끊이질 않는`, `현지인들이 숨겨온`, `요즘 난리 난`];
+    const top = tops[Math.floor(Math.random() * tops.length)];
+    const subs = [`${n}대 맛집`, `맛집 TOP ${n}`];
+    const sub = subs[Math.floor(Math.random() * subs.length)];
+    return { text: `${top} ${theme.keyword} ${sub}`, top, main: theme.keyword, sub };
+  }
   const r = theme.region || "전국";
   const f = theme.food || theme.keyword;
   const sfx = theme.suffix || "맛집";
@@ -1392,18 +1450,24 @@ async function main() {
     }
   }
 
+  // 지역편 요일: 화·목·토(KST) 저녁 모음집은 "동네 맛집" 지역편 풀에서 뽑는다 (주 3회).
+  // 나머지 요일·큐레이션·캐러셀은 음식 테마 풀. 포인터도 따로(area_idx).
+  const kstDow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay(); // 0=일
+  const areaDay = !process.env.ROUNDUP_STYLE && [2, 4, 6].includes(kstDow);
   // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
   // 모음집(grid)과 큐레이션(countdown)은 포인터를 따로 둬 같은 테마가 겹치지 않게 함
   const IDX_KEY =
     process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx"
     : process.env.ROUNDUP_STYLE === "carousel" ? "carousel_idx"
-    : "roundup_idx";
+    : areaDay ? "area_idx" : "roundup_idx";
   const idxRow = await db.execute({
     sql: "SELECT value FROM config WHERE key = ?",
     args: [IDX_KEY],
   });
   const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
-  const all = themesData.themes;
+  const allThemes = themesData.themes;
+  const all = allThemes.filter((t) => (t.mode === "area") === areaDay);
+  if (areaDay) console.log("지역편 요일 — 동네 맛집 풀", all.length, "개");
   // 조회수 성과로 가중한 순서 (데이터가 없거나 조회 실패면 기존 단순 로테이션)
   const perf = await themeWeights(db, all);
   const ordered = perf
@@ -1415,10 +1479,10 @@ async function main() {
   let theme = null, places = [];
   // ROUNDUP_THEME=키 를 주면 그 테마만 시도 (테스트·수동 발행용)
   if (process.env.ROUNDUP_THEME) {
-    const forced = all.find((t) => t.key === process.env.ROUNDUP_THEME);
+    const forced = allThemes.find((t) => t.key === process.env.ROUNDUP_THEME);
     if (forced) {
       console.log("테마 강제:", forced.key);
-      const got = await collectPlaces(forced, forced.areaCode ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
+      const got = await collectPlaces(forced, forced.areaCode || forced.mode === "area" ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
       console.log(`[${forced.key}] 수집 풀: ${got.length}곳`);
       if (got.length < 4) throw new Error("강제 테마 수집 부족");
       theme = forced;
@@ -1435,7 +1499,7 @@ async function main() {
   let best = null;
   for (let t = 0; !theme && t < Math.min(5, ordered.length); t++) {
     const cand = ordered[t];
-    const got = await collectPlaces(cand, cand.areaCode ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
+    const got = await collectPlaces(cand, cand.areaCode || cand.mode === "area" ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
     console.log(`[${cand.key}] 수집 풀: ${got.length}곳`);
     if (got.length >= 10) { theme = cand; places = got; break; }
     if (!best || got.length > best.places.length) best = { theme: cand, places: got };
@@ -1552,7 +1616,7 @@ async function main() {
       // 4축 합성 랭킹: 블로그 후기 수 + 카페글 + 유튜브 상위 조회수 + 네이버 리뷰순 진입.
       // 유튜브·리뷰순 키가 없거나 실패하면 그 축만 0점 — 블로그 단독과 동등하게 동작.
       const { rankComposite } = await import("../lib/ranking.ts");
-      const res = await rankComposite(places, theme.keyword);
+      const res = await rankComposite(places, theme.mode === "area" ? "맛집" : theme.keyword);
       if (res?.scored) {
         places = res.ranked; // 1위가 앞
         rankBasis = res.basis;
@@ -1605,7 +1669,7 @@ async function main() {
     const intro = path.join(TMP, "c_intro.jpg");
     if (coverStyle === "hero") {
       // hero 인트로 = 히어로 풀샷 표지 (포토코리아 우선)
-      pkBg = await photoKoreaPhoto(theme.keyword);
+      pkBg = theme.mode === "area" ? null : await photoKoreaPhoto(theme.keyword);
       if (pkBg) console.log(`포토코리아 배경: ${pkBg.title}${pkBg.photographer ? " ⓒ" + pkBg.photographer : ""}`);
       fs.copyFileSync(await composeHeroCover(theme, places, pkBg?.url), intro);
     } else
@@ -1653,7 +1717,7 @@ async function main() {
   } else {
     // classic·dark: 6칸 그리드 단일컷. 배경은 포토코리아 전문가 컷 우선
     // (공공누리 1유형 — 캡션에 크레딧 필수). 스타일 결정은 위(main 초입)에서 완료.
-    pkBg = await photoKoreaPhoto(theme.keyword);
+    pkBg = theme.mode === "area" ? null : await photoKoreaPhoto(theme.keyword);
     if (pkBg) console.log(`포토코리아 배경: ${pkBg.title}${pkBg.photographer ? " ⓒ" + pkBg.photographer : ""}`);
     reelCover = await composeReelCover(theme, places, coverStyle === "dark", pkBg?.url);
   }

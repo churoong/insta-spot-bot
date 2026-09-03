@@ -1,60 +1,1292 @@
 {
-  "_설명": "모음집(6선) 테마 풀. keyword=TourAPI 검색어, areaCode 없으면 전국. count는 폴백값이고 실제 표지는 음식 사진 검증을 통과한 6곳(부족하면 4곳). 제목은 스크립트의 자극형 템플릿에서 랜덤 생성(food/suffix 사용). 테마 선택은 조회수 성과 가중(themeWeights) — 매일 발행이라 풀이 넓어야 같은 음식이 반복되지 않는다. 신규 키워드는 TourAPI 수집량(사진+공공누리 Type1/3 기준 20건 이상)을 확인하고 추가할 것.",
-  "themes": [
-    { "key": "sundae", "food": "순대국", "keyword": "순대", "region": "전국", "count": 6, "emoji": "🍲", "tags": [ "순대국", "순대국밥", "국밥맛집" ] },
-    { "key": "dwaeji-busan", "food": "돼지국밥", "keyword": "돼지국밥", "areaCode": 6, "region": "부산", "count": 6, "emoji": "🍲", "tags": [ "돼지국밥", "부산맛집", "부산여행" ] },
-    { "key": "kalguksu", "food": "칼국수", "keyword": "칼국수", "region": "전국", "count": 6, "emoji": "🍜", "tags": [ "칼국수", "칼국수맛집", "면스타그램" ] },
-    { "key": "naengmyeon", "food": "냉면", "keyword": "냉면", "region": "전국", "count": 6, "emoji": "🍜", "tags": [ "냉면", "냉면맛집", "평양냉면" ] },
-    { "key": "gukbap", "food": "국밥", "keyword": "국밥", "region": "전국", "count": 6, "emoji": "🍲", "tags": [ "국밥", "국밥맛집", "해장맛집" ] },
-    { "key": "makguksu", "food": "막국수", "keyword": "막국수", "region": "전국", "count": 6, "emoji": "🍜", "tags": [ "막국수", "막국수맛집", "메밀막국수" ] },
-    { "key": "gomtang", "food": "곰탕·설렁탕", "keyword": "곰탕", "region": "전국", "count": 6, "emoji": "🥘", "tags": [ "곰탕", "설렁탕", "국물맛집" ] },
-    { "key": "milmyeon-busan", "food": "밀면", "keyword": "밀면", "areaCode": 6, "region": "부산", "count": 6, "emoji": "🍜", "tags": [ "밀면", "부산밀면", "부산맛집" ] },
-    { "key": "mandu", "food": "손만두", "keyword": "만두", "region": "전국", "count": 6, "emoji": "🥟", "tags": [ "만두", "손만두", "만두맛집" ] },
-    { "key": "chueotang", "food": "추어탕", "keyword": "추어탕", "region": "전국", "count": 6, "emoji": "🥘", "tags": [ "추어탕", "보양식", "건강밥상" ] },
-    { "key": "heukdwaeji-jeju", "food": "흑돼지", "keyword": "흑돼지", "areaCode": 39, "region": "제주", "count": 6, "emoji": "🥓", "tags": [ "제주흑돼지", "제주맛집", "제주여행" ] },
-    { "key": "jjamppong", "food": "짬뽕", "keyword": "짬뽕", "region": "전국", "count": 6, "emoji": "🍜", "tags": [ "짬뽕", "짬뽕맛집", "중식맛집" ] },
-    { "key": "jokbal", "food": "족발", "keyword": "족발", "region": "전국", "count": 6, "emoji": "🐷", "tags": [ "족발", "족발맛집", "야식추천" ] },
-    { "key": "bossam", "food": "보쌈", "keyword": "보쌈", "region": "전국", "count": 6, "emoji": "🥬", "tags": [ "보쌈", "보쌈맛집", "고기맛집" ] },
-    { "key": "gopchang", "food": "곱창", "keyword": "곱창", "region": "전국", "count": 6, "emoji": "🔥", "tags": [ "곱창", "곱창맛집", "술안주추천" ] },
-    { "key": "galbi", "food": "갈비", "keyword": "갈비", "region": "전국", "count": 6, "emoji": "🥩", "tags": [ "갈비", "갈비맛집", "고기맛집" ] },
-    { "key": "samgyetang", "food": "삼계탕", "keyword": "삼계탕", "region": "전국", "count": 6, "emoji": "🍗", "tags": [ "삼계탕", "보양식", "삼계탕맛집" ] },
-    { "key": "haejangguk", "food": "해장국", "keyword": "해장국", "region": "전국", "count": 6, "emoji": "🍲", "tags": [ "해장국", "해장맛집", "국물맛집" ] },
-    { "key": "gamjatang", "food": "감자탕", "keyword": "감자탕", "region": "전국", "count": 6, "emoji": "🍲", "tags": [ "감자탕", "뼈해장국", "감자탕맛집" ] },
-    { "key": "budaejjigae", "food": "부대찌개", "keyword": "부대찌개", "region": "전국", "count": 6, "emoji": "🍲", "tags": [ "부대찌개", "부대찌개맛집", "찌개맛집" ] },
-    { "key": "jjukkumi", "food": "쭈꾸미", "keyword": "쭈꾸미", "region": "전국", "count": 6, "emoji": "🌶", "tags": [ "쭈꾸미", "쭈꾸미맛집", "매운맛집" ] },
-    { "key": "mulhoe", "food": "물회", "keyword": "물회", "region": "전국", "count": 6, "emoji": "🐟", "tags": [ "물회", "물회맛집", "여름별미" ] },
-    { "key": "chobap", "food": "초밥", "keyword": "초밥", "region": "전국", "count": 6, "emoji": "🍣", "tags": [ "초밥", "초밥맛집", "스시맛집" ] },
-    { "key": "donkatsu", "food": "돈까스", "keyword": "돈까스", "region": "전국", "count": 6, "emoji": "🍛", "tags": [ "돈까스", "돈까스맛집", "경양식" ] },
-    { "key": "tteokbokki", "food": "떡볶이", "keyword": "떡볶이", "region": "전국", "count": 6, "emoji": "🌶", "tags": [ "떡볶이", "떡볶이맛집", "분식맛집" ] },
-    { "key": "dakgalbi", "food": "닭갈비", "keyword": "닭갈비", "region": "전국", "count": 6, "emoji": "🐔", "tags": [ "닭갈비", "닭갈비맛집", "춘천닭갈비" ] },
-    { "key": "jangeo", "food": "장어구이", "keyword": "장어", "region": "전국", "count": 6, "emoji": "🐟", "tags": [ "장어구이", "장어맛집", "보양식" ] },
-    { "key": "maeuntang", "food": "매운탕", "keyword": "매운탕", "region": "전국", "count": 6, "emoji": "🍲", "tags": [ "매운탕", "매운탕맛집", "생선요리" ] },
-    { "key": "hoe", "food": "회", "keyword": "횟집", "region": "전국", "count": 6, "emoji": "🐟", "tags": [ "회", "횟집추천", "물회" ] },
-    { "key": "gejang", "food": "게장", "keyword": "게장", "region": "전국", "count": 6, "emoji": "🦀", "tags": [ "게장", "간장게장", "밥도둑" ] },
-    { "key": "eotang", "food": "어탕", "keyword": "어탕", "region": "전국", "count": 6, "emoji": "🍜", "tags": [ "어탕", "어탕국수", "보양식" ] },
-    { "key": "sundubu", "food": "순두부", "keyword": "순두부", "region": "전국", "count": 6, "emoji": "🍲", "tags": [ "순두부", "순두부찌개", "두부맛집" ] },
-    { "key": "nakji", "food": "낙지", "keyword": "낙지", "region": "전국", "count": 6, "emoji": "🐙", "tags": [ "낙지", "낙지볶음", "낙지맛집" ] },
-    { "key": "jeonbok", "food": "전복", "keyword": "전복", "region": "전국", "count": 6, "emoji": "🐚", "tags": [ "전복", "전복요리", "보양식" ] },
-    { "key": "saengseongui", "food": "생선구이", "keyword": "생선구이", "region": "전국", "count": 6, "emoji": "🐟", "tags": [ "생선구이", "생선구이백반", "백반맛집" ] },
-    { "key": "galchi", "food": "갈치", "keyword": "갈치", "region": "전국", "count": 6, "emoji": "🐟", "tags": [ "갈치조림", "갈치구이", "갈치맛집" ] },
-    { "key": "gimbap", "food": "김밥", "keyword": "김밥", "region": "전국", "count": 6, "emoji": "🍙", "tags": [ "김밥", "김밥맛집", "분식맛집" ] },
-    { "key": "daege", "food": "대게", "keyword": "대게", "region": "전국", "count": 6, "emoji": "🦀", "tags": [ "대게", "대게맛집", "영덕대게" ] },
-    { "key": "baeksuk", "food": "백숙", "keyword": "백숙", "region": "전국", "count": 6, "emoji": "🍗", "tags": [ "백숙", "닭백숙", "보양식" ] },
-    { "key": "gogiguksu-jeju", "food": "고기국수", "keyword": "고기국수", "areaCode": 39, "region": "제주", "count": 6, "emoji": "🍜", "tags": [ "고기국수", "제주고기국수", "제주맛집" ] },
-    { "key": "sundae-sudo", "food": "순대국", "keyword": "순대", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍲", "tags": [ "순대국", "순대국밥", "국밥맛집" ] },
-    { "key": "sundae-yeongnam", "food": "순대국", "keyword": "순대", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍲", "tags": [ "순대국", "순대국밥", "국밥맛집" ] },
-    { "key": "sundae-honam", "food": "순대국", "keyword": "순대", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍲", "tags": [ "순대국", "순대국밥", "국밥맛집" ] },
-    { "key": "haejangguk-sudo", "food": "해장국", "keyword": "해장국", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍲", "tags": [ "해장국", "해장맛집", "국물맛집" ] },
-    { "key": "haejangguk-yeongnam", "food": "해장국", "keyword": "해장국", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍲", "tags": [ "해장국", "해장맛집", "국물맛집" ] },
-    { "key": "haejangguk-honam", "food": "해장국", "keyword": "해장국", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍲", "tags": [ "해장국", "해장맛집", "국물맛집" ] },
-    { "key": "gukbap-sudo", "food": "국밥", "keyword": "국밥", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍲", "tags": [ "국밥", "국밥맛집", "해장맛집" ] },
-    { "key": "gukbap-yeongnam", "food": "국밥", "keyword": "국밥", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍲", "tags": [ "국밥", "국밥맛집", "해장맛집" ] },
-    { "key": "gukbap-honam", "food": "국밥", "keyword": "국밥", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍲", "tags": [ "국밥", "국밥맛집", "해장맛집" ] },
-    { "key": "naengmyeon-sudo", "food": "냉면", "keyword": "냉면", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍜", "tags": [ "냉면", "냉면맛집", "평양냉면" ] },
-    { "key": "naengmyeon-yeongnam", "food": "냉면", "keyword": "냉면", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍜", "tags": [ "냉면", "냉면맛집", "평양냉면" ] },
-    { "key": "naengmyeon-honam", "food": "냉면", "keyword": "냉면", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍜", "tags": [ "냉면", "냉면맛집", "평양냉면" ] },
-    { "key": "jjamppong-sudo", "food": "짬뽕", "keyword": "짬뽕", "region": "수도권", "areaCodes": [ 1, 31, 2 ], "count": 6, "emoji": "🍜", "tags": [ "짬뽕", "짬뽕맛집", "중식맛집" ] },
-    { "key": "jjamppong-yeongnam", "food": "짬뽕", "keyword": "짬뽕", "region": "영남", "areaCodes": [ 6, 4, 7, 35, 36 ], "count": 6, "emoji": "🍜", "tags": [ "짬뽕", "짬뽕맛집", "중식맛집" ] },
-    { "key": "jjamppong-honam", "food": "짬뽕", "keyword": "짬뽕", "region": "호남", "areaCodes": [ 5, 37, 38 ], "count": 6, "emoji": "🍜", "tags": [ "짬뽕", "짬뽕맛집", "중식맛집" ] }
-  ]
+ "_설명": "모음집(6선) 테마 풀. keyword=TourAPI 검색어, areaCode 없으면 전국. count는 폴백값이고 실제 표지는 음식 사진 검증을 통과한 6곳(부족하면 4곳). 제목은 스크립트의 자극형 템플릿에서 랜덤 생성(food/suffix 사용). 테마 선택은 조회수 성과 가중(themeWeights) — 매일 발행이라 풀이 넓어야 같은 음식이 반복되지 않는다. 신규 키워드는 TourAPI 수집량(사진+공공누리 Type1/3 기준 20건 이상)을 확인하고 추가할 것.",
+ "themes": [
+  {
+   "key": "sundae",
+   "food": "순대국",
+   "keyword": "순대",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "순대국",
+    "순대국밥",
+    "국밥맛집"
+   ]
+  },
+  {
+   "key": "dwaeji-busan",
+   "food": "돼지국밥",
+   "keyword": "돼지국밥",
+   "areaCode": 6,
+   "region": "부산",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "돼지국밥",
+    "부산맛집",
+    "부산여행"
+   ]
+  },
+  {
+   "key": "kalguksu",
+   "food": "칼국수",
+   "keyword": "칼국수",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "칼국수",
+    "칼국수맛집",
+    "면스타그램"
+   ]
+  },
+  {
+   "key": "naengmyeon",
+   "food": "냉면",
+   "keyword": "냉면",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "냉면",
+    "냉면맛집",
+    "평양냉면"
+   ]
+  },
+  {
+   "key": "gukbap",
+   "food": "국밥",
+   "keyword": "국밥",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "국밥",
+    "국밥맛집",
+    "해장맛집"
+   ]
+  },
+  {
+   "key": "makguksu",
+   "food": "막국수",
+   "keyword": "막국수",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "막국수",
+    "막국수맛집",
+    "메밀막국수"
+   ]
+  },
+  {
+   "key": "gomtang",
+   "food": "곰탕·설렁탕",
+   "keyword": "곰탕",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🥘",
+   "tags": [
+    "곰탕",
+    "설렁탕",
+    "국물맛집"
+   ]
+  },
+  {
+   "key": "milmyeon-busan",
+   "food": "밀면",
+   "keyword": "밀면",
+   "areaCode": 6,
+   "region": "부산",
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "밀면",
+    "부산밀면",
+    "부산맛집"
+   ]
+  },
+  {
+   "key": "mandu",
+   "food": "손만두",
+   "keyword": "만두",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🥟",
+   "tags": [
+    "만두",
+    "손만두",
+    "만두맛집"
+   ]
+  },
+  {
+   "key": "chueotang",
+   "food": "추어탕",
+   "keyword": "추어탕",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🥘",
+   "tags": [
+    "추어탕",
+    "보양식",
+    "건강밥상"
+   ]
+  },
+  {
+   "key": "heukdwaeji-jeju",
+   "food": "흑돼지",
+   "keyword": "흑돼지",
+   "areaCode": 39,
+   "region": "제주",
+   "count": 6,
+   "emoji": "🥓",
+   "tags": [
+    "제주흑돼지",
+    "제주맛집",
+    "제주여행"
+   ]
+  },
+  {
+   "key": "jjamppong",
+   "food": "짬뽕",
+   "keyword": "짬뽕",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "짬뽕",
+    "짬뽕맛집",
+    "중식맛집"
+   ]
+  },
+  {
+   "key": "jokbal",
+   "food": "족발",
+   "keyword": "족발",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐷",
+   "tags": [
+    "족발",
+    "족발맛집",
+    "야식추천"
+   ]
+  },
+  {
+   "key": "bossam",
+   "food": "보쌈",
+   "keyword": "보쌈",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🥬",
+   "tags": [
+    "보쌈",
+    "보쌈맛집",
+    "고기맛집"
+   ]
+  },
+  {
+   "key": "gopchang",
+   "food": "곱창",
+   "keyword": "곱창",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🔥",
+   "tags": [
+    "곱창",
+    "곱창맛집",
+    "술안주추천"
+   ]
+  },
+  {
+   "key": "galbi",
+   "food": "갈비",
+   "keyword": "갈비",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🥩",
+   "tags": [
+    "갈비",
+    "갈비맛집",
+    "고기맛집"
+   ]
+  },
+  {
+   "key": "samgyetang",
+   "food": "삼계탕",
+   "keyword": "삼계탕",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍗",
+   "tags": [
+    "삼계탕",
+    "보양식",
+    "삼계탕맛집"
+   ]
+  },
+  {
+   "key": "haejangguk",
+   "food": "해장국",
+   "keyword": "해장국",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "해장국",
+    "해장맛집",
+    "국물맛집"
+   ]
+  },
+  {
+   "key": "gamjatang",
+   "food": "감자탕",
+   "keyword": "감자탕",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "감자탕",
+    "뼈해장국",
+    "감자탕맛집"
+   ]
+  },
+  {
+   "key": "budaejjigae",
+   "food": "부대찌개",
+   "keyword": "부대찌개",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "부대찌개",
+    "부대찌개맛집",
+    "찌개맛집"
+   ]
+  },
+  {
+   "key": "jjukkumi",
+   "food": "쭈꾸미",
+   "keyword": "쭈꾸미",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🌶",
+   "tags": [
+    "쭈꾸미",
+    "쭈꾸미맛집",
+    "매운맛집"
+   ]
+  },
+  {
+   "key": "mulhoe",
+   "food": "물회",
+   "keyword": "물회",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐟",
+   "tags": [
+    "물회",
+    "물회맛집",
+    "여름별미"
+   ]
+  },
+  {
+   "key": "chobap",
+   "food": "초밥",
+   "keyword": "초밥",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍣",
+   "tags": [
+    "초밥",
+    "초밥맛집",
+    "스시맛집"
+   ]
+  },
+  {
+   "key": "donkatsu",
+   "food": "돈까스",
+   "keyword": "돈까스",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍛",
+   "tags": [
+    "돈까스",
+    "돈까스맛집",
+    "경양식"
+   ]
+  },
+  {
+   "key": "tteokbokki",
+   "food": "떡볶이",
+   "keyword": "떡볶이",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🌶",
+   "tags": [
+    "떡볶이",
+    "떡볶이맛집",
+    "분식맛집"
+   ]
+  },
+  {
+   "key": "dakgalbi",
+   "food": "닭갈비",
+   "keyword": "닭갈비",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐔",
+   "tags": [
+    "닭갈비",
+    "닭갈비맛집",
+    "춘천닭갈비"
+   ]
+  },
+  {
+   "key": "jangeo",
+   "food": "장어구이",
+   "keyword": "장어",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐟",
+   "tags": [
+    "장어구이",
+    "장어맛집",
+    "보양식"
+   ]
+  },
+  {
+   "key": "maeuntang",
+   "food": "매운탕",
+   "keyword": "매운탕",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "매운탕",
+    "매운탕맛집",
+    "생선요리"
+   ]
+  },
+  {
+   "key": "hoe",
+   "food": "회",
+   "keyword": "횟집",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐟",
+   "tags": [
+    "회",
+    "횟집추천",
+    "물회"
+   ]
+  },
+  {
+   "key": "gejang",
+   "food": "게장",
+   "keyword": "게장",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🦀",
+   "tags": [
+    "게장",
+    "간장게장",
+    "밥도둑"
+   ]
+  },
+  {
+   "key": "eotang",
+   "food": "어탕",
+   "keyword": "어탕",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "어탕",
+    "어탕국수",
+    "보양식"
+   ]
+  },
+  {
+   "key": "sundubu",
+   "food": "순두부",
+   "keyword": "순두부",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "순두부",
+    "순두부찌개",
+    "두부맛집"
+   ]
+  },
+  {
+   "key": "nakji",
+   "food": "낙지",
+   "keyword": "낙지",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐙",
+   "tags": [
+    "낙지",
+    "낙지볶음",
+    "낙지맛집"
+   ]
+  },
+  {
+   "key": "jeonbok",
+   "food": "전복",
+   "keyword": "전복",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐚",
+   "tags": [
+    "전복",
+    "전복요리",
+    "보양식"
+   ]
+  },
+  {
+   "key": "saengseongui",
+   "food": "생선구이",
+   "keyword": "생선구이",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐟",
+   "tags": [
+    "생선구이",
+    "생선구이백반",
+    "백반맛집"
+   ]
+  },
+  {
+   "key": "galchi",
+   "food": "갈치",
+   "keyword": "갈치",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🐟",
+   "tags": [
+    "갈치조림",
+    "갈치구이",
+    "갈치맛집"
+   ]
+  },
+  {
+   "key": "gimbap",
+   "food": "김밥",
+   "keyword": "김밥",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍙",
+   "tags": [
+    "김밥",
+    "김밥맛집",
+    "분식맛집"
+   ]
+  },
+  {
+   "key": "daege",
+   "food": "대게",
+   "keyword": "대게",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🦀",
+   "tags": [
+    "대게",
+    "대게맛집",
+    "영덕대게"
+   ]
+  },
+  {
+   "key": "baeksuk",
+   "food": "백숙",
+   "keyword": "백숙",
+   "region": "전국",
+   "count": 6,
+   "emoji": "🍗",
+   "tags": [
+    "백숙",
+    "닭백숙",
+    "보양식"
+   ]
+  },
+  {
+   "key": "gogiguksu-jeju",
+   "food": "고기국수",
+   "keyword": "고기국수",
+   "areaCode": 39,
+   "region": "제주",
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "고기국수",
+    "제주고기국수",
+    "제주맛집"
+   ]
+  },
+  {
+   "key": "sundae-sudo",
+   "food": "순대국",
+   "keyword": "순대",
+   "region": "수도권",
+   "areaCodes": [
+    1,
+    31,
+    2
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "순대국",
+    "순대국밥",
+    "국밥맛집"
+   ]
+  },
+  {
+   "key": "sundae-yeongnam",
+   "food": "순대국",
+   "keyword": "순대",
+   "region": "영남",
+   "areaCodes": [
+    6,
+    4,
+    7,
+    35,
+    36
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "순대국",
+    "순대국밥",
+    "국밥맛집"
+   ]
+  },
+  {
+   "key": "sundae-honam",
+   "food": "순대국",
+   "keyword": "순대",
+   "region": "호남",
+   "areaCodes": [
+    5,
+    37,
+    38
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "순대국",
+    "순대국밥",
+    "국밥맛집"
+   ]
+  },
+  {
+   "key": "haejangguk-sudo",
+   "food": "해장국",
+   "keyword": "해장국",
+   "region": "수도권",
+   "areaCodes": [
+    1,
+    31,
+    2
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "해장국",
+    "해장맛집",
+    "국물맛집"
+   ]
+  },
+  {
+   "key": "haejangguk-yeongnam",
+   "food": "해장국",
+   "keyword": "해장국",
+   "region": "영남",
+   "areaCodes": [
+    6,
+    4,
+    7,
+    35,
+    36
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "해장국",
+    "해장맛집",
+    "국물맛집"
+   ]
+  },
+  {
+   "key": "haejangguk-honam",
+   "food": "해장국",
+   "keyword": "해장국",
+   "region": "호남",
+   "areaCodes": [
+    5,
+    37,
+    38
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "해장국",
+    "해장맛집",
+    "국물맛집"
+   ]
+  },
+  {
+   "key": "gukbap-sudo",
+   "food": "국밥",
+   "keyword": "국밥",
+   "region": "수도권",
+   "areaCodes": [
+    1,
+    31,
+    2
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "국밥",
+    "국밥맛집",
+    "해장맛집"
+   ]
+  },
+  {
+   "key": "gukbap-yeongnam",
+   "food": "국밥",
+   "keyword": "국밥",
+   "region": "영남",
+   "areaCodes": [
+    6,
+    4,
+    7,
+    35,
+    36
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "국밥",
+    "국밥맛집",
+    "해장맛집"
+   ]
+  },
+  {
+   "key": "gukbap-honam",
+   "food": "국밥",
+   "keyword": "국밥",
+   "region": "호남",
+   "areaCodes": [
+    5,
+    37,
+    38
+   ],
+   "count": 6,
+   "emoji": "🍲",
+   "tags": [
+    "국밥",
+    "국밥맛집",
+    "해장맛집"
+   ]
+  },
+  {
+   "key": "naengmyeon-sudo",
+   "food": "냉면",
+   "keyword": "냉면",
+   "region": "수도권",
+   "areaCodes": [
+    1,
+    31,
+    2
+   ],
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "냉면",
+    "냉면맛집",
+    "평양냉면"
+   ]
+  },
+  {
+   "key": "naengmyeon-yeongnam",
+   "food": "냉면",
+   "keyword": "냉면",
+   "region": "영남",
+   "areaCodes": [
+    6,
+    4,
+    7,
+    35,
+    36
+   ],
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "냉면",
+    "냉면맛집",
+    "평양냉면"
+   ]
+  },
+  {
+   "key": "naengmyeon-honam",
+   "food": "냉면",
+   "keyword": "냉면",
+   "region": "호남",
+   "areaCodes": [
+    5,
+    37,
+    38
+   ],
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "냉면",
+    "냉면맛집",
+    "평양냉면"
+   ]
+  },
+  {
+   "key": "jjamppong-sudo",
+   "food": "짬뽕",
+   "keyword": "짬뽕",
+   "region": "수도권",
+   "areaCodes": [
+    1,
+    31,
+    2
+   ],
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "짬뽕",
+    "짬뽕맛집",
+    "중식맛집"
+   ]
+  },
+  {
+   "key": "jjamppong-yeongnam",
+   "food": "짬뽕",
+   "keyword": "짬뽕",
+   "region": "영남",
+   "areaCodes": [
+    6,
+    4,
+    7,
+    35,
+    36
+   ],
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "짬뽕",
+    "짬뽕맛집",
+    "중식맛집"
+   ]
+  },
+  {
+   "key": "jjamppong-honam",
+   "food": "짬뽕",
+   "keyword": "짬뽕",
+   "region": "호남",
+   "areaCodes": [
+    5,
+    37,
+    38
+   ],
+   "count": 6,
+   "emoji": "🍜",
+   "tags": [
+    "짬뽕",
+    "짬뽕맛집",
+    "중식맛집"
+   ]
+  },
+  {
+   "key": "area-gangneung",
+   "mode": "area",
+   "keyword": "강릉",
+   "region": "강원",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "강릉맛집",
+    "강릉여행",
+    "강원맛집"
+   ],
+   "tour": {
+    "areaCode": 32,
+    "sigunguCode": 1
+   }
+  },
+  {
+   "key": "area-sokcho",
+   "mode": "area",
+   "keyword": "속초",
+   "region": "강원",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "속초맛집",
+    "속초여행",
+    "강원맛집"
+   ],
+   "tour": {
+    "areaCode": 32,
+    "sigunguCode": 5
+   }
+  },
+  {
+   "key": "area-chuncheon",
+   "mode": "area",
+   "keyword": "춘천",
+   "region": "강원",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "춘천맛집",
+    "춘천여행",
+    "강원맛집"
+   ],
+   "tour": {
+    "areaCode": 32,
+    "sigunguCode": 13
+   }
+  },
+  {
+   "key": "area-yeosu",
+   "mode": "area",
+   "keyword": "여수",
+   "region": "전남",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "여수맛집",
+    "여수여행",
+    "전남맛집"
+   ],
+   "tour": {
+    "areaCode": 38,
+    "sigunguCode": 13
+   }
+  },
+  {
+   "key": "area-gyeongju",
+   "mode": "area",
+   "keyword": "경주",
+   "region": "경북",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "경주맛집",
+    "경주여행",
+    "경북맛집"
+   ],
+   "tour": {
+    "areaCode": 35,
+    "sigunguCode": 2
+   }
+  },
+  {
+   "key": "area-suwon",
+   "mode": "area",
+   "keyword": "수원",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "수원맛집",
+    "경기맛집",
+    "수원데이트"
+   ],
+   "tour": {
+    "areaCode": 31,
+    "sigunguCode": 13
+   }
+  },
+  {
+   "key": "area-jeju-si",
+   "mode": "area",
+   "keyword": "제주시",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "제주맛집",
+    "제주시맛집",
+    "제주여행"
+   ],
+   "tour": {
+    "areaCode": 39,
+    "sigunguCode": 4
+   }
+  },
+  {
+   "key": "area-seogwipo",
+   "mode": "area",
+   "keyword": "서귀포",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "서귀포맛집",
+    "제주맛집",
+    "제주여행"
+   ],
+   "tour": {
+    "areaCode": 39,
+    "sigunguCode": 3
+   }
+  },
+  {
+   "key": "area-jeonju",
+   "mode": "area",
+   "keyword": "전주",
+   "region": "전북",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "전주맛집",
+    "전주여행",
+    "전북맛집"
+   ],
+   "tour": {
+    "areaCode": 37,
+    "sigunguCode": 12
+   }
+  },
+  {
+   "key": "area-gangnam",
+   "mode": "area",
+   "keyword": "강남",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "강남맛집",
+    "서울맛집",
+    "강남데이트"
+   ],
+   "tour": {
+    "areaCode": 1,
+    "sigunguCode": 1
+   }
+  },
+  {
+   "key": "area-mapo",
+   "mode": "area",
+   "keyword": "마포",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "마포맛집",
+    "서울맛집",
+    "홍대맛집"
+   ],
+   "tour": {
+    "areaCode": 1,
+    "sigunguCode": 13
+   }
+  },
+  {
+   "key": "area-jongno",
+   "mode": "area",
+   "keyword": "종로",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "종로맛집",
+    "서울맛집",
+    "광화문맛집"
+   ],
+   "tour": {
+    "areaCode": 1,
+    "sigunguCode": 23
+   }
+  },
+  {
+   "key": "area-yongsan",
+   "mode": "area",
+   "keyword": "용산",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "용산맛집",
+    "서울맛집",
+    "이태원맛집"
+   ],
+   "tour": {
+    "areaCode": 1,
+    "sigunguCode": 21
+   }
+  },
+  {
+   "key": "area-songpa",
+   "mode": "area",
+   "keyword": "송파",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "송파맛집",
+    "잠실맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "areaCode": 1,
+    "sigunguCode": 18
+   }
+  },
+  {
+   "key": "area-yeongdeungpo",
+   "mode": "area",
+   "keyword": "영등포",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "영등포맛집",
+    "여의도맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "areaCode": 1,
+    "sigunguCode": 20
+   }
+  },
+  {
+   "key": "area-haeundae",
+   "mode": "area",
+   "keyword": "해운대",
+   "region": "부산",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "해운대맛집",
+    "부산맛집",
+    "부산여행"
+   ],
+   "tour": {
+    "areaCode": 6,
+    "sigunguCode": 16
+   }
+  },
+  {
+   "key": "area-yuseong",
+   "mode": "area",
+   "keyword": "대전 유성",
+   "region": "대전",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "대전맛집",
+    "유성맛집",
+    "대전데이트"
+   ],
+   "tour": {
+    "areaCode": 3,
+    "sigunguCode": 4
+   }
+  },
+  {
+   "key": "area-incheon-jung",
+   "mode": "area",
+   "keyword": "인천 중구",
+   "region": "인천",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "인천맛집",
+    "인천여행",
+    "차이나타운맛집"
+   ],
+   "tour": {
+    "areaCode": 2,
+    "sigunguCode": 10
+   }
+  },
+  {
+   "key": "area-cheonan",
+   "mode": "area",
+   "keyword": "천안",
+   "region": "충남",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "천안맛집",
+    "충남맛집",
+    "천안데이트"
+   ],
+   "tour": {
+    "areaCode": 34,
+    "sigunguCode": 12
+   }
+  },
+  {
+   "key": "area-geoje",
+   "mode": "area",
+   "keyword": "거제",
+   "region": "경남",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "거제맛집",
+    "거제여행",
+    "경남맛집"
+   ],
+   "tour": {
+    "areaCode": 36,
+    "sigunguCode": 1
+   }
+  },
+  {
+   "key": "area-gunsan",
+   "mode": "area",
+   "keyword": "군산",
+   "region": "전북",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "군산맛집",
+    "군산여행",
+    "전북맛집"
+   ],
+   "tour": {
+    "areaCode": 37,
+    "sigunguCode": 2
+   }
+  },
+  {
+   "key": "area-seongsu",
+   "mode": "area",
+   "keyword": "성수동",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "성수동맛집",
+    "성수맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.0558,
+    "mapY": 37.5446,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-euljiro",
+   "mode": "area",
+   "keyword": "을지로",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "을지로맛집",
+    "을지로노포",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.991,
+    "mapY": 37.5663,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-ikseon",
+   "mode": "area",
+   "keyword": "익선동",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "익선동맛집",
+    "종로맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9903,
+    "mapY": 37.574,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-hongdae",
+   "mode": "area",
+   "keyword": "홍대",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "홍대맛집",
+    "연남동맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9245,
+    "mapY": 37.5571,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-mangwon",
+   "mode": "area",
+   "keyword": "망원동",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "망원동맛집",
+    "망리단길",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9101,
+    "mapY": 37.5557,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-hwangnidan",
+   "mode": "area",
+   "keyword": "황리단길",
+   "region": "경북",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "황리단길맛집",
+    "경주맛집",
+    "경주여행"
+   ],
+   "tour": {
+    "mapX": 129.211,
+    "mapY": 35.836,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-itaewon",
+   "mode": "area",
+   "keyword": "이태원",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "이태원맛집",
+    "용산맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9944,
+    "mapY": 37.5345,
+    "radius": 1500
+   }
+  }
+ ]
 }
