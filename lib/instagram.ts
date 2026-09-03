@@ -386,6 +386,27 @@ export async function fetchFollowers(): Promise<number | null> {
   }
 }
 
+/**
+ * 게시물 인사이트(조회·도달·저장) — 관리 페이지 표시용. 이 계정은 좋아요가 아니라
+ * 조회·도달·저장으로 성과를 판단한다(사용자 합의). 릴스·캐러셀·이미지 공통 metric만 요청.
+ */
+export async function fetchInsights(
+  mediaId: string
+): Promise<{ views: number; reach: number; saved: number } | null> {
+  try {
+    const res = await fetch(
+      `${GRAPH}/${mediaId}/insights?metric=views,reach,saved&access_token=${encodeURIComponent(await getToken())}`,
+      { signal: AbortSignal.timeout(15000) }
+    );
+    const json = await res.json();
+    if (json.error || !Array.isArray(json.data)) return null;
+    const pick = (name: string) => Number(json.data.find((d: any) => d.name === name)?.values?.[0]?.value ?? 0);
+    return { views: pick("views"), reach: pick("reach"), saved: pick("saved") };
+  } catch {
+    return null;
+  }
+}
+
 /** 게시물 반응 수 조회 (좋아요·댓글) — 인기 랭킹·주간 베스트용 */
 export async function fetchEngagement(
   mediaId: string

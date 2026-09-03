@@ -71,7 +71,7 @@ async function loadData() {
   try {
     await initDb();
     const posts = await db.execute(
-      "SELECT id, place_name, address, category, image_url, image_urls, caption, status, created_at, like_count, comment_count FROM posts ORDER BY datetime(created_at) DESC, id DESC LIMIT 50"
+      "SELECT id, place_name, address, category, image_url, image_urls, caption, status, created_at, like_count, comment_count, views, reach, saved, metrics_at FROM posts ORDER BY datetime(created_at) DESC, id DESC LIMIT 50"
     );
     const dms = await db.execute(
       "SELECT COUNT(*) AS n FROM dm_log"
@@ -455,6 +455,14 @@ export default async function Home() {
                   {p.status === "published" && (
                     <span style={{ marginLeft: 8 }}>
                       ❤️ {Number(p.like_count) || 0} 💬 {Number(p.comment_count) || 0}
+                      {p.metrics_at ? (
+                        // 조회·도달·저장 = 이 계정의 실제 성과 지표 (하루 2회 갱신)
+                        <span style={{ marginLeft: 8, color: "#e8eaf0" }} title={`인사이트 갱신 ${toKst(p.metrics_at)}`}>
+                          👁 {Number(p.views).toLocaleString()} · 도달 {Number(p.reach).toLocaleString()} · 저장 {Number(p.saved) || 0}
+                        </span>
+                      ) : (
+                        <span style={{ marginLeft: 8, color: "#6b7280" }}>👁 집계 전</span>
+                      )}
                     </span>
                   )}
                 </div>
