@@ -16,10 +16,10 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 ## 현재 발행 구성 (KST)
 | 무엇 | 언제 | 워크플로 | 스크립트 |
 |---|---|---|---|
-| 일반 릴스(트라이얼) | 매일 08:13 (창 08~12) | reels.yml | scripts/make-reel.mjs |
+| 일반 릴스(트라이얼) | 매일 08:00 (창 08~12) | reels.yml | scripts/make-reel.mjs |
 | 모음집 릴스 + 표지 스토리 | 매일 17:30 (창 17:30~22:00) | roundup.yml | scripts/make-roundup.mjs |
-| 큐레이션(카운트다운) | 월·금 12:41 (창 12~16) | countdown.yml | make-roundup (ROUNDUP_STYLE=countdown) |
-| 캐러셀(저장형) | 토 12:41 (창 12~16) | carousel.yml | make-roundup (ROUNDUP_STYLE=carousel) |
+| 큐레이션(카운트다운) | 월·금 12:30 (창 12:30~16) | countdown.yml | make-roundup (ROUNDUP_STYLE=countdown) |
+| 캐러셀(저장형) | 토 12:30 (창 12:30~16) | carousel.yml | make-roundup (ROUNDUP_STYLE=carousel) |
 | 월간 쇼츠 벤치마크 | 매월 1일 | benchmark.yml | scripts/benchmark-shorts.mjs |
 
 **발행 시각 구조**: Vercel Cron(vercel.json, ±59분) → `/api/cron/trigger/[wf]` → GitHub `workflow_dispatch` 즉시 실행이 주 경로.
