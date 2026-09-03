@@ -21,6 +21,9 @@ const HANDLE = process.env.IG_USERNAME || "tourist_710";
 // 하루 1회 가드가 "오늘 이미 발행"으로 재발행까지 막는다 (2026-09-03 성수 편 실측).
 let pending = null; // { db, cid }
 const OFFLINE = process.env.ROUNDUP_OFFLINE === "1";
+// 강제 재발행: 인스타에서 지운 회차를 같은 날 같은 테마로 다시 올릴 때. 하루 1회 가드를
+// 건너뛰고 그 테마의 오늘 행을 지운 뒤 새로 발행한다. 테마 지정(ROUNDUP_THEME) 없이는 무시.
+const FORCE = process.env.ROUNDUP_FORCE === "1" && !!process.env.ROUNDUP_THEME;
 // 오프라인 렌더용 사진 캐시. 클라우드 세션(claude.ai/code)은 네트워크 정책이
 // tong.visitkorea.or.kr 같은 외부 호스트를 403으로 막는다 — 시크릿이 없는 게 아니라
 // 그림 자체를 못 받는다. 그래서 OFFLINE 모드는 이 폴더의 파일을 먼저 쓰고, 없으면
@@ -1579,7 +1582,8 @@ async function main() {
   // 심야로 밀렸다. 릴스처럼 크론을 촘촘히 걸고, 오늘 이미 발행했으면 조용히 종료.
   // (같은 형식만 검사 — 정오 큐레이션이 저녁 모음집을 막으면 안 된다. DRY는 발행이
   //  없으니 가드 대상이 아님 — 로컬 미리보기 검증이 실발행에 막히면 안 된다)
-  if (!DRY) {
+  if (FORCE) console.log("강제 재발행 모드 — 하루 1회 가드 생략, 테마:", process.env.ROUNDUP_THEME);
+  if (!DRY && !FORCE) {
     // 발행 도중 죽어 30분 넘게 'publishing'인 행은 실패로 확정 (러너 15분 타임아웃보다 김).
     // 아래 가드가 이런 행을 "오늘 이미 발행"으로 세지 않게 하려는 것.
     await db.execute(
@@ -1928,6 +1932,11 @@ async function main() {
   // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커 선기록.
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const cid = `${STYLE === "countdown" ? "countdown" : STYLE === "carousel" ? "carousel" : "roundup"}-${theme.key}-${today}`;
+  if (FORCE) {
+    // 인스타에서 지운 게시물의 행(ig_media_id 포함)을 치운다 — 지표 크론이 죽은 미디어를 조회하지 않게
+    const gone = await db.execute({ sql: "DELETE FROM posts WHERE content_id = ?", args: [cid] });
+    console.log(`강제 재발행 — 기존 행 ${gone.rowsAffected}건 삭제: ${cid}`);
+  }
   const dup = await db.execute({
     sql: "SELECT 1 FROM posts WHERE content_id = ? AND status IN ('published','publishing')",
     args: [cid],
