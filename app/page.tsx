@@ -50,7 +50,8 @@ function buildEngagementGuide(posts: any[]) {
   const hourScore: Record<number, number> = {};
   for (const p of posts) {
     if (p.status !== "published") continue;
-    const score = (Number(p.like_count) || 0) + (Number(p.comment_count) || 0) * 3;
+    // 이 계정의 성과 지표는 조회수 (좋아요는 배포와 무관 — 사용자 합의). 미집계면 반응 수 폴백.
+    const score = Number(p.views) > 0 ? Number(p.views) : (Number(p.like_count) || 0) + (Number(p.comment_count) || 0) * 3;
     if (score <= 0) continue;
     const kstHour = (new Date(String(p.created_at).replace(" ", "T") + "Z").getUTCHours() + 9) % 24;
     hourScore[kstHour] = (hourScore[kstHour] ?? 0) + score;
@@ -81,10 +82,9 @@ async function loadData() {
       "SELECT SUM(CASE WHEN status='published' THEN 1 ELSE 0 END) AS pub, SUM(CASE WHEN status='dry_run' THEN 1 ELSE 0 END) AS dry FROM posts"
     );
     const popular = await db.execute(
-      `SELECT place_name, like_count, comment_count,
-              (COALESCE(like_count,0) + COALESCE(comment_count,0) * 3) AS score
+      `SELECT place_name, like_count, comment_count, views, reach, saved
        FROM posts WHERE status='published' AND category != '주간베스트'
-       ORDER BY score DESC, id DESC LIMIT 3`
+       ORDER BY COALESCE(views,0) DESC, (COALESCE(like_count,0) + COALESCE(comment_count,0) * 3) DESC, id DESC LIMIT 3`
     );
     const live = process.env.IG_ACCESS_TOKEN ? true : false;
 
@@ -110,22 +110,24 @@ async function loadData() {
       const fl = (await db.execute("SELECT date, count FROM follower_log ORDER BY date DESC LIMIT 14")).rows as any[];
       const cur = (
         await db.execute(
-          `SELECT COUNT(*) n, COALESCE(SUM(like_count),0) l, COALESCE(SUM(comment_count),0) c
+          `SELECT COUNT(*) n, COALESCE(SUM(like_count),0) l, COALESCE(SUM(comment_count),0) c,
+                  COALESCE(SUM(views),0) v, COALESCE(SUM(reach),0) rc, COALESCE(SUM(saved),0) s
            FROM posts WHERE status='published' AND created_at >= datetime('now','-7 days')`
         )
       ).rows[0] as any;
       const prev = (
         await db.execute(
-          `SELECT COUNT(*) n, COALESCE(SUM(like_count),0) l, COALESCE(SUM(comment_count),0) c
+          `SELECT COUNT(*) n, COALESCE(SUM(like_count),0) l, COALESCE(SUM(comment_count),0) c,
+                  COALESCE(SUM(views),0) v, COALESCE(SUM(reach),0) rc, COALESCE(SUM(saved),0) s
            FROM posts WHERE status='published'
              AND created_at >= datetime('now','-14 days') AND created_at < datetime('now','-7 days')`
         )
       ).rows[0] as any;
       const best = (
         await db.execute(
-          `SELECT place_name, like_count, comment_count FROM posts
+          `SELECT place_name, like_count, comment_count, views, reach, saved FROM posts
            WHERE status='published' AND created_at >= datetime('now','-7 days')
-           ORDER BY (COALESCE(like_count,0)+COALESCE(comment_count,0)*3) DESC LIMIT 1`
+           ORDER BY COALESCE(views,0) DESC, (COALESCE(like_count,0)+COALESCE(comment_count,0)*3) DESC LIMIT 1`
         )
       ).rows[0] as any;
       const now = fl[0] ? Number(fl[0].count) : null;
@@ -134,7 +136,9 @@ async function loadData() {
         followers: now,
         followersDelta: now !== null && weekAgo ? now - Number(weekAgo.count) : null,
         posts7: Number(cur.n), likes7: Number(cur.l), comments7: Number(cur.c),
+        views7: Number(cur.v), reach7: Number(cur.rc), saved7: Number(cur.s),
         postsPrev: Number(prev.n), likesPrev: Number(prev.l), commentsPrev: Number(prev.c),
+        viewsPrev: Number(prev.v), reachPrev: Number(prev.rc), savedPrev: Number(prev.s),
         best: best ?? null,
       };
     } catch { /* 데이터 부족 */ }
@@ -308,12 +312,13 @@ export default async function Home() {
                 marginBottom: 16,
               }}
             >
-              <div style={{ fontWeight: 700, marginBottom: 8 }}>🔥 인기 TOP{data.popular.length}</div>
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>🔥 조회수 TOP{data.popular.length}</div>
               {data.popular.map((p: any, i: number) => (
                 <div key={i} style={{ color: "#c8cdd8", fontSize: 13.5, padding: "3px 0" }}>
                   {["🥇", "🥈", "🥉"][i]} {p.place_name}
                   <span style={{ color: "#9aa0ae", marginLeft: 8 }}>
-                    ❤️ {Number(p.like_count) || 0} 💬 {Number(p.comment_count) || 0}
+                    👁 {Number(p.views || 0).toLocaleString()} · 도달 {Number(p.reach || 0).toLocaleString()} · 저장 {Number(p.saved) || 0}
+                    {" "}· ❤️ {Number(p.like_count) || 0}
                   </span>
                 </div>
               ))}
@@ -354,14 +359,19 @@ export default async function Home() {
                       <span style={{ color: "#9aa0ae" }}>수집 중 (다음 크론부터 기록)</span>
                     )}
                     <br />
-                    📤 발행 {r.posts7}건{delta(r.posts7, r.postsPrev)} · ❤️ {r.likes7}
-                    {delta(r.likes7, r.likesPrev)} · 💬 {r.comments7}
-                    {delta(r.comments7, r.commentsPrev)}
+                    📤 발행 {r.posts7}건{delta(r.posts7, r.postsPrev)} · 👁 조회 {Number(r.views7).toLocaleString()}
+                    {delta(r.views7, r.viewsPrev)} · 도달 {Number(r.reach7).toLocaleString()}
+                    {delta(r.reach7, r.reachPrev)} · 저장 {r.saved7}
+                    {delta(r.saved7, r.savedPrev)}
+                    <br />
+                    <span style={{ color: "#9aa0ae" }}>
+                      ❤️ {r.likes7}{delta(r.likes7, r.likesPrev)} · 💬 {r.comments7}{delta(r.comments7, r.commentsPrev)}
+                    </span>
                     {r.best && (
                       <>
                         <br />
-                        🏆 이번 주 베스트: {r.best.place_name} (❤️ {Number(r.best.like_count) || 0} 💬{" "}
-                        {Number(r.best.comment_count) || 0})
+                        🏆 이번 주 베스트: {r.best.place_name} (👁 {Number(r.best.views || 0).toLocaleString()} · 도달{" "}
+                        {Number(r.best.reach || 0).toLocaleString()} · 저장 {Number(r.best.saved) || 0})
                       </>
                     )}
                   </div>
