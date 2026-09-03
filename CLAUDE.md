@@ -59,10 +59,12 @@ npx tsc --noEmit && npx next build   # 웹훅·API·lib 변경 시 (Vercel 배�
 node --check scripts/make-roundup.mjs
 ```
 - GitHub 러너에서 실경로 렌더 확인: `gh workflow run roundup.yml -f dry=true` → 아티팩트 `dry-preview`.
+- 실패한 회차 재발행: `gh workflow run roundup.yml -f theme=<테마키>` (예: area-seongsu). 시작 시 30분 넘은 `publishing` 행은 `failed`로 정리되고, 같은 테마의 failed 행은 지워진 뒤 재시도된다. 시크릿 없는 클라우드 세션도 GitHub MCP로 workflow_dispatch(브랜치 ref 가능)는 할 수 있다 — 단 사용자가 명시적으로 요청했을 때만.
 - 디자인 변경 PR에는 렌더한 미리보기 이미지를 첨부/설명할 것 — 사용자는 폰에서 그림으로 판단한다.
 
 ## 함정 (실제로 겪은 것)
 - `db.execute({ sql })`에 `args`가 없으면 libsql이 크래시 — 인자 없으면 문자열로 호출.
+- posts 행은 인스타 발행 **전에** `publishing`으로 선기록된다. 발행 중 예외가 나면 마지막 catch가 `failed`로 바꾼다(2026-09-03 성수 편: 인스타가 사유 없이 컨테이너 ERROR → 행이 `publishing`으로 남아 대시보드엔 게시된 듯 보이고 하루 1회 가드가 재발행을 막았음). 릴스 컨테이너 ERROR는 다른 호스트로 재업로드해 1회 재시도한다.
 - `next.config.mjs`의 `outputFileTracingIncludes`에 `fs.readFileSync` 데이터 파일을 안 넣으면 Vercel에서 **조용히** 파일이 없다(`?diag=1`로 검증).
 - ffmpeg `-t`를 입력 옵션 위치에 두면 무한 BGM 루프와 `-shortest`가 만나 렌더가 안 끝난다 — 출력 옵션으로.
 - 셸 한 줄(node -e)로 한국어·백틱·`${}`가 든 소스를 수정하지 말 것 — 인용이 깨진다. 파일 편집은 편집 도구나 heredoc 스크립트로.
