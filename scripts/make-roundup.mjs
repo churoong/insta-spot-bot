@@ -1509,24 +1509,34 @@ async function main() {
     }
   }
 
-  // 지역편 요일: 화·목·토(KST) 저녁 모음집은 "동네 맛집" 지역편 풀에서 뽑는다 (주 3회).
-  // 나머지 요일·큐레이션·캐러셀은 음식 테마 풀. 포인터도 따로(area_idx).
+  // 저녁 모음집 요일 슬롯 (2026-09-03 사용자 지시: 상권 > 지역 > 동일음식 전국 순으로 많이):
+  //   화·목·토 = 상권(반경 1.5km 동네 맛집) 3회 / 월·금 = 지역(도시 종합 + 권역×음식) 2회 /
+  //   수·일 = 전국 음식 테마 2회. 슬롯마다 포인터 따로. 큐레이션·캐러셀은 음식 테마만.
+  //   ※ 도시×단일음식(춘천 닭갈비 등)은 실측 풀 0~9곳이라 불가 — 권역 단위까지만.
   const kstDow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay(); // 0=일
-  const areaDay = !process.env.ROUNDUP_STYLE && [2, 4, 6].includes(kstDow);
+  const SLOT_BY_DOW = ["nation", "city", "spot", "nation", "spot", "city", "spot"]; // 일~토
+  const slot = process.env.ROUNDUP_STYLE ? "food" : SLOT_BY_DOW[kstDow];
+  const isSpot = (t) => t.mode === "area" && t.tour?.mapX;
+  const isCity = (t) => (t.mode === "area" && !t.tour?.mapX) || (t.mode !== "area" && (t.areaCode || t.areaCodes));
+  const inSlot = (t) =>
+    slot === "spot" ? isSpot(t)
+    : slot === "city" ? isCity(t)
+    : slot === "nation" ? t.mode !== "area" && !t.areaCode && !t.areaCodes
+    : t.mode !== "area"; // food: 큐레이션·캐러셀 (전국+권역 음식)
   // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
   // 모음집(grid)과 큐레이션(countdown)은 포인터를 따로 둬 같은 테마가 겹치지 않게 함
   const IDX_KEY =
     process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx"
     : process.env.ROUNDUP_STYLE === "carousel" ? "carousel_idx"
-    : areaDay ? "area_idx" : "roundup_idx";
+    : slot === "spot" ? "spot_idx" : slot === "city" ? "city_idx" : "roundup_idx";
   const idxRow = await db.execute({
     sql: "SELECT value FROM config WHERE key = ?",
     args: [IDX_KEY],
   });
   const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
   const allThemes = themesData.themes;
-  const all = allThemes.filter((t) => (t.mode === "area") === areaDay);
-  if (areaDay) console.log("지역편 요일 — 동네 맛집 풀", all.length, "개");
+  const all = allThemes.filter(inSlot);
+  console.log(`오늘 슬롯: ${slot} — 풀 ${all.length}개`);
   // 조회수 성과로 가중한 순서 (데이터가 없거나 조회 실패면 기존 단순 로테이션)
   const perf = await themeWeights(db, all);
   const ordered = perf

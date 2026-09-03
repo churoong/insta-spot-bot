@@ -1287,6 +1287,168 @@
     "mapY": 37.5345,
     "radius": 1500
    }
+  },
+  {
+   "key": "area-apgujeong",
+   "mode": "area",
+   "keyword": "압구정·청담",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "압구정맛집",
+    "청담맛집",
+    "강남맛집"
+   ],
+   "tour": {
+    "mapX": 127.029,
+    "mapY": 37.527,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-gangnam-station",
+   "mode": "area",
+   "keyword": "강남역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "강남역맛집",
+    "강남맛집",
+    "신논현맛집"
+   ],
+   "tour": {
+    "mapX": 127.0276,
+    "mapY": 37.4979,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-jamsil",
+   "mode": "area",
+   "keyword": "잠실",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "잠실맛집",
+    "송리단길",
+    "송파맛집"
+   ],
+   "tour": {
+    "mapX": 127.105,
+    "mapY": 37.51,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-kondae",
+   "mode": "area",
+   "keyword": "건대",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "건대맛집",
+    "건대입구맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.07,
+    "mapY": 37.5404,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-gwangjang",
+   "mode": "area",
+   "keyword": "광장시장",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "광장시장맛집",
+    "종로맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.999,
+    "mapY": 37.57,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-yeouido",
+   "mode": "area",
+   "keyword": "여의도",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "여의도맛집",
+    "영등포맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9245,
+    "mapY": 37.5219,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-haengridan",
+   "mode": "area",
+   "keyword": "수원 행리단길",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "행리단길",
+    "수원맛집",
+    "행궁동맛집"
+   ],
+   "tour": {
+    "mapX": 127.017,
+    "mapY": 37.286,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-seochon",
+   "mode": "area",
+   "keyword": "서촌",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "서촌맛집",
+    "경복궁맛집",
+    "종로맛집"
+   ],
+   "tour": {
+    "mapX": 126.972,
+    "mapY": 37.579,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-bukchon",
+   "mode": "area",
+   "keyword": "북촌·삼청동",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "북촌맛집",
+    "삼청동맛집",
+    "종로맛집"
+   ],
+   "tour": {
+    "mapX": 126.984,
+    "mapY": 37.582,
+    "radius": 1500
+   }
   }
  ]
 }
