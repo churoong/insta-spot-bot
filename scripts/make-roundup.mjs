@@ -95,6 +95,10 @@ const SIDO_SHORT = {
   제주특별자치도: "제주", 제주도: "제주",
 };
 
+// 대표 사진 최소 가로 해상도. 서울 음식관광 DB(레드테이블) 사진은 메뉴 등록용 썸네일이라
+// 릴스 1080px 풀블리드에 올리면 뭉개진다(9/3 성수 편 1위·6위 실측). 이보다 작은 후보는
+// 비전에 보내기도 전에 제외 — TourAPI 원본(originimgurl)은 보통 이 기준을 넘는다.
+const MIN_PHOTO_W = 900;
 const BAD_IMG_NAME =
   /(화장실|주차|기저귀|수유|경사로|안내도|안내판|표지판|매표|엘리베이터|승강기|휠체어|점자|유도블록|소화전|진입로|비상|피난|보관함|안내소|계산대)/;
 
@@ -568,9 +572,17 @@ async function pickFoodImage(place, food) {
         const res = await fetch(c.small, { signal: AbortSignal.timeout(15000) });
         if (!res.ok) continue;
         let b = Buffer.from(await res.arrayBuffer());
+        const sharp = (await import("sharp")).default;
+        // 해상도 게이트 — 작은 사진은 아무리 음식이 잘 보여도 릴스에 못 쓴다
+        try {
+          const meta = await sharp(b).metadata();
+          if ((meta.width ?? 0) < MIN_PHOTO_W) {
+            console.log(`  저해상도 제외(${meta.width}px): ${c.url.slice(-48)}`);
+            continue;
+          }
+        } catch { continue; }
         // 비짓제주는 webp, 일부 원본은 4MB급 — JPEG로 통일·축소해서 비전에 넘긴다
         if (b.length > 900_000 || !(b[0] === 0xff && b[1] === 0xd8)) {
-          const sharp = (await import("sharp")).default;
           b = await sharp(b).resize(720, 720, { fit: "inside" }).jpeg({ quality: 78 }).toBuffer();
         }
         valid.push(c);
@@ -1158,7 +1170,7 @@ async function renderPagesReel(stills, bgm, outMp4) {
   for (let i = 0; i < stills.length; i++) {
     const c = path.join(TMP, `pg_${i}.mp4`);
     await ff(["-y", "-loop", "1", "-i", stills[i].path, "-vf", "fps=30,format=yuv420p",
-      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", String(stills[i].sec), c]);
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-tune", "stillimage", "-t", String(stills[i].sec), c]);
     clips.push(c);
   }
   const list = path.join(TMP, "pg_list.txt");
@@ -1174,7 +1186,7 @@ async function renderPagesReel(stills, bgm, outMp4) {
     "-filter_complex",
     `[0:v]fps=30,format=yuv420p[v]${bgm ? `;[1:a]volume=0.35,afade=t=out:st=${(total - 0.8).toFixed(1)}:d=0.8[a]` : ""}`,
     "-map", "[v]", "-map", bgm ? "[a]" : "1:a",
-    "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac",
     "-t", String(total), "-movflags", "+faststart", outMp4,
   ]);
   return total;
@@ -1224,7 +1236,7 @@ async function bgFrame(sharp, imgUrl, brightness = 0.5, blur = 0) {
 
 /** 인트로 카드 — "부산 돼지국밥 TOP 8" 같은 제목을 크게 */
 async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
-  const bg = await bgFrame(sharp, (places.find((p) => p.foodPicked) ?? places[0]).imageUrl, 0.4, 8);
+  const bg = await bgFrame(sharp, (places.find((p) => p.foodPicked) ?? places[0]).imageUrl, 0.5, 8);
   const lines = wrapLines(title, 10, 3);
   const size = lines.length >= 3 ? 100 : lines.length === 2 ? 116 : 128;
   const lineH = Math.round(size * 1.28);
@@ -1245,7 +1257,8 @@ async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
 
 /** 순위 카드 — 큰 순위 숫자 + 상호명 + 지역 + 한줄평 */
 async function composeRankCard(sharp, place, rank) {
-  const bg = await bgFrame(sharp, place.imageUrl, 0.62, 0);
+  // 0.62였을 때 사진이 탁해 보인다는 피드백(9/3) — 사진은 살리고 가독성은 하단 박스·외곽선으로
+  const bg = await bgFrame(sharp, place.imageUrl, 0.85, 0);
   const nameLines = wrapLines(place.name, 11, 2);
   const nameSize = nameLines.length === 2 ? 78 : 92;
   const clip = (l) => {
@@ -1497,7 +1510,7 @@ function buildCaption(theme, places, descending = false, ep = null, basis = "") 
     `🗺 ${places.length}곳 지도 링크가 필요하면 댓글에 '지도'라고 남겨주세요\n\n` +
     `${saveCta}\n` +
     `⏰ 내일 저녁 5시 반, 다음 편으로 이어집니다\n\n` +
-    `${tags}\n\n📷 사진·정보 출처: 한국관광공사 TourAPI`
+    tags
   );
 }
 
@@ -1523,7 +1536,8 @@ async function main() {
     await sharpMod(await composeChecklistCard(sharpMod, theme, places))
       .extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 })
       .toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
-    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg`);
+    fs.writeFileSync("countdown-card-preview.jpg", await composeRankCard(sharpMod, places[0], 1));
+    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg, countdown-card-preview.jpg`);
     return;
   }
 
@@ -2042,7 +2056,9 @@ async function main() {
         "-y", "-loop", "1", "-i", cards[i], "-t", String(secs.toFixed(2)), "-r", "30",
         "-vf",
         `scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0005,1.10)':d=${d}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p`,
-        "-c:v", "libx264", "-preset", "veryfast", out,
+        // CRF 18: 기본(23)은 정지 사진+줌에서 뭉개짐이 보였다. 컷은 여기서 한 번만 인코딩하고
+        // 아래 concat은 재인코딩 없이 이어 붙인다 (세대 손실 1회 제거)
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", out,
       ]);
       clips.push(out);
     }
@@ -2051,7 +2067,7 @@ async function main() {
     const silent = path.join(TMP, "c_silent.mp4");
     await ff([
       "-y", "-f", "concat", "-safe", "0", "-i", listFile,
-      "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", silent,
+      "-c", "copy", silent, // 컷들이 같은 인코딩 파라미터라 무손실 병합
     ]);
     const cdSec = await probeDuration(silent);
     const cdFade = cdSec > 2 ? `,afade=t=out:st=${(cdSec - 0.8).toFixed(2)}:d=0.8` : "";
@@ -2106,7 +2122,7 @@ async function main() {
       "-filter_complex",
       `[0:v]fps=30,format=yuv420p[v]${bgm ? ";[1:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,
       "-map", "[v]", "-map", bgm ? "[a]" : "1:a",
-      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-c:a", "aac",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-tune", "stillimage", "-c:a", "aac",
       "-t", "8", "-movflags", "+faststart", reelMp4,
     ]);
   }
