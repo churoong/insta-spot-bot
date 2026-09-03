@@ -1280,6 +1280,31 @@ function buildCaption(theme, places, descending = false, ep = null, basis = "") 
 }
 
 async function main() {
+  // ── 오프라인 렌더 모드: 시크릿·DB·외부 API 없이 표지·카드만 렌더 ──
+  // 클라우드 세션(claude.ai/code)이나 .env 없는 환경에서 디자인 수정을 눈으로
+  // 검증하는 용도. data/dry-sample.json(실제 DRY 수집 결과)을 그대로 compose에 넣는다.
+  //   ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs
+  //   → roundup-reel-preview.jpg / carousel-preview-*.jpg 생성 (발행·DB 접근 없음)
+  if (process.env.ROUNDUP_OFFLINE === "1") {
+    const { theme, places } = JSON.parse(
+      fs.readFileSync(new URL("../data/dry-sample.json", import.meta.url), "utf8")
+    );
+    const sharpMod = (await import("sharp")).default;
+    if (process.env.COVER_TFONT) TFONT = process.env.COVER_TFONT;
+    fs.copyFileSync(await composeReelCover(theme, places, false, null), "roundup-reel-preview.jpg");
+    const pad = (n) => String(n).padStart(2, "0");
+    await sharpMod("roundup-reel-preview.jpg").extract({ left: 0, top: 285, width: 1080, height: 1350 })
+      .jpeg({ quality: 90 }).toFile("carousel-preview-01-cover.jpg");
+    for (let i = 0; i < places.length; i++) {
+      fs.writeFileSync(`carousel-preview-${pad(i + 2)}-card.jpg`, await composeCarouselCard(sharpMod, places[i], i + 1));
+    }
+    await sharpMod(await composeChecklistCard(sharpMod, theme, places))
+      .extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 })
+      .toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
+    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg`);
+    return;
+  }
+
   const { db, initDb } = await import("../lib/db.ts");
   const themesData = JSON.parse(
     fs.readFileSync(new URL("../data/roundup-themes.json", import.meta.url), "utf8")
