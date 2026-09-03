@@ -288,6 +288,7 @@ async function jejuPlaces(keyword) {
       address: clean(it.roadaddress || it.address),
       region: shortRegion(it.roadaddress || it.address),
       imageUrl: String(it.repPhoto.photoid.imgpath),
+      lat: Number(it.latitude) || null, lng: Number(it.longitude) || null,
       // 태그는 공식 메타데이터라 설명 근거로 붙여준다 (메뉴 필드는 없음 — 지어내기 방지 위해 비움)
       overview: `${clean(it.introduction)}${it.tag ? ` (키워드: ${clean(it.tag)})` : ""}`.slice(0, 300),
     }));
@@ -317,6 +318,7 @@ async function busanPlaces(keyword) {
       address: `부산 ${clean(it.GUGUN_NM)} ${clean(it.ADDR1)}`,
       region: `부산 ${clean(it.GUGUN_NM).replace(/(구|군)$/, "")}`,
       imageUrl: String(it.MAIN_IMG_NORMAL),
+      lat: Number(it.LAT) || null, lng: Number(it.LNG) || null,
       // 설명·캡션 재료가 이미 갖춰져 있어 enrichPlaces의 TourAPI 조회가 불필요
       menu: clean(it.RPRSNTV_MENU).slice(0, 60),
       overview: clean(it.ITEMCNTNTS).slice(0, 300),
@@ -399,18 +401,69 @@ async function collectAreaPlaces(theme, limit) {
       !AREA_BAD_CAT.test(String(it.cat3 ?? "")) &&
       !AREA_BAD_NAME.test(String(it.title ?? ""))
   );
+  // 보조 소스 반경 합류 (2026-09-03): TourAPI가 얇은 상권(서면·광안리·애월 등)을
+  // 부산맛집 API·비짓제주·서울 음식관광 DB로 채운다. 좌표 있는 상권 테마에서만.
+  const extra = t.mapX && t.mapY ? await supplementNearby(theme, Number(t.mapX), Number(t.mapY), Number(t.radius ?? 1500)) : [];
   const picked = [];
+  const names = new Set();
+  // 보조 소스는 풀의 절반까지만 — 나머지는 TourAPI(공공누리 사진)로 섞어 소스 편중을 막는다
+  const extraCap = Math.ceil((limit ?? theme.count) / 2);
+  for (const b of extra.sort(() => Math.random() - 0.5)) {
+    if (picked.length >= extraCap) break;
+    names.add(normName(b.name));
+    picked.push(b);
+  }
   for (const it of items.sort(() => Math.random() - 0.5)) {
+    if (picked.length >= (limit ?? theme.count)) break;
+    const nm = String(it.title).replace(/\[[^\]]*\]/g, "").trim();
+    if (names.has(normName(nm))) continue; // 보조 소스와 중복
     picked.push({
       contentId: String(it.contentid),
-      name: String(it.title).replace(/\[[^\]]*\]/g, "").trim(),
+      name: nm,
       address: [it.addr1, it.addr2].filter(Boolean).join(" "),
       region: shortRegion(it.addr1),
       imageUrl: toHttps(it.firstimage),
     });
-    if (picked.length >= (limit ?? theme.count)) break;
   }
+  if (extra.length) console.log(`[collect:area] 보조 소스 ${extra.length}곳 합류 (${theme.region})`);
   return picked;
+}
+
+/** 두 좌표 사이 거리(m) */
+function distM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1), dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** 상권 좌표 반경 안의 보조 소스 식당 — 지역(시도)에 맞는 소스만 조회한다 */
+async function supplementNearby(theme, x, y, radius) {
+  const region = String(theme.region ?? "");
+  const out = [];
+  try {
+    if (region.startsWith("부산")) {
+      for (const p of await busanPlaces("")) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
+    } else if (region.startsWith("제주")) {
+      for (const p of await jejuPlaces("")) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
+    } else if (region.startsWith("서울")) {
+      const { seoulNearby } = await import("../lib/seoulfood.ts");
+      for (const p of seoulNearby(y, x, radius)) {
+        out.push({
+          contentId: `seoul-${p.id}`,
+          name: String(p.name).trim(),
+          address: String(p.addr),
+          region: shortRegion(p.addr),
+          imageUrl: p.imgs[0],
+          extraImages: p.imgs.slice(1, 6), // 비전이 음식 컷을 고르도록 나머지 사진도 후보로
+          overview: p.intro && !/(찾으신다면|추천합니다!|가 ?볼 ?만한)/.test(p.intro) ? String(p.intro).slice(0, 300) : "",
+        });
+      }
+    }
+  } catch (e) {
+    console.error("[collect:area] 보조 소스 실패(무시):", String(e).slice(0, 80));
+  }
+  return out;
 }
 
 async function collectPlaces(theme, limit) {
@@ -486,13 +539,14 @@ async function markHundredYear(db, places) {
 async function pickFoodImage(place, food) {
   try {
     // 지자체 소스(busan-·jeju-)는 TourAPI 콘텐츠가 아니라 추가 이미지 조회가 없다 — 대표 1장만 검사
-    const items = /^(busan|jeju)-/.test(place.contentId)
+    const items = /^(busan|jeju|seoul)-/.test(place.contentId)
       ? []
       : await tourCall("detailImage2", {
           contentId: place.contentId, imageYN: "Y", numOfRows: "15",
         });
     const cands = [
       { url: place.imageUrl, small: place.imageUrl },
+      ...(place.extraImages ?? []).map((u) => ({ url: u, small: u })),
       ...items
         .filter((it) => !(it.imgname && BAD_IMG_NAME.test(it.imgname)))
         .map((it) => ({

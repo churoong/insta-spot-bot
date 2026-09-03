@@ -57,6 +57,21 @@ function load(): SeoulPlace[] {
   return cache;
 }
 
+/**
+ * 좌표 반경 안의 서울 DB 식당 (상권 모음집 풀 보강용, 2026-09-03).
+ * 반환은 원본 레코드 그대로(imgs 배열 포함) — 호출부가 카드 형태로 매핑한다.
+ */
+export function seoulNearby(lat: number, lng: number, radiusM: number): SeoulPlace[] {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  return load().filter((p) => {
+    if (!p.lat || !p.lng) return false;
+    const dLat = toRad(Number(p.lat) - lat), dLng = toRad(Number(p.lng) - lng);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat)) * Math.cos(toRad(Number(p.lat))) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a)) <= radiusM;
+  });
+}
+
 export function seoulAvailable(): boolean {
   return load().length > 0;
 }
