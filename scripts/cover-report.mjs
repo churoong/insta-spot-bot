@@ -11,8 +11,8 @@
 const B = "https://graph.instagram.com/v23.0";
 const TOKEN = process.env.IG_ACCESS_TOKEN;
 
-const STYLES = ["classic", "hero", "dark"];
-const LABEL = { classic: "기존(흰 카드)", hero: "A안(히어로)", dark: "C안(다크)" };
+const STYLES = ["classic", "hero", "pages", "dark"];
+const LABEL = { classic: "기존(흰 카드)", hero: "A안(히어로)", pages: "페이지형(슬라이드)", dark: "C안(다크)" };
 
 async function insights(mediaId) {
   try {

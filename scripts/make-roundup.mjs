@@ -1073,6 +1073,65 @@ async function composeChecklistCard(sharp, theme, places) {
   return out;
 }
 
+/**
+ * 페이지형 릴스 프레임: 캐러셀 카드(1080x1350)를 9:16 캔버스 가운데(y=285)에 얹고,
+ * 위아래는 카드 사진을 늘려 블러·어둡게 깔아 검은 띠가 안 보이게 한다.
+ */
+async function composePageFrame(sharp, cardBuf, outPath) {
+  const bg = await sharp(cardBuf).resize(1080, 1920, { fit: "cover" }).blur(28)
+    .modulate({ brightness: 0.55, saturation: 1.1 }).jpeg({ quality: 80 }).toBuffer();
+  await sharp(bg).composite([{ input: cardBuf, top: 285, left: 0 }]).jpeg({ quality: 90 }).toFile(outPath);
+  return outPath;
+}
+
+/**
+ * 페이지형 릴스 렌더 — 표지 정지컷 + 식당 카드 프레임들을 순서대로 이어붙이고 BGM을 얹는다.
+ * stills: [{ path, sec }] 순서대로. 정지컷 → 개별 클립(같은 인코딩) → concat → 오디오 믹스.
+ * ⚠️ "-t"는 출력 옵션 위치에 — 입력 사이에 두면 무한 루프 BGM과 -shortest가 만나 안 끝난다.
+ */
+async function renderPagesReel(stills, bgm, outMp4) {
+  const ff = (args) =>
+    new Promise((resolve, reject) => {
+      const p = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "inherit"] });
+      p.on("error", reject);
+      p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
+    });
+  const clips = [];
+  for (let i = 0; i < stills.length; i++) {
+    const c = path.join(TMP, `pg_${i}.mp4`);
+    await ff(["-y", "-loop", "1", "-i", stills[i].path, "-vf", "fps=30,format=yuv420p",
+      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", String(stills[i].sec), c]);
+    clips.push(c);
+  }
+  const list = path.join(TMP, "pg_list.txt");
+  fs.writeFileSync(list, clips.map((c) => `file '${c.replace(/\\/g, "/")}'`).join("\n"));
+  const joined = path.join(TMP, "pg_joined.mp4");
+  await ff(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", joined]);
+  const total = stills.reduce((a, x) => a + x.sec, 0);
+  const audio = bgm
+    ? ["-stream_loop", "-1", "-i", bgm.path]
+    : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
+  await ff([
+    "-y", "-i", joined, ...audio,
+    "-filter_complex",
+    `[0:v]fps=30,format=yuv420p[v]${bgm ? `;[1:a]volume=0.35,afade=t=out:st=${(total - 0.8).toFixed(1)}:d=0.8[a]` : ""}`,
+    "-map", "[v]", "-map", bgm ? "[a]" : "1:a",
+    "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
+    "-t", String(total), "-movflags", "+faststart", outMp4,
+  ]);
+  return total;
+}
+
+/** 페이지형 정지컷 목록: 표지 4초 + 식당 카드 각 2.5초 (사용자 지정) */
+async function buildPageStills(sharp, reelCover, places) {
+  const stills = [{ path: reelCover, sec: 4 }];
+  for (let i = 0; i < places.length; i++) {
+    const card = await composeCarouselCard(sharp, places[i], i + 1);
+    stills.push({ path: await composePageFrame(sharp, card, path.join(TMP, `pg_frame_${i + 1}.jpg`)), sec: 2.5 });
+  }
+  return stills;
+}
+
 /** 수치 축약 — 2796→2.8천, 292000→29만 (데이터 배지용) */
 function fmtK(n) {
   n = Number(n) || 0;
@@ -1579,7 +1638,9 @@ async function main() {
     // 표지 실험 판정(2026-09-01, 스타일별 4건): classic 평균 2,205(돌파 3/4) vs
     // dark 210(0/4) vs hero 142(0/2) — 검증된 승자 classic에 몰고 hero만 주 1회
     // 실험 유지, dark는 제외. (되돌리려면 배열만 바꾸면 됨)
-    const STYLES = ["classic", "classic", "classic", "hero", "classic", "classic", "classic"];
+    // 2026-09-03 사용자 지시: 페이지형(표지 → 식당 카드 6장 슬라이드쇼, 장당 2.5초)을
+    // A/B로 추가 — classic 5 : hero 1 : pages 1. 판정은 cover-report.
+    const STYLES = ["classic", "classic", "hero", "classic", "classic", "pages", "classic"];
     if (process.env.COVER_STYLE && STYLES.includes(process.env.COVER_STYLE)) {
       coverStyle = process.env.COVER_STYLE; // 시안 확인용 수동 지정
     } else {
@@ -1729,6 +1790,17 @@ async function main() {
       console.log("DRY — countdown-intro-preview.jpg / countdown-rank-preview.jpg 저장");
     } else {
       fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
+      if (coverStyle === "pages") {
+        const stills = await buildPageStills(sharpMod, reelCover, places);
+        stills.forEach((st, i) => fs.copyFileSync(st.path, `pages-preview-${String(i + 1).padStart(2, "0")}.jpg`));
+        console.log(`DRY — pages-preview-01~${String(stills.length).padStart(2, "0")}.jpg 저장`);
+        if (process.env.DRY_RENDER === "1") {
+          // 로컬 ffmpeg로 실제 영상까지 (발행 없음) — 컷 이어붙이기·BGM 검증용
+          const { pickBgm } = await import("../lib/bgm.ts");
+          const total = await renderPagesReel(stills, pickBgm(), "pages-preview.mp4");
+          console.log(`DRY — pages-preview.mp4 렌더 (${total}초)`);
+        }
+      }
       if (STYLE === "carousel") {
         // 실발행과 동일한 전체 장 구성 미리보기 — 표지(4:5 크롭) + 식당 카드들 + 체크리스트
         const pad = (n) => String(n).padStart(2, "0");
@@ -1932,6 +2004,11 @@ async function main() {
       ]);
     }
     console.log(`카운트다운 릴스 렌더 완료 (${clips.length}컷${voiceWav ? ", 음성 포함" : ""})`);
+  } else if (coverStyle === "pages") {
+    // 페이지형: classic 표지 4초 → 식당 카드 6장 각 2.5초 (총 ~19초, BGM만, 나레이션 없음)
+    const stills = await buildPageStills(sharpMod, reelCover, places);
+    const total = await renderPagesReel(stills, bgm, reelMp4);
+    console.log(`페이지형 릴스 렌더 완료 (${stills.length}컷, ${total}초)`);
   } else {
     // 리스트 표지 → 8초 고정 세로 릴스 (기존 모음집).
     // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
