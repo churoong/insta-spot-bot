@@ -565,6 +565,16 @@ async function pickFoodImage(place, food) {
       .filter((v, i, a) => v.url && a.findIndex((x) => x.url === v.url) === i)
       .slice(0, 6);
     if (cands.length < 1 || !process.env.GEMINI_API_KEY) return;
+    const sharp = (await import("sharp")).default;
+    // 해상도 게이트 — 작은 사진은 아무리 음식이 잘 보여도 릴스 풀블리드에 못 쓴다.
+    // 비전에는 썸네일(small)을 보내므로 크기는 반드시 '원본(url)'으로 재야 한다
+    // (썸네일로 재면 TourAPI 후보가 전부 150px로 걸러진다 — 9/3 DRY 실측).
+    const wideEnough = async (buf, url) => {
+      const meta = await sharp(buf).metadata();
+      if ((meta.width ?? 0) >= MIN_PHOTO_W) return true;
+      console.log(`  저해상도 제외(${meta.width}px): ${url.slice(-48)}`);
+      return false;
+    };
 
     const valid = [], parts = [];
     for (const c of cands) {
@@ -572,15 +582,8 @@ async function pickFoodImage(place, food) {
         const res = await fetch(c.small, { signal: AbortSignal.timeout(15000) });
         if (!res.ok) continue;
         let b = Buffer.from(await res.arrayBuffer());
-        const sharp = (await import("sharp")).default;
-        // 해상도 게이트 — 작은 사진은 아무리 음식이 잘 보여도 릴스에 못 쓴다
-        try {
-          const meta = await sharp(b).metadata();
-          if ((meta.width ?? 0) < MIN_PHOTO_W) {
-            console.log(`  저해상도 제외(${meta.width}px): ${c.url.slice(-48)}`);
-            continue;
-          }
-        } catch { continue; }
+        // 비전용 사본이 곧 원본인 후보(대표 사진·지자체 소스)는 여기서 바로 거른다
+        if (c.small === c.url && !(await wideEnough(b, c.url))) continue;
         // 비짓제주는 webp, 일부 원본은 4MB급 — JPEG로 통일·축소해서 비전에 넘긴다
         if (b.length > 900_000 || !(b[0] === 0xff && b[1] === 0xd8)) {
           b = await sharp(b).resize(720, 720, { fit: "inside" }).jpeg({ quality: 78 }).toBuffer();
@@ -601,7 +604,18 @@ async function pickFoodImage(place, food) {
       )) ?? "";
     const m = text.match(/\[[\d,\s]*\]/);
     const order = m ? JSON.parse(m[0]) : [];
-    const best = order.length ? valid[Number(order[0]) - 1] : null;
+    // 비전이 고른 순서대로 원본 해상도를 확인해 첫 합격을 채택 (원본은 여기서만 받는다)
+    let best = null;
+    for (const n of order) {
+      const cand = valid[Number(n) - 1];
+      if (!cand?.url) continue;
+      if (cand.small === cand.url) { best = cand; break; } // 위에서 이미 검사됨
+      try {
+        const r = await fetch(cand.url, { signal: AbortSignal.timeout(20000) });
+        if (!r.ok) continue;
+        if (await wideEnough(Buffer.from(await r.arrayBuffer()), cand.url)) { best = cand; break; }
+      } catch { /* 다음 후보 */ }
+    }
     if (best?.url) {
       place.imageUrl = best.url;
       place.foodPicked = true;
