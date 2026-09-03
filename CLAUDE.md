@@ -65,7 +65,7 @@ node --check scripts/make-roundup.mjs
 - 소스 파일은 CRLF일 수 있다 — 문자열 앵커 치환 시 `\r\n` 감안.
 - 로컬 Windows Git Bash는 tzdata가 없어 `TZ=Asia/Seoul date`가 UTC로 폴백한다(러너는 정상). 시간은 UTC+9 산술로.
 - 크론 지연 판단: `gh run list --json createdAt`으로 실측할 것. 추측 금지.
-- **클라우드 세션(claude.ai/code) 네트워크**: npm·apt는 되지만 `tong.visitkorea.or.kr` 등 사진 호스트는 403(허용 목록 밖). 오프라인 렌더는 `data/dry-sample-photos/` 캐시 → 네트워크 → 색 플레이스홀더 순으로 폴백하므로 클라우드에서는 **레이아웃·서체만** 검증된다. 실사진 검증은 로컬에서 `ROUNDUP_OFFLINE=1`을 한 번 돌려 캐시를 채우고 커밋. `apt-get update`는 이미지의 무관한 PPA 때문에 실패하지만 install은 된다.
+- **클라우드 세션(claude.ai/code) 네트워크**: npm·apt는 되지만 `tong.visitkorea.or.kr` 등 사진 호스트는 403(허용 목록 밖). 오프라인 렌더는 `data/dry-sample-photos/` 캐시(샘플 6장 커밋돼 있음) → 네트워크 → 색 플레이스홀더 순으로 폴백하므로 클라우드에서도 샘플 실사진으로 검증된다. 샘플(data/dry-sample.json)을 바꾸면 로컬에서 `ROUNDUP_OFFLINE=1`을 한 번 돌려 캐시를 다시 채우고 커밋. `apt-get update`는 이미지의 무관한 PPA 때문에 실패하지만 install은 된다.
 
 ## 작업 방식
 - 브랜치 → PR(사용자가 폰에서 머지). main 머지 시 Vercel 자동 배포, Actions는 다음 발행부터 반영.
