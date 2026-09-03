@@ -22,6 +22,8 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 | 캐러셀(저장형) | 토 12:30 (창 12:30~16) | carousel.yml | make-roundup (ROUNDUP_STYLE=carousel) |
 | 월간 쇼츠 벤치마크 | 매월 1일 | benchmark.yml | scripts/benchmark-shorts.mjs |
 
+**관리 페이지**(`/`, app/page.tsx): 게시물 목록에 ❤️💬 외에 👁 조회·도달·저장을 표시. 값은 `/api/cron/metrics`(Vercel 크론 07:00·19:00 KST, CRON_SECRET)가 인스타 인사이트로 갱신해 posts.views/reach/saved/metrics_at에 저장. 좋아요는 `/api/cron/post`가 별도 갱신.
+
 **발행 시각 구조**: Vercel Cron(vercel.json, ±59분) → `/api/cron/trigger/[wf]` → GitHub `workflow_dispatch` 즉시 실행이 주 경로.
 GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실측). 각 yml 첫 스텝의 **KST 발행 창 게이트**가 창 밖 런을 수 초에 스킵하고, 스크립트의 **하루 1회 가드**가 중복을 막는다. 수동 실행(workflow_dispatch)은 게이트 통과.
 
