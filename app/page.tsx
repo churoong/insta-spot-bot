@@ -158,7 +158,9 @@ async function loadData() {
       publishedCount: Number(totals.rows[0].pub) || 0,
       dryRunCount: Number(totals.rows[0].dry) || 0,
       dmCount: Number(dms.rows[0].n),
-      popular: popular.rows.filter((r: any) => Number(r.score) > 0),
+      popular: popular.rows.filter(
+        (r: any) => Number(r.views) > 0 || (Number(r.like_count) || 0) + (Number(r.comment_count) || 0) > 0
+      ),
       cooldownMin,
       cronLog,
       report,
