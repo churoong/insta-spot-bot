@@ -1379,7 +1379,7 @@ function buildCaption(theme, places, descending = false, ep = null, basis = "") 
     `💬 ${engagementLine(theme, places.length)}\n` +
     `🗺 ${places.length}곳 지도 링크가 필요하면 댓글에 '지도'라고 남겨주세요\n\n` +
     `${saveCta}\n` +
-    `⏰ 내일 저녁 6시, 다음 편으로 이어집니다\n\n` +
+    `⏰ 내일 저녁 5시 반, 다음 편으로 이어집니다\n\n` +
     `${tags}\n\n📷 사진·정보 출처: 한국관광공사 TourAPI`
   );
 }

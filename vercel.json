@@ -3,6 +3,6 @@
     { "path": "/api/cron/trigger/reels", "schedule": "13 23 * * *" },
     { "path": "/api/cron/trigger/countdown", "schedule": "41 3 * * 1,5" },
     { "path": "/api/cron/trigger/carousel", "schedule": "41 3 * * 6" },
-    { "path": "/api/cron/trigger/roundup", "schedule": "23 9 * * *" }
+    { "path": "/api/cron/trigger/roundup", "schedule": "30 8 * * *" }
   ]
 }
