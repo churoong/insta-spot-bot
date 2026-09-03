@@ -16,6 +16,60 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "roundup-"));
 const TOUR = "https://apis.data.go.kr/B551011/KorService2";
 const DRY = process.env.ROUNDUP_DRY === "1";
 const HANDLE = process.env.IG_USERNAME || "tourist_710";
+const OFFLINE = process.env.ROUNDUP_OFFLINE === "1";
+// 오프라인 렌더용 사진 캐시. 클라우드 세션(claude.ai/code)은 네트워크 정책이
+// tong.visitkorea.or.kr 같은 외부 호스트를 403으로 막는다 — 시크릿이 없는 게 아니라
+// 그림 자체를 못 받는다. 그래서 OFFLINE 모드는 이 폴더의 파일을 먼저 쓰고, 없으면
+// 짧게 네트워크를 시도하고(성공 시 여기 저장), 그래도 안 되면 색 플레이스홀더로
+// 레이아웃만 렌더한다. 로컬(네트워크 있는) 세션에서 한 번 돌리면 캐시가 채워지니
+// 커밋해 두면 클라우드에서도 실사진으로 검증할 수 있다.
+const PHOTO_CACHE_DIR = new URL("../data/dry-sample-photos/", import.meta.url);
+
+/**
+ * 사진 한 장 → Buffer. 실패하면 null (호출부가 throw/skip을 결정).
+ * OFFLINE 모드에서는 절대 null을 돌려주지 않는다 — 플레이스홀더라도 만든다.
+ */
+async function fetchPhoto(url, label = "") {
+  if (!url) return OFFLINE ? placeholderPhoto(label) : null;
+  let cacheFile = null;
+  try { if (OFFLINE) cacheFile = new URL(path.basename(new URL(url).pathname), PHOTO_CACHE_DIR); } catch { /* 이상한 URL — 캐시 없이 진행 */ }
+  if (cacheFile && fs.existsSync(cacheFile)) return fs.readFileSync(cacheFile);
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(OFFLINE ? 8000 : 20000) });
+    if (!res.ok) throw new Error("http " + res.status);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (cacheFile) {
+      fs.mkdirSync(PHOTO_CACHE_DIR, { recursive: true });
+      fs.writeFileSync(cacheFile, buf);
+    }
+    return buf;
+  } catch (e) {
+    if (!OFFLINE) return null;
+    if (!fetchPhoto.warned) {
+      fetchPhoto.warned = true;
+      console.log(`  (사진 네트워크 불가 — 플레이스홀더로 렌더: ${e.message}. 실사진 검증은 data/dry-sample-photos/ 캐시를 채워서)`);
+    }
+    return placeholderPhoto(label);
+  }
+}
+
+/** 오프라인 폴백: 따뜻한 단색 그라데이션 + 라벨 (레이아웃·서체 검증용, 발행에는 절대 안 쓰임) */
+async function placeholderPhoto(label = "") {
+  const sharp = (await import("sharp")).default;
+  let h = 0;
+  for (const ch of label) h = (h * 31 + ch.codePointAt(0)) % 360;
+  const hue = 10 + (h % 40); // 주황~적갈 계열 (음식 사진 톤 근사)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="hsl(${hue},62%,48%)"/><stop offset="1" stop-color="hsl(${hue + 18},55%,28%)"/>
+    </linearGradient></defs>
+    <rect width="1200" height="900" fill="url(#g)"/>
+    <circle cx="600" cy="450" r="260" fill="rgba(255,255,255,0.10)"/>
+    <text x="600" y="470" text-anchor="middle" font-family="${FONT}" font-size="64" font-weight="700" fill="rgba(255,255,255,0.85)">${esc(label)}</text>
+    <text x="600" y="540" text-anchor="middle" font-family="${FONT}" font-size="30" fill="rgba(255,255,255,0.6)">사진 플레이스홀더 (오프라인)</text>
+  </svg>`;
+  return sharp(Buffer.from(svg)).jpeg({ quality: 80 }).toBuffer();
+}
 // 본문·설명: Pretendard / 제목·상호명·순위: G마켓 산스 (쇼츠 썸네일 유행 서체).
 // 둘 다 assets/fonts/ 동봉 — 각 워크플로가 렌더 전에 설치한다. 미설치 환경은 Noto 폴백.
 const FONT = "'Pretendard','Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
@@ -639,9 +693,9 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   // 배경: 음식 사진 풀블리드 + 오버레이. 블러는 원본에 박힌 타 블로그 워터마크를
   // 뭉개기 위한 것(배경은 장식일 뿐이라 카드가 도드라지는 효과도 있다).
   const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
-  const bgRes = await fetch(bgUrl ?? bgPlace.imageUrl, { signal: AbortSignal.timeout(20000) });
-  if (!bgRes.ok) throw new Error("릴스 배경 사진 실패");
-  const bgPhoto = await sharp(Buffer.from(await bgRes.arrayBuffer()))
+  const bgBuf = await fetchPhoto(bgUrl ?? bgPlace.imageUrl, bgPlace.name);
+  if (!bgBuf) throw new Error("릴스 배경 사진 실패");
+  const bgPhoto = await sharp(bgBuf)
     .resize(W, H, { fit: "cover" })
     .blur(dark ? 18 : 14)
     .modulate({ saturation: dark ? 1.0 : 1.12, brightness: dark ? 0.92 : 1 })
@@ -657,12 +711,7 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   // 사진은 한 곳당 한 번만 받아 카드와 상단 모자이크에 같이 쓴다
   const photoBufs = [];
   for (const p of places) {
-    try {
-      const res = await fetch(p.imageUrl, { signal: AbortSignal.timeout(20000) });
-      photoBufs.push(res.ok ? Buffer.from(await res.arrayBuffer()) : null);
-    } catch {
-      photoBufs.push(null);
-    }
+    photoBufs.push(await fetchPhoto(p.imageUrl, p.name));
   }
 
   const mask = Buffer.from(
@@ -789,10 +838,10 @@ async function composeHeroCover(theme, places, bgUrl = null) {
   const CH = Math.round(W * 5 / 4); // 1350
 
   const p = places.find((x) => x.foodPicked) ?? places[0];
-  const res = await fetch(bgUrl ?? p.imageUrl, { signal: AbortSignal.timeout(20000) });
-  if (!res.ok) throw new Error("히어로 배경 사진 실패");
+  const heroBuf = await fetchPhoto(bgUrl ?? p.imageUrl, p.name);
+  if (!heroBuf) throw new Error("히어로 배경 사진 실패");
   // 그리드형과 달리 사진 자체가 주인공이라 블러를 넣지 않는다
-  const bgPhoto = await sharp(Buffer.from(await res.arrayBuffer()))
+  const bgPhoto = await sharp(heroBuf)
     .resize(W, H, { fit: "cover", position: "attention" })
     .modulate({ saturation: 1.14, brightness: 1.02 })
     .jpeg({ quality: 90 })
@@ -859,9 +908,9 @@ function coverName(raw) {
  */
 async function composeCarouselCard(sharp, place, idx) {
   const W = 1080, H = 1350, PH_H = 780;
-  const res = await fetch(place.imageUrl, { signal: AbortSignal.timeout(20000) });
-  if (!res.ok) throw new Error("카드 사진 실패");
-  const photo = await sharp(Buffer.from(await res.arrayBuffer()))
+  const cardBuf = await fetchPhoto(place.imageUrl, place.name);
+  if (!cardBuf) throw new Error("카드 사진 실패");
+  const photo = await sharp(cardBuf)
     .resize(W, PH_H, { fit: "cover", position: "attention" })
     .modulate({ saturation: 1.08 })
     .jpeg({ quality: 88 })
@@ -990,9 +1039,8 @@ function wrapLines(text, per, maxLines) {
 
 /** 배경 사진을 세로 규격으로 (왜곡 없이) + 어둡게 */
 async function bgFrame(sharp, imgUrl, brightness = 0.5, blur = 0) {
-  const res = await fetch(imgUrl, { signal: AbortSignal.timeout(20000) });
-  if (!res.ok) throw new Error(`배경 사진 실패 ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
+  const buf = await fetchPhoto(imgUrl);
+  if (!buf) throw new Error("배경 사진 실패");
   let p = sharp(buf).resize(RW, RH, { fit: "cover", position: sharp.strategy.attention })
     .modulate({ brightness, saturation: 1.06 });
   if (blur > 0) p = p.blur(blur);
@@ -1091,9 +1139,8 @@ async function composeCover(theme, places) {
   const cellBufs = {};
   for (let i = 0; i < places.length; i++) {
     try {
-      const res = await fetch(places[i].imageUrl, { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) continue;
-      const buf = Buffer.from(await res.arrayBuffer());
+      const buf = await fetchPhoto(places[i].imageUrl, places[i].name);
+      if (!buf) continue;
       cellBufs[i] = buf;
       const { x, y } = cellPos(i);
       const resized = await sharp(buf)
@@ -1188,9 +1235,9 @@ async function composeCover(theme, places) {
 async function composeSlide(place, rank) {
   const sharp = (await import("sharp")).default;
   const W = 1080, H = 1350, BAR = 250;
-  const res = await fetch(place.imageUrl, { signal: AbortSignal.timeout(20000) });
-  if (!res.ok) throw new Error("slide img http " + res.status);
-  const photo = await sharp(Buffer.from(await res.arrayBuffer()))
+  const slideBuf = await fetchPhoto(place.imageUrl, place.name);
+  if (!slideBuf) throw new Error("slide img 실패");
+  const photo = await sharp(slideBuf)
     .resize(W, H, { fit: "cover" })
     .jpeg({ quality: 85 })
     .toBuffer();
