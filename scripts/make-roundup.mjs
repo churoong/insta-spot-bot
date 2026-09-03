@@ -16,6 +16,10 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "roundup-"));
 const TOUR = "https://apis.data.go.kr/B551011/KorService2";
 const DRY = process.env.ROUNDUP_DRY === "1";
 const HANDLE = process.env.IG_USERNAME || "tourist_710";
+// 발행 '전에' 선기록한 posts 행. 발행 중 예외로 죽으면 마지막 catch가 이 행을 'failed'로
+// 바꾼다 — 안 그러면 'publishing'이 영원히 남아 대시보드엔 "게시된 것처럼" 보이고
+// 하루 1회 가드가 "오늘 이미 발행"으로 재발행까지 막는다 (2026-09-03 성수 편 실측).
+let pending = null; // { db, cid }
 const OFFLINE = process.env.ROUNDUP_OFFLINE === "1";
 // 오프라인 렌더용 사진 캐시. 클라우드 세션(claude.ai/code)은 네트워크 정책이
 // tong.visitkorea.or.kr 같은 외부 호스트를 403으로 막는다 — 시크릿이 없는 게 아니라
@@ -1548,6 +1552,13 @@ async function main() {
   // (같은 형식만 검사 — 정오 큐레이션이 저녁 모음집을 막으면 안 된다. DRY는 발행이
   //  없으니 가드 대상이 아님 — 로컬 미리보기 검증이 실발행에 막히면 안 된다)
   if (!DRY) {
+    // 발행 도중 죽어 30분 넘게 'publishing'인 행은 실패로 확정 (러너 15분 타임아웃보다 김).
+    // 아래 가드가 이런 행을 "오늘 이미 발행"으로 세지 않게 하려는 것.
+    await db.execute(
+      `UPDATE posts SET status = 'failed'
+        WHERE status = 'publishing' AND ig_media_id IS NULL
+          AND created_at < datetime('now', '-30 minutes')`
+    );
     const prefix =
       process.env.ROUNDUP_STYLE === "countdown" ? "countdown-%"
       : process.env.ROUNDUP_STYLE === "carousel" ? "carousel-%"
@@ -1889,11 +1900,16 @@ async function main() {
   // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커 선기록.
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const cid = `${STYLE === "countdown" ? "countdown" : STYLE === "carousel" ? "carousel" : "roundup"}-${theme.key}-${today}`;
-  const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
+  const dup = await db.execute({
+    sql: "SELECT 1 FROM posts WHERE content_id = ? AND status IN ('published','publishing')",
+    args: [cid],
+  });
   if (dup.rows.length) {
     console.log("오늘 이미 발행된 테마 — 스킵:", cid);
     return;
   }
+  // 같은 테마가 오늘 실패했었다면 그 행을 치우고 다시 시도 (content_id UNIQUE)
+  await db.execute({ sql: "DELETE FROM posts WHERE content_id = ? AND status = 'failed'", args: [cid] });
   await db.execute({
     sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status, cover_style, title_font)
           VALUES (?, ?, ?, '모음집', ?, ?, 'publishing', ?, ?)`,
@@ -1907,6 +1923,7 @@ async function main() {
       titleFont,
     ],
   });
+  pending = { db, cid };
 
   // ===== 캐러셀(주간 저장형 포맷): 표지 4:5 크롭 + 식당별 상세 카드 → 사진집 발행 =====
   if (STYLE === "carousel") {
@@ -2103,13 +2120,23 @@ async function main() {
   if (bgm) finalCaption += `
 ${bgm.attribution}`;
   // countdown은 나레이션이 주인공(음악 30), grid는 음악이 주인공(100)
-  const mediaId = await publishReelSmart(
-    reelUrl,
-    finalCaption,
-    igMusic
-      ? { audioId: igMusic.id, audioVolume: cdMode ? 30 : 100, videoVolume: 100 } // 나레이션 있는 형식은 음악을 낮게
-      : null
-  );
+  const musicOpt = igMusic
+    ? { audioId: igMusic.id, audioVolume: cdMode ? 30 : 100, videoVolume: 100 } // 나레이션 있는 형식은 음악을 낮게
+    : null;
+  let mediaId;
+  try {
+    mediaId = await publishReelSmart(reelUrl, finalCaption, musicOpt);
+  } catch (e) {
+    // 인스타가 사유 없이 컨테이너 ERROR를 주는 경우(9/3 성수 편 실측). 같은 규격의 영상이
+    // 전날은 정상 발행됐으니 호스트에서 영상을 못 받아온 일시 오류일 가능성이 크다 —
+    // 다른 호스트로 다시 올려 한 번 더. (영상 재렌더는 안 함: 문제는 URL 쪽)
+    if (!/컨테이너 처리 실패|컨테이너 처리 시간 초과/.test(String(e))) throw e;
+    console.error("[publish] 컨테이너 ERROR — 다른 호스트로 재업로드 후 1회 재시도:", String(e).slice(0, 160));
+    await new Promise((r) => setTimeout(r, 20000));
+    const retryUrl = await uploadPublic(reelMp4, { avoidHostOf: reelUrl });
+    console.log("모음집 릴스 재업로드:", retryUrl);
+    mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt);
+  }
   console.log("✅ 모음집 릴스 발행:", mediaId);
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
@@ -2184,8 +2211,10 @@ function curlUpload(args) {
 }
 
 /** 공개 URL 업로드 폴백 체인 (Blob → tmpfiles → catbox) */
-async function uploadPublic(filePath) {
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
+async function uploadPublic(filePath, { avoidHostOf = "" } = {}) {
+  // avoidHostOf: 직전에 쓴 URL — 그 호스트(tmpfiles 등)는 건너뛰고 다음 폴백으로 (재시도용)
+  const avoid = (host) => avoidHostOf.includes(host);
+  if (process.env.BLOB_READ_WRITE_TOKEN && !avoid("blob.vercel-storage.com")) {
     try {
       const { put } = await import("@vercel/blob");
       const res = await put(`roundups/${Date.now()}-${path.basename(filePath)}`, fs.readFileSync(filePath), {
@@ -2196,7 +2225,7 @@ async function uploadPublic(filePath) {
       console.error("Vercel Blob 실패, 다음 폴백:", String(e).slice(0, 150));
     }
   }
-  try {
+  if (!avoid("tmpfiles.org")) try {
     const out = await curlUpload(["-F", `file=@${filePath}`, "https://tmpfiles.org/api/v1/upload"]);
     const pageUrl = JSON.parse(out)?.data?.url?.replace("tmpfiles.org/", "tmpfiles.org/dl/");
     if (pageUrl) {
@@ -2217,7 +2246,18 @@ async function uploadPublic(filePath) {
 
 main()
   .then(() => process.exit(0))
-  .catch((e) => {
+  .catch(async (e) => {
     console.error("모음집 실패:", e);
+    if (pending) {
+      try {
+        await pending.db.execute({
+          sql: "UPDATE posts SET status = 'failed' WHERE content_id = ? AND status = 'publishing'",
+          args: [pending.cid],
+        });
+        console.error("posts 행을 failed로 표시:", pending.cid);
+      } catch (e2) {
+        console.error("failed 표시 실패:", String(e2).slice(0, 120));
+      }
+    }
     process.exit(1);
   });
