@@ -461,6 +461,22 @@ export default async function Home() {
                       미리보기
                     </span>
                   )}
+                  {/* 발행 전에 선기록되는 행 — 인스타에 아직(또는 끝내) 안 올라간 상태를 구분 */}
+                  {(p.status === "publishing" || p.status === "failed") && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: p.status === "failed" ? "#ff6b6b" : "#9aa0ae",
+                        background: p.status === "failed" ? "#3a1414" : "#262a33",
+                        border: `1px solid ${p.status === "failed" ? "#5c1a1a" : "#3a3f4a"}`,
+                        borderRadius: 6,
+                        padding: "1px 6px",
+                      }}
+                    >
+                      {p.status === "failed" ? "발행 실패" : "발행 중"}
+                    </span>
+                  )}
                 </div>
                 <div style={{ color: "#9aa0ae", fontSize: 13, margin: "4px 0 10px" }}>
                   {p.address} · {toKst(p.created_at)}

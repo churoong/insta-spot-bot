@@ -16,7 +16,14 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "roundup-"));
 const TOUR = "https://apis.data.go.kr/B551011/KorService2";
 const DRY = process.env.ROUNDUP_DRY === "1";
 const HANDLE = process.env.IG_USERNAME || "tourist_710";
+// 발행 '전에' 선기록한 posts 행. 발행 중 예외로 죽으면 마지막 catch가 이 행을 'failed'로
+// 바꾼다 — 안 그러면 'publishing'이 영원히 남아 대시보드엔 "게시된 것처럼" 보이고
+// 하루 1회 가드가 "오늘 이미 발행"으로 재발행까지 막는다 (2026-09-03 성수 편 실측).
+let pending = null; // { db, cid }
 const OFFLINE = process.env.ROUNDUP_OFFLINE === "1";
+// 강제 재발행: 인스타에서 지운 회차를 같은 날 같은 테마로 다시 올릴 때. 하루 1회 가드를
+// 건너뛰고 그 테마의 오늘 행을 지운 뒤 새로 발행한다. 테마 지정(ROUNDUP_THEME) 없이는 무시.
+const FORCE = process.env.ROUNDUP_FORCE === "1" && !!process.env.ROUNDUP_THEME;
 // 오프라인 렌더용 사진 캐시. 클라우드 세션(claude.ai/code)은 네트워크 정책이
 // tong.visitkorea.or.kr 같은 외부 호스트를 403으로 막는다 — 시크릿이 없는 게 아니라
 // 그림 자체를 못 받는다. 그래서 OFFLINE 모드는 이 폴더의 파일을 먼저 쓰고, 없으면
@@ -91,6 +98,10 @@ const SIDO_SHORT = {
   제주특별자치도: "제주", 제주도: "제주",
 };
 
+// 대표 사진 최소 가로 해상도. 서울 음식관광 DB(레드테이블) 사진은 메뉴 등록용 썸네일이라
+// 릴스 1080px 풀블리드에 올리면 뭉개진다(9/3 성수 편 1위·6위 실측). 이보다 작은 후보는
+// 비전에 보내기도 전에 제외 — TourAPI 원본(originimgurl)은 보통 이 기준을 넘는다.
+const MIN_PHOTO_W = 900;
 const BAD_IMG_NAME =
   /(화장실|주차|기저귀|수유|경사로|안내도|안내판|표지판|매표|엘리베이터|승강기|휠체어|점자|유도블록|소화전|진입로|비상|피난|보관함|안내소|계산대)/;
 
@@ -563,6 +574,16 @@ async function pickFoodImage(place, food) {
       .filter((v, i, a) => v.url && a.findIndex((x) => x.url === v.url) === i)
       .slice(0, 6);
     if (cands.length < 1 || !process.env.GEMINI_API_KEY) return;
+    const sharp = (await import("sharp")).default;
+    // 해상도 게이트 — 작은 사진은 아무리 음식이 잘 보여도 릴스 풀블리드에 못 쓴다.
+    // 비전에는 썸네일(small)을 보내므로 크기는 반드시 '원본(url)'으로 재야 한다
+    // (썸네일로 재면 TourAPI 후보가 전부 150px로 걸러진다 — 9/3 DRY 실측).
+    const wideEnough = async (buf, url) => {
+      const meta = await sharp(buf).metadata();
+      if ((meta.width ?? 0) >= MIN_PHOTO_W) return true;
+      console.log(`  저해상도 제외(${meta.width}px): ${url.slice(-48)}`);
+      return false;
+    };
 
     const valid = [], parts = [];
     for (const c of cands) {
@@ -570,9 +591,10 @@ async function pickFoodImage(place, food) {
         const res = await fetch(c.small, { signal: AbortSignal.timeout(15000) });
         if (!res.ok) continue;
         let b = Buffer.from(await res.arrayBuffer());
+        // 비전용 사본이 곧 원본인 후보(대표 사진·지자체 소스)는 여기서 바로 거른다
+        if (c.small === c.url && !(await wideEnough(b, c.url))) continue;
         // 비짓제주는 webp, 일부 원본은 4MB급 — JPEG로 통일·축소해서 비전에 넘긴다
         if (b.length > 900_000 || !(b[0] === 0xff && b[1] === 0xd8)) {
-          const sharp = (await import("sharp")).default;
           b = await sharp(b).resize(720, 720, { fit: "inside" }).jpeg({ quality: 78 }).toBuffer();
         }
         valid.push(c);
@@ -591,7 +613,18 @@ async function pickFoodImage(place, food) {
       )) ?? "";
     const m = text.match(/\[[\d,\s]*\]/);
     const order = m ? JSON.parse(m[0]) : [];
-    const best = order.length ? valid[Number(order[0]) - 1] : null;
+    // 비전이 고른 순서대로 원본 해상도를 확인해 첫 합격을 채택 (원본은 여기서만 받는다)
+    let best = null;
+    for (const n of order) {
+      const cand = valid[Number(n) - 1];
+      if (!cand?.url) continue;
+      if (cand.small === cand.url) { best = cand; break; } // 위에서 이미 검사됨
+      try {
+        const r = await fetch(cand.url, { signal: AbortSignal.timeout(20000) });
+        if (!r.ok) continue;
+        if (await wideEnough(Buffer.from(await r.arrayBuffer()), cand.url)) { best = cand; break; }
+      } catch { /* 다음 후보 */ }
+    }
     if (best?.url) {
       place.imageUrl = best.url;
       place.foodPicked = true;
@@ -1160,7 +1193,7 @@ async function renderPagesReel(stills, bgm, outMp4) {
   for (let i = 0; i < stills.length; i++) {
     const c = path.join(TMP, `pg_${i}.mp4`);
     await ff(["-y", "-loop", "1", "-i", stills[i].path, "-vf", "fps=30,format=yuv420p",
-      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-t", String(stills[i].sec), c]);
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-tune", "stillimage", "-t", String(stills[i].sec), c]);
     clips.push(c);
   }
   const list = path.join(TMP, "pg_list.txt");
@@ -1176,7 +1209,7 @@ async function renderPagesReel(stills, bgm, outMp4) {
     "-filter_complex",
     `[0:v]fps=30,format=yuv420p[v]${bgm ? `;[1:a]volume=0.35,afade=t=out:st=${(total - 0.8).toFixed(1)}:d=0.8[a]` : ""}`,
     "-map", "[v]", "-map", bgm ? "[a]" : "1:a",
-    "-c:v", "libx264", "-preset", "veryfast", "-c:a", "aac",
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac",
     "-t", String(total), "-movflags", "+faststart", outMp4,
   ]);
   return total;
@@ -1226,7 +1259,7 @@ async function bgFrame(sharp, imgUrl, brightness = 0.5, blur = 0) {
 
 /** 인트로 카드 — "부산 돼지국밥 TOP 8" 같은 제목을 크게 */
 async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
-  const bg = await bgFrame(sharp, (places.find((p) => p.foodPicked) ?? places[0]).imageUrl, 0.4, 8);
+  const bg = await bgFrame(sharp, (places.find((p) => p.foodPicked) ?? places[0]).imageUrl, 0.5, 8);
   const lines = wrapLines(title, 10, 3);
   const size = lines.length >= 3 ? 100 : lines.length === 2 ? 116 : 128;
   const lineH = Math.round(size * 1.28);
@@ -1247,7 +1280,8 @@ async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
 
 /** 순위 카드 — 큰 순위 숫자 + 상호명 + 지역 + 한줄평 */
 async function composeRankCard(sharp, place, rank) {
-  const bg = await bgFrame(sharp, place.imageUrl, 0.62, 0);
+  // 0.62였을 때 사진이 탁해 보인다는 피드백(9/3) — 사진은 살리고 가독성은 하단 박스·외곽선으로
+  const bg = await bgFrame(sharp, place.imageUrl, 0.85, 0);
   const nameLines = wrapLines(place.name, 11, 2);
   const nameSize = nameLines.length === 2 ? 78 : 92;
   const clip = (l) => {
@@ -1499,7 +1533,7 @@ function buildCaption(theme, places, descending = false, ep = null, basis = "") 
     `🗺 ${places.length}곳 지도 링크가 필요하면 댓글에 '지도'라고 남겨주세요\n\n` +
     `${saveCta}\n` +
     `⏰ 내일 저녁 5시 반, 다음 편으로 이어집니다\n\n` +
-    `${tags}` // 사진 출처 라인 제외 (2026-09-03 사용자 지시)
+    tags // 사진 출처 라인 제외 (2026-09-03 사용자 지시)
   );
 }
 
@@ -1525,7 +1559,8 @@ async function main() {
     await sharpMod(await composeChecklistCard(sharpMod, theme, places))
       .extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 })
       .toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
-    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg`);
+    fs.writeFileSync("countdown-card-preview.jpg", await composeRankCard(sharpMod, places[0], 1));
+    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg, countdown-card-preview.jpg`);
     return;
   }
 
@@ -1553,7 +1588,15 @@ async function main() {
   // 심야로 밀렸다. 릴스처럼 크론을 촘촘히 걸고, 오늘 이미 발행했으면 조용히 종료.
   // (같은 형식만 검사 — 정오 큐레이션이 저녁 모음집을 막으면 안 된다. DRY는 발행이
   //  없으니 가드 대상이 아님 — 로컬 미리보기 검증이 실발행에 막히면 안 된다)
-  if (!DRY) {
+  if (FORCE) console.log("강제 재발행 모드 — 하루 1회 가드 생략, 테마:", process.env.ROUNDUP_THEME);
+  if (!DRY && !FORCE) {
+    // 발행 도중 죽어 30분 넘게 'publishing'인 행은 실패로 확정 (러너 15분 타임아웃보다 김).
+    // 아래 가드가 이런 행을 "오늘 이미 발행"으로 세지 않게 하려는 것.
+    await db.execute(
+      `UPDATE posts SET status = 'failed'
+        WHERE status = 'publishing' AND ig_media_id IS NULL
+          AND created_at < datetime('now', '-30 minutes')`
+    );
     const prefix =
       process.env.ROUNDUP_STYLE === "countdown" ? "countdown-%"
       : process.env.ROUNDUP_STYLE === "carousel" ? "carousel-%"
@@ -1895,11 +1938,21 @@ async function main() {
   // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커 선기록.
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const cid = `${STYLE === "countdown" ? "countdown" : STYLE === "carousel" ? "carousel" : "roundup"}-${theme.key}-${today}`;
-  const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ?", args: [cid] });
+  if (FORCE) {
+    // 인스타에서 지운 게시물의 행(ig_media_id 포함)을 치운다 — 지표 크론이 죽은 미디어를 조회하지 않게
+    const gone = await db.execute({ sql: "DELETE FROM posts WHERE content_id = ?", args: [cid] });
+    console.log(`강제 재발행 — 기존 행 ${gone.rowsAffected}건 삭제: ${cid}`);
+  }
+  const dup = await db.execute({
+    sql: "SELECT 1 FROM posts WHERE content_id = ? AND status IN ('published','publishing')",
+    args: [cid],
+  });
   if (dup.rows.length) {
     console.log("오늘 이미 발행된 테마 — 스킵:", cid);
     return;
   }
+  // 같은 테마가 오늘 실패했었다면 그 행을 치우고 다시 시도 (content_id UNIQUE)
+  await db.execute({ sql: "DELETE FROM posts WHERE content_id = ? AND status = 'failed'", args: [cid] });
   await db.execute({
     sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status, cover_style, title_font)
           VALUES (?, ?, ?, '모음집', ?, ?, 'publishing', ?, ?)`,
@@ -1913,6 +1966,7 @@ async function main() {
       titleFont,
     ],
   });
+  pending = { db, cid };
 
   // ===== 캐러셀(주간 저장형 포맷): 표지 4:5 크롭 + 식당별 상세 카드 → 사진집 발행 =====
   if (STYLE === "carousel") {
@@ -1958,7 +2012,7 @@ async function main() {
       const { publishStory } = await import("../lib/instagram.ts");
       console.log("📣 표지 스토리 공유:", await publishStory(await uploadPublic(reelCover)));
     } catch (e) {
-      console.error("표지 스토리 실패(무시):", String(e).slice(0, 80));
+      console.error("표지 스토리 실패(무시):", String(e).slice(0, 240));
     }
     const chosenIdx2 = all.findIndex((t) => t.key === theme.key);
     await db.execute({
@@ -2031,7 +2085,9 @@ async function main() {
         "-y", "-loop", "1", "-i", cards[i], "-t", String(secs.toFixed(2)), "-r", "30",
         "-vf",
         `scale=3240:5760:flags=lanczos,zoompan=z='min(zoom+0.0005,1.10)':d=${d}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=30,format=yuv420p`,
-        "-c:v", "libx264", "-preset", "veryfast", out,
+        // CRF 18: 기본(23)은 정지 사진+줌에서 뭉개짐이 보였다. 컷은 여기서 한 번만 인코딩하고
+        // 아래 concat은 재인코딩 없이 이어 붙인다 (세대 손실 1회 제거)
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", out,
       ]);
       clips.push(out);
     }
@@ -2040,7 +2096,7 @@ async function main() {
     const silent = path.join(TMP, "c_silent.mp4");
     await ff([
       "-y", "-f", "concat", "-safe", "0", "-i", listFile,
-      "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", silent,
+      "-c", "copy", silent, // 컷들이 같은 인코딩 파라미터라 무손실 병합
     ]);
     const cdSec = await probeDuration(silent);
     const cdFade = cdSec > 2 ? `,afade=t=out:st=${(cdSec - 0.8).toFixed(2)}:d=0.8` : "";
@@ -2095,7 +2151,7 @@ async function main() {
       "-filter_complex",
       `[0:v]fps=30,format=yuv420p[v]${bgm ? ";[1:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,
       "-map", "[v]", "-map", bgm ? "[a]" : "1:a",
-      "-c:v", "libx264", "-preset", "veryfast", "-tune", "stillimage", "-c:a", "aac",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-tune", "stillimage", "-c:a", "aac",
       "-t", "8", "-movflags", "+faststart", reelMp4,
     ]);
   }
@@ -2108,13 +2164,23 @@ async function main() {
   if (bgm) finalCaption += `
 ${bgm.attribution}`;
   // countdown은 나레이션이 주인공(음악 30), grid는 음악이 주인공(100)
-  const mediaId = await publishReelSmart(
-    reelUrl,
-    finalCaption,
-    igMusic
-      ? { audioId: igMusic.id, audioVolume: cdMode ? 30 : 100, videoVolume: 100 } // 나레이션 있는 형식은 음악을 낮게
-      : null
-  );
+  const musicOpt = igMusic
+    ? { audioId: igMusic.id, audioVolume: cdMode ? 30 : 100, videoVolume: 100 } // 나레이션 있는 형식은 음악을 낮게
+    : null;
+  let mediaId;
+  try {
+    mediaId = await publishReelSmart(reelUrl, finalCaption, musicOpt);
+  } catch (e) {
+    // 인스타가 사유 없이 컨테이너 ERROR를 주는 경우(9/3 성수 편 실측). 같은 규격의 영상이
+    // 전날은 정상 발행됐으니 호스트에서 영상을 못 받아온 일시 오류일 가능성이 크다 —
+    // 다른 호스트로 다시 올려 한 번 더. (영상 재렌더는 안 함: 문제는 URL 쪽)
+    if (!/컨테이너 처리 실패|컨테이너 처리 시간 초과/.test(String(e))) throw e;
+    console.error("[publish] 컨테이너 ERROR — 다른 호스트로 재업로드 후 1회 재시도:", String(e).slice(0, 160));
+    await new Promise((r) => setTimeout(r, 20000));
+    const retryUrl = await uploadPublic(reelMp4, { avoidHostOf: reelUrl });
+    console.log("모음집 릴스 재업로드:", retryUrl);
+    mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt);
+  }
   console.log("✅ 모음집 릴스 발행:", mediaId);
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
@@ -2132,7 +2198,7 @@ ${bgm.attribution}`;
       console.log("📣 표지 스토리 공유:", storyId);
     }
   } catch (e) {
-    console.error("표지 스토리 실패(무시):", String(e).slice(0, 100));
+    console.error("표지 스토리 실패(무시):", String(e).slice(0, 240));
   }
 
   // 표지 스타일 포인터 이동 — 3안이 같은 횟수만큼 나가야 비교가 된다.
@@ -2189,8 +2255,10 @@ function curlUpload(args) {
 }
 
 /** 공개 URL 업로드 폴백 체인 (Blob → tmpfiles → catbox) */
-async function uploadPublic(filePath) {
-  if (process.env.BLOB_READ_WRITE_TOKEN) {
+async function uploadPublic(filePath, { avoidHostOf = "" } = {}) {
+  // avoidHostOf: 직전에 쓴 URL — 그 호스트(tmpfiles 등)는 건너뛰고 다음 폴백으로 (재시도용)
+  const avoid = (host) => avoidHostOf.includes(host);
+  if (process.env.BLOB_READ_WRITE_TOKEN && !avoid("blob.vercel-storage.com")) {
     try {
       const { put } = await import("@vercel/blob");
       const res = await put(`roundups/${Date.now()}-${path.basename(filePath)}`, fs.readFileSync(filePath), {
@@ -2201,7 +2269,7 @@ async function uploadPublic(filePath) {
       console.error("Vercel Blob 실패, 다음 폴백:", String(e).slice(0, 150));
     }
   }
-  try {
+  if (!avoid("tmpfiles.org")) try {
     const out = await curlUpload(["-F", `file=@${filePath}`, "https://tmpfiles.org/api/v1/upload"]);
     const pageUrl = JSON.parse(out)?.data?.url?.replace("tmpfiles.org/", "tmpfiles.org/dl/");
     if (pageUrl) {
@@ -2222,7 +2290,18 @@ async function uploadPublic(filePath) {
 
 main()
   .then(() => process.exit(0))
-  .catch((e) => {
+  .catch(async (e) => {
     console.error("모음집 실패:", e);
+    if (pending) {
+      try {
+        await pending.db.execute({
+          sql: "UPDATE posts SET status = 'failed' WHERE content_id = ? AND status = 'publishing'",
+          args: [pending.cid],
+        });
+        console.error("posts 행을 failed로 표시:", pending.cid);
+      } catch (e2) {
+        console.error("failed 표시 실패:", String(e2).slice(0, 120));
+      }
+    }
     process.exit(1);
   });

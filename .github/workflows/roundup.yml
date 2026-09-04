@@ -7,6 +7,14 @@ on:
         description: "발행 없이 표지만 렌더해 아티팩트로 업로드 (서체·디자인 검증용)"
         type: boolean
         default: false
+      theme:
+        description: "테마 키를 지정하면 그 테마만 시도 (예: area-seongsu — 실패한 회차 재발행용)"
+        type: string
+        default: ""
+      force:
+        description: "인스타에서 지운 회차를 같은 날 다시 올릴 때 — 하루 1회 가드 생략 + 그 테마의 오늘 행 삭제 (theme 필수)"
+        type: boolean
+        default: false
   schedule:
     # 크론 지연 실측(2026-08-19~09-01): 정상기 22~44분, 혼잡기 4~11.6시간(중앙값 ~5h).
     # 게다가 지연이 크론 간격을 넘으면 GitHub이 뒤 슬롯을 드롭해 3중 크론이 무력화됐다.
@@ -62,6 +70,8 @@ jobs:
         env:
           # dry 입력 시 발행 없이 표지 미리보기만 (아래 아티팩트 업로드)
           ROUNDUP_DRY: ${{ inputs.dry && '1' || '' }}
+          ROUNDUP_THEME: ${{ inputs.theme }}
+          ROUNDUP_FORCE: ${{ inputs.force && '1' || '' }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
