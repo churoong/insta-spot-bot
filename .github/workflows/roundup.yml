@@ -32,7 +32,7 @@ on:
 jobs:
   roundup:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20 # 사진 판정 8분 예산 + 렌더·발행 ~5분 + 여유
     steps:
       - name: 발행 창 게이트 (KST 17:30~22:00, 수동 실행은 통과)
         id: gate

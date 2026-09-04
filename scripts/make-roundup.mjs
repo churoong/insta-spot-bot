@@ -609,9 +609,11 @@ async function pickFoodImage(place, food) {
         ];
     let text = await geminiCall(visionParts, 60);
     if (!text) text = await groqVision(visionParts, 60); // Gemini 과부하 시 무료 Groq 비전으로
-    text = text ?? "";
-    const m = text.match(/\[[\d,\s]*\]/);
-    const order = m ? JSON.parse(m[0]) : [];
+    text = (text ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
+    const arrs = [...text.matchAll(/\[[\d,\s]*\]/g)];
+    const m = arrs.length ? arrs[arrs.length - 1] : null;
+    let order = [];
+    try { order = m ? JSON.parse(m[0]) : []; } catch { order = []; }
     // 비전이 고른 순서대로 원본 해상도를 확인해 첫 합격을 채택 (원본은 여기서만 받는다)
     let best = null;
     for (const n of order) {
@@ -645,8 +647,15 @@ function geminiModel() {
 // (9/2 런 #34, 9/4 런 #61: 24곳 중 22곳이 503으로 비전 탈락 → 발행 건너뜀).
 // 다만 러너 15분 제한이 있어 런 전체 재시도 횟수에 상한을 둔다.
 let geminiRetryBudget = 8;
+// 연속 실패 회로 차단: 503·타임아웃이 3번 연달아 나면 이번 런은 Gemini를 더 부르지 않는다.
+// (9/4 DRY #65 실측: 곳마다 40초 타임아웃+재시도로 60초씩 써서 24곳에 15분 제한 초과)
+let geminiConsecutiveFail = 0;
 async function geminiCall(parts, maxTokens) {
   if (!process.env.GEMINI_API_KEY) return null;
+  if (geminiConsecutiveFail >= 3) {
+    if (geminiConsecutiveFail === 3) { console.log("[llm] Gemini 연속 3회 실패 — 이번 런은 Groq로만 진행"); geminiConsecutiveFail++; }
+    return null;
+  }
   for (let attempt = 0; ; attempt++) {
     let retryable = false;
     try {
@@ -656,7 +665,7 @@ async function geminiCall(parts, maxTokens) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
-          signal: AbortSignal.timeout(40000),
+          signal: AbortSignal.timeout(30000),
         }
       );
       const j = await res.json();
@@ -666,7 +675,7 @@ async function geminiCall(parts, maxTokens) {
       } else {
         const cand = j?.candidates?.[0];
         const t = (cand?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("") ?? "").trim();
-        if (t && cand?.finishReason === "STOP") return t;
+        if (t && cand?.finishReason === "STOP") { geminiConsecutiveFail = 0; return t; }
         if (t && cand?.finishReason) console.log("[llm] Gemini 응답 잘림:", cand.finishReason);
         return null;
       }
@@ -674,7 +683,7 @@ async function geminiCall(parts, maxTokens) {
       console.log("[llm] Gemini 오류:", String(e).slice(0, 80));
       retryable = /TimeoutError|fetch failed|ECONNRESET/.test(String(e));
     }
-    if (!retryable || attempt >= 1 || geminiRetryBudget <= 0) return null;
+    if (!retryable || attempt >= 1 || geminiRetryBudget <= 0) { if (retryable) geminiConsecutiveFail++; return null; }
     geminiRetryBudget--;
     const wait = 6000 + attempt * 6000;
     console.log(`[llm] Gemini ${wait / 1000}초 후 재시도 (남은 예산 ${geminiRetryBudget})`);
@@ -723,11 +732,15 @@ async function groqVision(parts, maxTokens) {
   if (!process.env.GROQ_KEY) return null;
   const model = await resolveGroqVisionModel();
   if (!model) return null;
+  // qwen3.6-27b는 요청당 이미지 3장 상한(9/4 실측 "supports up to 3 images") — 앞 3장만 보내고
+  // 프롬프트의 장수도 맞춘다 (번호는 1번부터 그대로 대응)
+  const MAX_IMGS = 3;
+  const nImgs = Math.min(MAX_IMGS, parts.filter((p) => p.inlineData).length);
   const content = [];
   let imgs = 0;
   for (const p of parts) {
-    if (p.text) content.push({ type: "text", text: p.text });
-    else if (p.inlineData && imgs < 5) {
+    if (p.text) content.push({ type: "text", text: p.text.replace(/식당 사진 \d+장/, `식당 사진 ${nImgs}장`) });
+    else if (p.inlineData && imgs < MAX_IMGS) {
       imgs++;
       content.push({ type: "image_url", image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` } });
     }
@@ -740,7 +753,7 @@ async function groqVision(parts, maxTokens) {
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content }],
-        max_tokens: maxTokens,
+        max_tokens: Math.max(maxTokens, 1024), // thinking 모델이 사고 토큰을 먼저 쓰므로 넉넉히
         temperature: 0,
       }),
       signal: AbortSignal.timeout(40000),
@@ -750,8 +763,9 @@ async function groqVision(parts, maxTokens) {
       console.log("[llm] Groq 비전 실패:", String(j.error.message ?? "").slice(0, 80));
       return null;
     }
-    const t = String(j?.choices?.[0]?.message?.content ?? "").trim();
-    if (t) console.log(`[llm] Groq 비전 폴백 사용 (${model})`);
+    // thinking 모델은 <think>…</think>를 본문에 섞어 내기도 한다 — 걷어내고 답만
+    const t = String(j?.choices?.[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+    if (t) console.log(`[llm] Groq 비전 폴백 사용 (${model}): ${t.slice(0, 40).replace(/\s+/g, " ")}`);
     return t || null;
   } catch (e) {
     console.log("[llm] Groq 비전 오류:", String(e).slice(0, 80));
@@ -1778,8 +1792,15 @@ async function main() {
   //     탈락한 곳은 다음 후보로 대체한다. (무료 등급 분당 한도 고려해 4초 간격)
   const NEED = 6;
   const passed = [];
+  // 러너 15분(→20분) 제한 안에 렌더·발행까지 끝내려면 사진 판정은 8분 안에 끊는다
+  const PHOTO_PHASE_BUDGET_MS = 8 * 60 * 1000;
+  const photoPhaseStart = Date.now();
   for (const p of places) {
     if (passed.length >= NEED) break;
+    if (Date.now() - photoPhaseStart > PHOTO_PHASE_BUDGET_MS) {
+      console.log(`사진 판정 시간 예산(8분) 초과 — 확보한 ${passed.length}곳으로 진행`);
+      break;
+    }
     await pickFoodImage(p, theme.food);
     if (p.foodPicked) passed.push(p);
     else console.log(`  음식 사진 없음 → 제외: ${p.name}`);
