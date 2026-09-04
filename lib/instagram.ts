@@ -97,6 +97,9 @@ async function waitForContainer(id: string) {
  * 컨테이너 발행(media_publish) — IG의 두 가지 알려진 오동작 방어:
  *  - 2207027 "media not ready": 컨테이너가 FINISHED여도 발행이 잠깐 준비 전일 수 있음 → 재시도
  *  - 2207051 "action is blocked": 에러를 돌려주면서 실제로는 발행됨 → 최근 미디어로 확인
+ *  - "The requested resource does not exist": 스토리 컨테이너가 FINISHED 직후 media_publish에서
+ *    이 응답이 온 사례(2026-09-03 성수 재발행). 같은 형식이 직전 런에서는 정상 발행됐으므로
+ *    전파 지연으로 보고 잠시 기다렸다 재시도한다
  */
 async function publishContainer(creationId: string, verifyCaption?: string): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -105,8 +108,8 @@ async function publishContainer(creationId: string, verifyCaption?: string): Pro
       return String(published.id);
     } catch (e) {
       const msg = String(e);
-      if (/2207027|not ready for publishing|not available/i.test(msg) && attempt < 4) {
-        await new Promise((r) => setTimeout(r, 5000)); // 준비 대기 후 재시도
+      if (/2207027|not ready for publishing|not available|does not exist/i.test(msg) && attempt < 4) {
+        await new Promise((r) => setTimeout(r, /does not exist/i.test(msg) ? 8000 : 5000)); // 준비·전파 대기 후 재시도
         continue;
       }
       if (verifyCaption) {

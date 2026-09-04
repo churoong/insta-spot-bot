@@ -2006,7 +2006,7 @@ async function main() {
       const { publishStory } = await import("../lib/instagram.ts");
       console.log("📣 표지 스토리 공유:", await publishStory(await uploadPublic(reelCover)));
     } catch (e) {
-      console.error("표지 스토리 실패(무시):", String(e).slice(0, 80));
+      console.error("표지 스토리 실패(무시):", String(e).slice(0, 240));
     }
     const chosenIdx2 = all.findIndex((t) => t.key === theme.key);
     await db.execute({
@@ -2193,7 +2193,7 @@ ${bgm.attribution}`;
       console.log("📣 표지 스토리 공유:", storyId);
     }
   } catch (e) {
-    console.error("표지 스토리 실패(무시):", String(e).slice(0, 100));
+    console.error("표지 스토리 실패(무시):", String(e).slice(0, 240));
   }
 
   // 표지 스타일 포인터 이동 — 3안이 같은 횟수만큼 나가야 비교가 된다.
