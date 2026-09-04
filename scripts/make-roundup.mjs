@@ -642,31 +642,44 @@ function geminiModel() {
   const m = process.env.GEMINI_MODEL;
   return m && m !== "gemini-flash-latest" ? m : "gemini-flash-lite-latest";
 }
+// Gemini 과부하(503 high demand)·타임아웃은 몇 초 뒤 다시 부르면 되는 경우가 많다
+// (9/2 런 #34, 9/4 런 #61: 24곳 중 22곳이 503으로 비전 탈락 → 발행 건너뜀).
+// 다만 러너 15분 제한이 있어 런 전체 재시도 횟수에 상한을 둔다.
+let geminiRetryBudget = 8;
 async function geminiCall(parts, maxTokens) {
   if (!process.env.GEMINI_API_KEY) return null;
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
-        signal: AbortSignal.timeout(40000),
+  for (let attempt = 0; ; attempt++) {
+    let retryable = false;
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
+          signal: AbortSignal.timeout(40000),
+        }
+      );
+      const j = await res.json();
+      if (j?.error) {
+        console.log("[llm] Gemini 실패:", j.error.code ?? "", String(j.error.message ?? "").slice(0, 80));
+        retryable = j.error.code === 503 || j.error.code === 429 || /UNAVAILABLE|RESOURCE_EXHAUSTED/.test(String(j.error.status ?? ""));
+      } else {
+        const cand = j?.candidates?.[0];
+        const t = (cand?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("") ?? "").trim();
+        if (t && cand?.finishReason === "STOP") return t;
+        if (t && cand?.finishReason) console.log("[llm] Gemini 응답 잘림:", cand.finishReason);
+        return null;
       }
-    );
-    const j = await res.json();
-    if (j?.error) {
-      console.log("[llm] Gemini 실패:", j.error.code ?? "", String(j.error.message ?? "").slice(0, 80));
-      return null;
+    } catch (e) {
+      console.log("[llm] Gemini 오류:", String(e).slice(0, 80));
+      retryable = /TimeoutError|fetch failed|ECONNRESET/.test(String(e));
     }
-    const cand = j?.candidates?.[0];
-    const t = (cand?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("") ?? "").trim();
-    if (t && cand?.finishReason === "STOP") return t;
-    if (t && cand?.finishReason) console.log("[llm] Gemini 응답 잘림:", cand.finishReason);
-    return null;
-  } catch (e) {
-    console.log("[llm] Gemini 오류:", String(e).slice(0, 80));
-    return null;
+    if (!retryable || attempt >= 1 || geminiRetryBudget <= 0) return null;
+    geminiRetryBudget--;
+    const wait = 6000 + attempt * 6000;
+    console.log(`[llm] Gemini ${wait / 1000}초 후 재시도 (남은 예산 ${geminiRetryBudget})`);
+    await new Promise((r) => setTimeout(r, wait));
   }
 }
 
