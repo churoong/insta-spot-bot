@@ -728,8 +728,17 @@ async function resolveGroqTextModel() {
   if (process.env.GROQ_MODEL) return process.env.GROQ_MODEL;
   return pickModel(await groqModels(), [/gpt-oss-120b/i, /qwen3\.6/i, /gpt-oss-20b/i, /llama-3\.3-70b/i, /llama/i, /./]);
 }
+// Groq 비전은 무료 등급이라 호출마다 한도 대기가 붙는다(9/4 실측 20~30초). 런당 상한을 둬서
+// Gemini 장기 장애 때 빨리 건너뛰고 다음 예약 슬롯(1시간 간격)이 재시도하게 한다.
+let groqVisionCalls = 0;
+const GROQ_VISION_MAX_CALLS = 10;
 async function groqVision(parts, maxTokens) {
   if (!process.env.GROQ_KEY) return null;
+  if (groqVisionCalls >= GROQ_VISION_MAX_CALLS) {
+    if (groqVisionCalls === GROQ_VISION_MAX_CALLS) { console.log(`[llm] Groq 비전 런당 상한(${GROQ_VISION_MAX_CALLS}회) 도달 — 이후 생략`); groqVisionCalls++; }
+    return null;
+  }
+  groqVisionCalls++;
   const model = await resolveGroqVisionModel();
   if (!model) return null;
   const sharp = (await import("sharp")).default;
@@ -762,7 +771,7 @@ async function groqVision(parts, maxTokens) {
           delete body.reasoning_effort; body.max_tokens = 2048; // 모델이 파라미터를 모르면 빼고 재시도
           continue;
         }
-        if (/rate limit|too many requests/i.test(msg) && attempt < 2) {
+        if (/rate limit|too many requests/i.test(msg) && attempt < 1) {
           const m = msg.match(/try again in ([\d.]+)\s*s/i);
           const wait = Math.min(30000, m ? Math.ceil(Number(m[1]) * 1000) + 500 : 15000);
           console.log(`[llm] Groq 비전 한도 — ${Math.round(wait / 1000)}초 후 재시도`);
