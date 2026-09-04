@@ -687,8 +687,37 @@ async function geminiCall(parts, maxTokens) {
  * (9/4 밤 실측: 재시도 8회를 다 써도 Gemini 전멸 → 발행 건너뜀. 텍스트는 Groq 폴백이
  *  있었는데 사진 판정만 없었다.) parts는 geminiCall과 같은 형식, 이미지는 5장까지.
  */
+// Groq 비전 모델 id는 자주 바뀐다(9/4 실측: llama-4-scout id가 "does not exist"). 고정하지 말고
+// /models 목록에서 멀티모달로 보이는 모델을 골라 쓴다. GROQ_VISION_MODEL로 고정 지정 가능.
+let groqVisionModel = null;
+async function resolveGroqVisionModel() {
+  if (process.env.GROQ_VISION_MODEL) return process.env.GROQ_VISION_MODEL;
+  if (groqVisionModel !== null) return groqVisionModel || null;
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${process.env.GROQ_KEY}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    const j = await res.json();
+    const ids = (j?.data ?? []).map((m) => String(m.id)).filter((id) => !/guard|whisper|tts|embed/i.test(id));
+    // 우선순위: llama-4(멀티모달) → 이름에 vision → 그 외 없음
+    const pick =
+      ids.find((id) => /llama-4.*(maverick|scout)/i.test(id)) ??
+      ids.find((id) => /llama-4/i.test(id)) ??
+      ids.find((id) => /vision/i.test(id)) ?? "";
+    groqVisionModel = pick;
+    console.log(pick ? `[llm] Groq 비전 모델: ${pick}` : `[llm] Groq 비전 모델 없음 (목록: ${ids.slice(0, 8).join(", ")})`);
+    return pick || null;
+  } catch (e) {
+    console.log("[llm] Groq 모델 목록 실패:", String(e).slice(0, 80));
+    groqVisionModel = "";
+    return null;
+  }
+}
 async function groqVision(parts, maxTokens) {
   if (!process.env.GROQ_KEY) return null;
+  const model = await resolveGroqVisionModel();
+  if (!model) return null;
   const content = [];
   let imgs = 0;
   for (const p of parts) {
@@ -704,7 +733,7 @@ async function groqVision(parts, maxTokens) {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_KEY}` },
       body: JSON.stringify({
-        model: process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct",
+        model,
         messages: [{ role: "user", content }],
         max_tokens: maxTokens,
         temperature: 0,
