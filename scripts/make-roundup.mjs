@@ -687,32 +687,37 @@ async function geminiCall(parts, maxTokens) {
  * (9/4 밤 실측: 재시도 8회를 다 써도 Gemini 전멸 → 발행 건너뜀. 텍스트는 Groq 폴백이
  *  있었는데 사진 판정만 없었다.) parts는 geminiCall과 같은 형식, 이미지는 5장까지.
  */
-// Groq 비전 모델 id는 자주 바뀐다(9/4 실측: llama-4-scout id가 "does not exist"). 고정하지 말고
-// /models 목록에서 멀티모달로 보이는 모델을 골라 쓴다. GROQ_VISION_MODEL로 고정 지정 가능.
-let groqVisionModel = null;
-async function resolveGroqVisionModel() {
-  if (process.env.GROQ_VISION_MODEL) return process.env.GROQ_VISION_MODEL;
-  if (groqVisionModel !== null) return groqVisionModel || null;
+// Groq 모델 id는 자주 바뀐다. 9/4 실측: llama-4-scout는 "does not exist", 텍스트 기본값이던
+// llama-3.3-70b-versatile은 2026-08 서비스 종료(권장 대체: openai/gpt-oss-120b, qwen/qwen3.6-27b —
+// qwen3.6-27b는 이미지 입력도 됨). 그래서 고정하지 않고 /models 목록에서 고른다.
+// GROQ_MODEL(텍스트)·GROQ_VISION_MODEL(비전)로 고정 지정 가능.
+let groqModelIds = null;
+async function groqModels() {
+  if (groqModelIds) return groqModelIds;
   try {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
       headers: { Authorization: `Bearer ${process.env.GROQ_KEY}` },
       signal: AbortSignal.timeout(15000),
     });
     const j = await res.json();
-    const ids = (j?.data ?? []).map((m) => String(m.id)).filter((id) => !/guard|whisper|tts|embed/i.test(id));
-    // 우선순위: llama-4(멀티모달) → 이름에 vision → 그 외 없음
-    const pick =
-      ids.find((id) => /llama-4.*(maverick|scout)/i.test(id)) ??
-      ids.find((id) => /llama-4/i.test(id)) ??
-      ids.find((id) => /vision/i.test(id)) ?? "";
-    groqVisionModel = pick;
-    console.log(pick ? `[llm] Groq 비전 모델: ${pick}` : `[llm] Groq 비전 모델 없음 (목록: ${ids.slice(0, 8).join(", ")})`);
-    return pick || null;
+    groqModelIds = (j?.data ?? []).map((m) => String(m.id)).filter((id) => !/guard|whisper|tts|embed|safeguard/i.test(id));
+    console.log(`[llm] Groq 모델 목록 ${groqModelIds.length}개: ${groqModelIds.join(", ")}`);
   } catch (e) {
     console.log("[llm] Groq 모델 목록 실패:", String(e).slice(0, 80));
-    groqVisionModel = "";
-    return null;
+    groqModelIds = [];
   }
+  return groqModelIds;
+}
+const pickModel = (ids, prefs) => { for (const p of prefs) { const hit = ids.find((id) => p.test(id)); if (hit) return hit; } return null; };
+async function resolveGroqVisionModel() {
+  if (process.env.GROQ_VISION_MODEL) return process.env.GROQ_VISION_MODEL;
+  const pick = pickModel(await groqModels(), [/qwen3\.6/i, /qwen.*vl/i, /llama-4.*(maverick|scout)/i, /llama-4/i, /vision/i]);
+  if (!pick) console.log("[llm] Groq 비전 모델 없음");
+  return pick;
+}
+async function resolveGroqTextModel() {
+  if (process.env.GROQ_MODEL) return process.env.GROQ_MODEL;
+  return pickModel(await groqModels(), [/gpt-oss-120b/i, /qwen3\.6/i, /gpt-oss-20b/i, /llama-3\.3-70b/i, /llama/i, /./]);
 }
 async function groqVision(parts, maxTokens) {
   if (!process.env.GROQ_KEY) return null;
@@ -746,7 +751,7 @@ async function groqVision(parts, maxTokens) {
       return null;
     }
     const t = String(j?.choices?.[0]?.message?.content ?? "").trim();
-    if (t) console.log("[llm] Groq 비전 폴백 사용");
+    if (t) console.log(`[llm] Groq 비전 폴백 사용 (${model})`);
     return t || null;
   } catch (e) {
     console.log("[llm] Groq 비전 오류:", String(e).slice(0, 80));
@@ -764,7 +769,7 @@ async function llmGenerate(prompt, maxTokens) {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_KEY}` },
         body: JSON.stringify({
-          model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+          model: await resolveGroqTextModel(),
           messages: [{ role: "user", content: prompt }],
           max_tokens: maxTokens,
           temperature: 0.8,
