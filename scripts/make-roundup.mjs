@@ -383,6 +383,11 @@ async function photoKoreaPhoto(keyword) {
  * 긁는다. 실측 풀: 강릉 67·경주 94·수원 188·강남 159 / 성수 121·을지로 52·익선 48 (사진 보유).
  * 같은 동네라 시군구 상한은 걸지 않는다. 지자체 보강 소스·포토코리아는 안 쓴다.
  */
+// 순수 음식점만 (사용자 정책: 카페·제과·주점 제외) — TourAPI cat3 + 상호 정규식. 보조 소스(부산·제주·서울 DB)
+// 에도 상호 필터를 건다 (실측: 비짓제주에서 노티드·라운지 바, 서울 DB에서 카페 드 파리가 새어 들어옴).
+const AREA_BAD_CAT = /^A0502(0900|1000)/;
+const AREA_BAD_NAME = /(카페|까페|cafe|coffee|커피|로스터|베이커리|bakery|제과|빵집|디저트|dessert|케이크|도넛|노티드|와플|아이스크림|젤라또|치즈|초콜|티하우스|찻집|다방|와인바|라운지|lounge|펍|pub|호프|바\b|주점|술집|포차|맥주|브런치)/i;
+
 async function collectAreaPlaces(theme, limit) {
   const t = theme.tour ?? {};
   const params = { contentTypeId: "39", numOfRows: "200", arrange: "O" };
@@ -403,8 +408,6 @@ async function collectAreaPlaces(theme, limit) {
   // 순수 음식점만 (사용자 정책: 카페·제과·주점 제외). 지역편은 음식 키워드가 없어
   // 카페·디저트가 그대로 섞여 들어온다(실측: 강릉 풀의 절반이 카페) — 분류코드와 상호로 거른다.
   //   cat3 A05020900 카페/전통찻집, A05021000 클럽
-  const AREA_BAD_CAT = /^A0502(0900|1000)/;
-  const AREA_BAD_NAME = /(카페|까페|cafe|coffee|커피|로스터|베이커리|bakery|제과|빵집|디저트|dessert|케이크|도넛|와플|아이스크림|젤라또|치즈|초콜|티하우스|찻집|다방|와인바|펍|pub|호프|바\b|주점|술집|포차|맥주)/i;
   items = items.filter(
     (it) =>
       it.firstimage &&
@@ -414,11 +417,14 @@ async function collectAreaPlaces(theme, limit) {
   );
   // 보조 소스 반경 합류 (2026-09-03): TourAPI가 얇은 상권(서면·광안리·애월 등)을
   // 부산맛집 API·비짓제주·서울 음식관광 DB로 채운다. 좌표 있는 상권 테마에서만.
-  const extra = t.mapX && t.mapY ? await supplementNearby(theme, Number(t.mapX), Number(t.mapY), Number(t.radius ?? 1500)) : [];
+  const extra = (t.mapX && t.mapY ? await supplementNearby(theme, Number(t.mapX), Number(t.mapY), Number(t.radius ?? 1500)) : [])
+    .filter((p) => !AREA_BAD_NAME.test(String(p.name)));
   const picked = [];
   const names = new Set();
-  // 보조 소스는 풀의 절반까지만 — 나머지는 TourAPI(공공누리 사진)로 섞어 소스 편중을 막는다
-  const extraCap = Math.ceil((limit ?? theme.count) / 2);
+  // 보조 소스는 풀의 절반까지만 — 나머지는 TourAPI(공공누리 사진)로 섞어 소스 편중을 막는다.
+  // 단 TourAPI가 얇은 상권(서면·애월 등 실측 6~10곳)은 보조 소스가 부족분을 메운다.
+  const want = limit ?? theme.count;
+  const extraCap = Math.max(Math.ceil(want / 2), want - items.length);
   for (const b of extra.sort(() => Math.random() - 0.5)) {
     if (picked.length >= extraCap) break;
     names.add(normName(b.name));
@@ -1527,7 +1533,7 @@ function buildCaption(theme, places, descending = false, ep = null, basis = "") 
     `🗺 ${places.length}곳 지도 링크가 필요하면 댓글에 '지도'라고 남겨주세요\n\n` +
     `${saveCta}\n` +
     `⏰ 내일 저녁 5시 반, 다음 편으로 이어집니다\n\n` +
-    tags
+    tags // 사진 출처 라인 제외 (2026-09-03 사용자 지시)
   );
 }
 
@@ -1994,7 +2000,7 @@ async function main() {
     const urls = [];
     for (const f of imgs) urls.push(await uploadPublic(f));
     let carCaption = caption;
-    if (pkBg) carCaption += `\n📷 표지 배경: 한국관광공사 포토코리아${pkBg.photographer ? ` ⓒ${pkBg.photographer}` : ""}`;
+    // 포토코리아 크레딧 라인은 캡션에서 제외 (2026-09-03 사용자 지시)
     const { publishCarousel } = await import("../lib/instagram.ts");
     const mediaId = await publishCarousel(urls, carCaption);
     console.log(`✅ 모음집 캐러셀 발행 (${imgs.length}장):`, mediaId);
@@ -2154,8 +2160,7 @@ async function main() {
   console.log("모음집 릴스 업로드:", reelUrl);
   const { publishReelSmart } = await import("../lib/instagram.ts");
   let finalCaption = caption;
-  if (pkBg) finalCaption += `
-📷 표지 배경: 한국관광공사 포토코리아${pkBg.photographer ? ` ⓒ${pkBg.photographer}` : ""}`;
+  // 포토코리아 크레딧 라인은 캡션에서 제외 (2026-09-03 사용자 지시)
   if (bgm) finalCaption += `
 ${bgm.attribution}`;
   // countdown은 나레이션이 주인공(음악 30), grid는 음악이 주인공(100)

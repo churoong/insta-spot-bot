@@ -1267,42 +1267,42 @@
    "tour": {
     "mapX": 129.211,
     "mapY": 35.836,
-    "radius": 1500
+    "radius": 2000
    }
   },
   {
    "key": "area-itaewon",
    "mode": "area",
-   "keyword": "이태원",
+   "keyword": "이태원·한남",
    "region": "서울",
    "count": 6,
    "emoji": "📍",
    "tags": [
     "이태원맛집",
-    "용산맛집",
-    "서울맛집"
+    "한남동맛집",
+    "용산맛집"
    ],
    "tour": {
-    "mapX": 126.9944,
-    "mapY": 37.5345,
-    "radius": 1500
+    "mapX": 126.998,
+    "mapY": 37.534,
+    "radius": 2000
    }
   },
   {
    "key": "area-apgujeong",
    "mode": "area",
-   "keyword": "압구정·청담",
+   "keyword": "압구정로데오",
    "region": "서울",
    "count": 6,
    "emoji": "📍",
    "tags": [
+    "압구정로데오",
     "압구정맛집",
-    "청담맛집",
-    "강남맛집"
+    "청담맛집"
    ],
    "tour": {
-    "mapX": 127.029,
-    "mapY": 37.527,
+    "mapX": 127.0406,
+    "mapY": 37.5273,
     "radius": 1500
    }
   },
@@ -1327,7 +1327,7 @@
   {
    "key": "area-jamsil",
    "mode": "area",
-   "keyword": "잠실",
+   "keyword": "잠실·송리단길",
    "region": "서울",
    "count": 6,
    "emoji": "📍",
@@ -1417,18 +1417,18 @@
   {
    "key": "area-seochon",
    "mode": "area",
-   "keyword": "서촌",
+   "keyword": "광화문·서촌",
    "region": "서울",
    "count": 6,
    "emoji": "📍",
    "tags": [
     "서촌맛집",
-    "경복궁맛집",
+    "광화문맛집",
     "종로맛집"
    ],
    "tour": {
-    "mapX": 126.972,
-    "mapY": 37.579,
+    "mapX": 126.9734,
+    "mapY": 37.5757,
     "radius": 1500
    }
   },
@@ -1448,6 +1448,564 @@
     "mapX": 126.984,
     "mapY": 37.582,
     "radius": 1500
+   }
+  },
+  {
+   "key": "area-myeongdong",
+   "mode": "area",
+   "keyword": "명동",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "명동맛집",
+    "서울맛집",
+    "중구맛집"
+   ],
+   "tour": {
+    "mapX": 126.9865,
+    "mapY": 37.5609,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-daehangno",
+   "mode": "area",
+   "keyword": "혜화·대학로",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "대학로맛집",
+    "혜화맛집",
+    "종로맛집"
+   ],
+   "tour": {
+    "mapX": 127.0018,
+    "mapY": 37.5822,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-sungshin",
+   "mode": "area",
+   "keyword": "성신여대",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "성신여대맛집",
+    "성북구맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.0164,
+    "mapY": 37.5927,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-sindang",
+   "mode": "area",
+   "keyword": "신당 힙당동",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "힙당동",
+    "신당동맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.0177,
+    "mapY": 37.5658,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-gongdeok",
+   "mode": "area",
+   "keyword": "공덕·마포",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "공덕맛집",
+    "마포맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9515,
+    "mapY": 37.5443,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-garosugil",
+   "mode": "area",
+   "keyword": "가로수길",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "가로수길맛집",
+    "신사동맛집",
+    "강남맛집"
+   ],
+   "tour": {
+    "mapX": 127.023,
+    "mapY": 37.5209,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-coex",
+   "mode": "area",
+   "keyword": "삼성·코엑스",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "코엑스맛집",
+    "삼성역맛집",
+    "강남맛집"
+   ],
+   "tour": {
+    "mapX": 127.0631,
+    "mapY": 37.5088,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-yangjae",
+   "mode": "area",
+   "keyword": "양재",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "양재맛집",
+    "서초맛집",
+    "강남맛집"
+   ],
+   "tour": {
+    "mapX": 127.0343,
+    "mapY": 37.4843,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-bangbae",
+   "mode": "area",
+   "keyword": "방배 카페골목",
+   "region": "서울",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "방배맛집",
+    "서초맛집",
+    "방배카페골목"
+   ],
+   "tour": {
+    "mapX": 126.995,
+    "mapY": 37.485,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-seomyeon",
+   "mode": "area",
+   "keyword": "서면·전포",
+   "region": "부산",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "서면맛집",
+    "전포맛집",
+    "부산맛집"
+   ],
+   "tour": {
+    "mapX": 129.0595,
+    "mapY": 35.1578,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-gwangalli",
+   "mode": "area",
+   "keyword": "광안리",
+   "region": "부산",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "광안리맛집",
+    "부산맛집",
+    "수영구맛집"
+   ],
+   "tour": {
+    "mapX": 129.1187,
+    "mapY": 35.1532,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-nampo",
+   "mode": "area",
+   "keyword": "남포동·자갈치",
+   "region": "부산",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "남포동맛집",
+    "자갈치맛집",
+    "부산맛집"
+   ],
+   "tour": {
+    "mapX": 129.03,
+    "mapY": 35.098,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-kyungsung",
+   "mode": "area",
+   "keyword": "경성대·부경대",
+   "region": "부산",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "경성대맛집",
+    "대연동맛집",
+    "부산맛집"
+   ],
+   "tour": {
+    "mapX": 129.1,
+    "mapY": 35.1373,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-yeongdo",
+   "mode": "area",
+   "keyword": "영도",
+   "region": "부산",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "영도맛집",
+    "흰여울",
+    "부산맛집"
+   ],
+   "tour": {
+    "mapX": 129.044,
+    "mapY": 35.0915,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-jeju-dongmun",
+   "mode": "area",
+   "keyword": "제주 동문시장",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "제주동문시장",
+    "제주시맛집",
+    "제주맛집"
+   ],
+   "tour": {
+    "mapX": 126.5275,
+    "mapY": 33.5118,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-jeju-yeondong",
+   "mode": "area",
+   "keyword": "제주 연동·노형",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "연동맛집",
+    "노형맛집",
+    "제주맛집"
+   ],
+   "tour": {
+    "mapX": 126.489,
+    "mapY": 33.4875,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-seogwipo-olle",
+   "mode": "area",
+   "keyword": "서귀포 올레시장",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "서귀포맛집",
+    "올레시장",
+    "제주맛집"
+   ],
+   "tour": {
+    "mapX": 126.5632,
+    "mapY": 33.2497,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-jungmun",
+   "mode": "area",
+   "keyword": "중문",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "중문맛집",
+    "서귀포맛집",
+    "제주맛집"
+   ],
+   "tour": {
+    "mapX": 126.4275,
+    "mapY": 33.2565,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-seongsan",
+   "mode": "area",
+   "keyword": "성산",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "성산맛집",
+    "성산일출봉",
+    "제주맛집"
+   ],
+   "tour": {
+    "mapX": 126.9265,
+    "mapY": 33.4615,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-hamdeok",
+   "mode": "area",
+   "keyword": "함덕",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "함덕맛집",
+    "함덕해수욕장",
+    "제주맛집"
+   ],
+   "tour": {
+    "mapX": 126.6695,
+    "mapY": 33.5432,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-hyeopjae",
+   "mode": "area",
+   "keyword": "협재·한림",
+   "region": "제주",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "협재맛집",
+    "한림맛집",
+    "제주맛집"
+   ],
+   "tour": {
+    "mapX": 126.2395,
+    "mapY": 33.394,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-ingye",
+   "mode": "area",
+   "keyword": "수원 인계동",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "인계동맛집",
+    "수원맛집",
+    "수원역맛집"
+   ],
+   "tour": {
+    "mapX": 127.033,
+    "mapY": 37.2645,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-cheongna",
+   "mode": "area",
+   "keyword": "청라",
+   "region": "인천",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "청라맛집",
+    "인천맛집",
+    "청라국제도시"
+   ],
+   "tour": {
+    "mapX": 126.6475,
+    "mapY": 37.5345,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-misa",
+   "mode": "area",
+   "keyword": "하남 미사",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "미사맛집",
+    "하남맛집",
+    "미사강변"
+   ],
+   "tour": {
+    "mapX": 127.1935,
+    "mapY": 37.5605,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-lafesta",
+   "mode": "area",
+   "keyword": "일산 라페스타",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "일산맛집",
+    "라페스타맛집",
+    "고양맛집"
+   ],
+   "tour": {
+    "mapX": 126.7725,
+    "mapY": 37.658,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-gwanggyo",
+   "mode": "area",
+   "keyword": "광교",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "광교맛집",
+    "수원맛집",
+    "광교호수공원"
+   ],
+   "tour": {
+    "mapX": 127.0518,
+    "mapY": 37.2887,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-jeongja",
+   "mode": "area",
+   "keyword": "분당 정자",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "정자동맛집",
+    "분당맛집",
+    "성남맛집"
+   ],
+   "tour": {
+    "mapX": 127.11,
+    "mapY": 37.362,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-beomgye",
+   "mode": "area",
+   "keyword": "안양 범계",
+   "region": "경기",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "범계맛집",
+    "안양맛집",
+    "평촌맛집"
+   ],
+   "tour": {
+    "mapX": 126.9506,
+    "mapY": 37.3897,
+    "radius": 2000
+   }
+  },
+  {
+   "key": "area-bongpyeong",
+   "mode": "area",
+   "keyword": "평창 봉평",
+   "region": "강원",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "봉평맛집",
+    "평창맛집",
+    "봉평메밀"
+   ],
+   "tour": {
+    "mapX": 128.385,
+    "mapY": 37.6155,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-daegwallyeong",
+   "mode": "area",
+   "keyword": "평창 대관령",
+   "region": "강원",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "대관령맛집",
+    "평창맛집",
+    "횡계맛집"
+   ],
+   "tour": {
+    "mapX": 128.711,
+    "mapY": 37.674,
+    "radius": 1500
+   }
+  },
+  {
+   "key": "area-eunhaengdong",
+   "mode": "area",
+   "keyword": "대전 은행동",
+   "region": "대전",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "은행동맛집",
+    "대전맛집",
+    "대전중앙시장"
+   ],
+   "tour": {
+    "mapX": 127.4272,
+    "mapY": 36.3283,
+    "radius": 2000
    }
   }
  ]

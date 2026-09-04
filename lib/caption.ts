@@ -4,7 +4,6 @@ import { llmText } from "./llm";
 import persona from "@/data/persona.json";
 import { searchMapUrl } from "./kakao";
 
-const SOURCE_LINE = "📷 사진·정보 출처: 한국관광공사 TourAPI";
 
 export interface CaptionResult {
   caption: string; // 해시태그 포함 완성본
@@ -103,7 +102,8 @@ ${persona.captionStyle.map((s: string) => `- ${s}`).join("\n")}
   ].filter(Boolean);
   const infoBlock = `${infoLines.join("\n")}\n\n`;
 
-  return { caption: `${body}\n\n${infoBlock}${buildHashtags(spot, dish, opts.menu)}\n\n${SOURCE_LINE}` };
+  // 사진 출처 라인은 캡션에서 제외 (2026-09-03 사용자 지시 "캡션에 사진 출처 내용은 다 빼")
+  return { caption: `${body}\n\n${infoBlock}${buildHashtags(spot, dish, opts.menu)}` };
 }
 
 /**
@@ -416,8 +416,7 @@ export function buildWeeklyCaption(count: number): string {
     `🔥 이번 주 여러분이 가장 사랑해주신 TOP${count}를 모아봤어요!\n\n` +
     `좋아요와 댓글이 가장 뜨거웠던 맛집들이에요.\n` +
     `저장해두고 하나씩 가보시면 후회 없으실 거예요 😋\n\n` +
-    `#주간베스트 #맛집추천 #맛집리스트 #맛집저장 #먹스타그램 #맛스타그램 #오늘뭐먹지 #국내맛집\n\n` +
-    SOURCE_LINE
+    `#주간베스트 #맛집추천 #맛집리스트 #맛집저장 #먹스타그램 #맛스타그램 #오늘뭐먹지 #국내맛집`
   );
 }
 
