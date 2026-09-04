@@ -572,8 +572,8 @@ async function pickFoodImage(place, food) {
         })),
     ]
       .filter((v, i, a) => v.url && a.findIndex((x) => x.url === v.url) === i)
-      .slice(0, 6);
-    if (cands.length < 1 || !process.env.GEMINI_API_KEY) return;
+      .slice(0, 5); // Groq 비전 폴백이 요청당 5장까지라 맞춤
+    if (cands.length < 1 || !(process.env.GEMINI_API_KEY || process.env.GROQ_KEY)) return;
     const sharp = (await import("sharp")).default;
     // 해상도 게이트 — 작은 사진은 아무리 음식이 잘 보여도 릴스 풀블리드에 못 쓴다.
     // 비전에는 썸네일(small)을 보내므로 크기는 반드시 '원본(url)'으로 재야 한다
@@ -603,14 +603,13 @@ async function pickFoodImage(place, food) {
     }
     if (valid.length < 1) return;
 
-    const text =
-      (await geminiCall(
-        [
+    const visionParts = [
           { text: `식당 사진 ${valid.length}장이야. ${food ? `"${food}" 요리가 실제로 화면에 보이는 사진의 번호만 좋은 순서대로 JSON 배열로 답해 (1번부터). 반찬·곁들임·다른 요리만 보이는 사진은 제외하고, ${food}가 보이는 사진이 한 장도 없으면 반드시 []로 답해.` : `음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터).`} 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
           ...parts,
-        ],
-        60
-      )) ?? "";
+        ];
+    let text = await geminiCall(visionParts, 60);
+    if (!text) text = await groqVision(visionParts, 60); // Gemini 과부하 시 무료 Groq 비전으로
+    text = text ?? "";
     const m = text.match(/\[[\d,\s]*\]/);
     const order = m ? JSON.parse(m[0]) : [];
     // 비전이 고른 순서대로 원본 해상도를 확인해 첫 합격을 채택 (원본은 여기서만 받는다)
@@ -680,6 +679,49 @@ async function geminiCall(parts, maxTokens) {
     const wait = 6000 + attempt * 6000;
     console.log(`[llm] Gemini ${wait / 1000}초 후 재시도 (남은 예산 ${geminiRetryBudget})`);
     await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+/**
+ * 비전 폴백: Gemini가 과부하(503)면 Groq 무료 멀티모달로 같은 판정을 한다.
+ * (9/4 밤 실측: 재시도 8회를 다 써도 Gemini 전멸 → 발행 건너뜀. 텍스트는 Groq 폴백이
+ *  있었는데 사진 판정만 없었다.) parts는 geminiCall과 같은 형식, 이미지는 5장까지.
+ */
+async function groqVision(parts, maxTokens) {
+  if (!process.env.GROQ_KEY) return null;
+  const content = [];
+  let imgs = 0;
+  for (const p of parts) {
+    if (p.text) content.push({ type: "text", text: p.text });
+    else if (p.inlineData && imgs < 5) {
+      imgs++;
+      content.push({ type: "image_url", image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` } });
+    }
+  }
+  if (!imgs) return null;
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_KEY}` },
+      body: JSON.stringify({
+        model: process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct",
+        messages: [{ role: "user", content }],
+        max_tokens: maxTokens,
+        temperature: 0,
+      }),
+      signal: AbortSignal.timeout(40000),
+    });
+    const j = await res.json();
+    if (j?.error) {
+      console.log("[llm] Groq 비전 실패:", String(j.error.message ?? "").slice(0, 80));
+      return null;
+    }
+    const t = String(j?.choices?.[0]?.message?.content ?? "").trim();
+    if (t) console.log("[llm] Groq 비전 폴백 사용");
+    return t || null;
+  } catch (e) {
+    console.log("[llm] Groq 비전 오류:", String(e).slice(0, 80));
+    return null;
   }
 }
 
