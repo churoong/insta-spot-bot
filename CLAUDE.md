@@ -25,7 +25,8 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 **관리 페이지**(`/`, app/page.tsx): 게시물 목록에 ❤️💬 외에 👁 조회·도달·저장을 표시. 조회수 TOP3·주간 리포트·추천 시간대도 조회수 기준(2026-09-03). 값은 `/api/cron/metrics`(Vercel 크론 07:00·19:00 KST, CRON_SECRET)가 인스타 인사이트로 갱신해 posts.views/reach/saved/metrics_at에 저장. 좋아요는 `/api/cron/post`가 별도 갱신.
 
 **발행 시각 구조**: Vercel Cron(vercel.json, ±59분) → `/api/cron/trigger/[wf]` → GitHub `workflow_dispatch` 즉시 실행이 주 경로.
-GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실측). 각 yml 첫 스텝의 **KST 발행 창 게이트**가 창 밖 런을 수 초에 스킵하고, 스크립트의 **하루 1회 가드**가 중복을 막는다. 수동 실행(workflow_dispatch)은 게이트 통과.
+GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실측). 각 yml 첫 스텝의 **KST 발행 창 게이트**가 창 밖 런을 수 초에 스킵하고, 스크립트의 **하루 1회 가드**(KST 날짜, 'publishing'은 30분 이내만 인정)가 중복을 막는다. 가드→마커 사이가 수 분이라 **yml job-level `concurrency`(직렬 실행)** 가 병렬 런의 이중 발행을 막는 실제 장치(2026-09-07 점검). 발행 중 실패·타임아웃(SIGTERM)은 마커를 `failed`로 정리해 폴백 슬롯이 재시도한다. 수동 실행(workflow_dispatch)은 게이트 통과. 타임아웃 25분(TourAPI 느린 날 15분 초과 실측 9/6).
+- 지도 DM: 인스타 DM은 1,000바이트 한도 → `buildMapListDm`은 상호+지역 + 짧은 리다이렉트 `/go/{posts.id}/{n}`(app/go)만 담는다. 긴 주소·네이버 URL을 넣으면 전송이 거부된다.
 
 ## 표지·디자인 결정사항
 - 스타일 순환 **classic 6 : hero 1** (cover_idx %7, dark 제외). classic 흰 카드 그리드가 실측 압승.
