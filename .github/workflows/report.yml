@@ -1,0 +1,46 @@
+name: 성과 리포트 (표지·서체 A/B)
+
+# 발행에는 관여하지 않는 조회 전용 워크플로. 수동 실행만 — 필요할 때 돌려보고 결과는
+# 로그와 Job Summary(폰에서 바로 읽힘)로 확인한다.
+#
+# 왜 필요한가: cover-report.mjs는 로컬 .env 전용이라 아무도 안 돌려서, 2026-09-02부터
+# 교대 발행 중인 서체 A/B(G마켓 vs 잘난체) 판정이 미뤄져 있었다. 러너에는 시크릿이 있으니
+# 여기서 돌리면 시크릿 없는 세션에서도 결과를 읽을 수 있다.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read # 조회만 — 커밋하지 않는다
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 표지 스타일·서체 A/B 성과
+        shell: bash
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          # 최신 토큰은 DB(config.ig_token)에 있고 이건 폴백 — 둘 다 없으면 DB 저장 지표만 쓴다
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+        run: |
+          # 실패해도 요약은 남긴다 — 폰에서 읽을 게 없으면 실행한 의미가 없다.
+          # (기본 셸이 -e -o pipefail이라 파이프 실패 시 즉시 종료되므로 rc를 직접 받는다)
+          set +e
+          npx tsx scripts/cover-report.mjs 2>&1 | tee cover-report.txt
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## 표지 스타일·서체 A/B 성과'
+            echo '```'
+            cat cover-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"

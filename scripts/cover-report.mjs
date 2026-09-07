@@ -9,7 +9,11 @@
 //    회차별 원자료를 그대로 출력한다 — 숫자 하나만 보고 결론 내지 말 것.
 
 const B = "https://graph.instagram.com/v23.0";
-const TOKEN = process.env.IG_ACCESS_TOKEN;
+// 토큰은 DB의 최신 값(config.ig_token)이 우선 — env IG_ACCESS_TOKEN은 최초 시드용이라
+// 60일 지나면 만료돼 있을 수 있다(lib/instagram.ts getToken과 같은 규칙).
+let TOKEN = process.env.IG_ACCESS_TOKEN;
+// 토큰이 URL 쿼리에 들어가므로 예외 메시지에 그대로 실릴 수 있다 — 로그에 남기기 전에 가린다
+const safe = (e) => String(e && e.stack ? e.stack : e).replace(/access_token=[^&\s"']+/g, "access_token=***");
 
 const STYLES = ["classic", "hero", "pages", "dark"];
 const LABEL = { classic: "기존(흰 카드)", hero: "A안(히어로)", pages: "페이지형(슬라이드)", dark: "C안(다크)" };
@@ -31,13 +35,17 @@ async function insights(mediaId) {
 }
 
 async function main() {
-  if (!TOKEN) throw new Error("IG_ACCESS_TOKEN 없음");
   const { db, initDb } = await import("../lib/db.ts");
   await initDb();
+  try {
+    const t = await db.execute("SELECT value FROM config WHERE key = 'ig_token'");
+    if (t.rows[0]?.value) TOKEN = String(t.rows[0].value);
+  } catch { /* config 없음 — env 토큰으로 */ }
+  if (!TOKEN) console.log("⚠️ IG 토큰 없음 — 크론이 저장한 DB 지표만 사용합니다(공유·시청 시간 제외).");
 
   const rows = (
     await db.execute(
-      `SELECT content_id, cover_style, title_font, ig_media_id, created_at
+      `SELECT content_id, cover_style, title_font, ig_media_id, created_at, views, reach, saved, metrics_at
          FROM posts
         WHERE category = '모음집' AND status = 'published'
           AND ig_media_id IS NOT NULL AND cover_style IS NOT NULL
@@ -52,13 +60,30 @@ async function main() {
 
   const stat = Object.fromEntries(STYLES.map((s) => [s, []]));
   const fontStat = {}; // 서체 A/B (title_font 기록이 있는 회차만)
+  let fromApi = 0, fromDb = 0, noData = 0;
   console.log("── 회차별 ──");
   for (const r of rows) {
-    const ins = await insights(String(r.ig_media_id));
+    // 라이브 인사이트가 1순위. 토큰 만료·한도로 막히면 /api/cron/metrics(하루 2회)가
+    // posts에 저장해 둔 조회·도달·저장으로 대신한다 — 공유·시청 시간은 그때 못 본다.
+    let ins = await insights(String(r.ig_media_id));
+    let src = "";
+    if (ins) fromApi++;
+    else if (r.views != null) {
+      // 공유·시청 시간은 크론이 저장하지 않는다(fetchInsights는 views/reach/saved만) —
+      // 키를 아예 넣지 않아 아래 평균에서 '0'이 아니라 '모름'으로 빠지게 한다.
+      ins = { views: Number(r.views), reach: Number(r.reach ?? 0), saved: Number(r.saved ?? 0) };
+      fromDb++;
+      src = ` | DB ${String(r.metrics_at ?? "").slice(0, 16) || "시각미상"}`;
+    } else noData++;
     const style = String(r.cover_style);
-    if (ins && stat[style]) stat[style].push(ins);
     const font = r.title_font ? String(r.title_font) : null;
-    if (ins && font && font !== "manual") (fontStat[font] ??= []).push(ins);
+    // 서체 A/B는 그리드 모음집(순환 스타일)만 대상 — 캐러셀은 cover_style='carousel'이라
+    // STYLES에 없고, 서체 교대(STYLE==='grid')도 안 타서 title_font가 늘 gmarket이다.
+    // 스타일 집계와 같은 가드를 쓰지 않으면 토요일 캐러셀이 gmarket 표본만 부풀린다.
+    if (ins && stat[style]) {
+      stat[style].push(ins);
+      if (font && font !== "manual") (fontStat[font] ??= []).push({ ...ins, style });
+    }
     const day = String(r.created_at ?? "").slice(0, 10);
     console.log(
       `${day} | ${(LABEL[style] ?? style).padEnd(13)} | 조회 ${String(ins?.views ?? "-").padStart(6)}` +
@@ -66,11 +91,21 @@ async function main() {
         ` | 공유 ${String(ins?.shares ?? "-").padStart(3)}` +
         ` | 시청 ${ins?.ig_reels_avg_watch_time ? (ins.ig_reels_avg_watch_time / 1000).toFixed(1) + "s" : "-"}` +
         (font ? ` | ${font}` : "") +
-        ` | ${r.content_id}`
+        ` | ${r.content_id}${src}`
     );
   }
+  console.log(`(지표 출처: 라이브 ${fromApi}건 / DB 저장분 ${fromDb}건 / 없음 ${noData}건)`);
 
+  // 조회·도달·저장은 전 표본에 있으니 그대로 평균. 공유·시청 시간은 라이브로 받은 행에만
+  // 있으므로 '있는 표본'만으로 평균 내고 표본 수를 병기한다 — 없는 값을 0으로 세면 평균이
+  // 표본 수에 비례해 깎이고, 전부 폴백이면 "시청 0.0s"가 측정값처럼 보인다.
   const avg = (a, k) => (a.length ? a.reduce((s, x) => s + (x[k] ?? 0), 0) / a.length : 0);
+  const partial = (a, k, fmt) => {
+    const v = a.filter((x) => x[k] != null).map((x) => x[k]);
+    return v.length ? `${fmt(v.reduce((s, x) => s + x, 0) / v.length)}(${v.length}건)` : "-";
+  };
+  const shareCol = (a) => partial(a, "shares", (x) => x.toFixed(1)).padStart(9);
+  const watchCol = (a) => partial(a, "ig_reels_avg_watch_time", (x) => (x / 1000).toFixed(1) + "s").padStart(10);
   console.log("\n── 스타일별 평균 ──");
   for (const s of STYLES) {
     const a = stat[s];
@@ -83,8 +118,8 @@ async function main() {
         ` | 조회 ${Math.round(avg(a, "views")).toString().padStart(6)}` +
         ` | 도달 ${Math.round(avg(a, "reach")).toString().padStart(5)}` +
         ` | 저장 ${avg(a, "saved").toFixed(1).padStart(4)}` +
-        ` | 공유 ${avg(a, "shares").toFixed(1).padStart(4)}` +
-        ` | 시청 ${(avg(a, "ig_reels_avg_watch_time") / 1000).toFixed(1)}s`
+        ` | 공유 ${shareCol(a)}` +
+        ` | 시청 ${watchCol(a)}`
     );
   }
 
@@ -106,8 +141,13 @@ async function main() {
           ` | 조회 ${Math.round(avg(a, "views")).toString().padStart(6)}` +
           ` | 도달 ${Math.round(avg(a, "reach")).toString().padStart(5)}` +
           ` | 저장 ${avg(a, "saved").toFixed(1).padStart(4)}` +
-          ` | 공유 ${avg(a, "shares").toFixed(1).padStart(4)}` +
-          ` | 시청 ${(avg(a, "ig_reels_avg_watch_time") / 1000).toFixed(1)}s`
+          ` | 공유 ${shareCol(a)}` +
+          ` | 시청 ${watchCol(a)}` +
+          // 서체 교대(font_idx %2)와 표지 순환(cover_idx %7)은 위상이 고정돼 14회차에야
+          // 맞아떨어진다. 그때까지는 서체 차이에 표지 차이가 섞이므로 구성을 함께 찍는다.
+          ` | 표지구성 ${STYLES.filter((st) => a.some((x) => x.style === st))
+            .map((st) => `${st} ${a.filter((x) => x.style === st).length}`)
+            .join(", ")}`
       );
     }
     const fn = Math.min(...fonts.map((f) => fontStat[f].length));
@@ -118,6 +158,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error("표지 성과 분석 실패:", e);
+  console.error("표지 성과 분석 실패:", safe(e));
   process.exit(1);
 });
