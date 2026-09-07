@@ -1118,7 +1118,7 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
  * 그리드형(기존·다크)과 달리 썸네일에서 음식이 크게 보이는 대신 6곳 정보는 안 보인다.
  * 어느 쪽이 유입에 유리한지 비교하려고 나란히 돌린다.
  */
-async function composeHeroCover(theme, places, bgUrl = null) {
+async function composeHeroCover(theme, places, bgUrl = null, outName = "reel-cover.jpg") {
   const sharp = (await import("sharp")).default;
   const W = 1080, H = 1920;
   const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285 — 4:5로 잘려도 살아남는 위쪽 경계
@@ -1164,7 +1164,9 @@ async function composeHeroCover(theme, places, bgUrl = null) {
     <text x="${W / 2}" y="${CT + CH - 14}" font-family="${FONT}" font-size="22" fill="#e0cfc4" text-anchor="middle">@${HANDLE}</text>
   </svg>`;
 
-  const out = path.join(TMP, "reel-cover.jpg");
+  // ⚠️ 기본 파일명이 composeReelCover와 같다 — 훅 컷처럼 그리드 표지와 함께 쓸 때는
+  //    반드시 다른 outName을 넘길 것(안 그러면 표지가 덮어써진다).
+  const out = path.join(TMP, outName);
   await sharp(bgPhoto)
     .composite([{ input: Buffer.from(svg), left: 0, top: 0 }])
     .jpeg({ quality: 90 })
@@ -1379,6 +1381,22 @@ async function renderPagesReel(stills, bgm, outMp4) {
     "-t", String(total), "-movflags", "+faststart", outMp4,
   ]);
   return total;
+}
+
+/**
+ * 그리드 릴스 첫 3초에 붙일 훅 컷 — 음식 풀샷 + 제목만 크게.
+ * 그리드 표지는 6칸에 정보가 빽빽해 첫 화면에서 "무슨 영상인지" 읽히기까지 시간이 걸린다.
+ * 평균 시청 4.9초 실측(2026-09-07)이라 그 사이에 이미 넘어가는 사람이 많다 —
+ * 큰 사진 한 장으로 3초 붙잡고 그리드로 넘겨 정보를 준다(사용자 결정 2026-09-07).
+ * 실패해도 발행은 막지 않는다 — null이면 기존 표지 8초 단일컷으로 렌더한다.
+ */
+async function buildHookCut(theme, places, bgUrl) {
+  try {
+    return await composeHeroCover(theme, places, bgUrl, "hook-cut.jpg");
+  } catch (e) {
+    console.error("훅 컷 생성 실패(표지 8초 단일컷으로 진행):", String(e).slice(0, 120));
+    return null;
+  }
 }
 
 /** 페이지형 정지컷 목록: 표지 4초 + 식당 카드 각 2.5초 (사용자 지정) */
@@ -1731,7 +1749,19 @@ async function main() {
       .extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 })
       .toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
     fs.writeFileSync("countdown-card-preview.jpg", await composeRankCard(sharpMod, places[0], 1));
-    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg, countdown-card-preview.jpg`);
+    // 그리드 릴스 첫 3초 훅 컷 — 실발행과 같은 렌더러로 뽑아 폰에서 그림으로 확인한다
+    const hook = await buildHookCut(theme, places, null);
+    if (hook) fs.copyFileSync(hook, "roundup-hook-preview.jpg");
+    // ffmpeg가 있으면 8초 릴스(훅 3초 + 표지 5초)까지 실제로 이어붙여 본다
+    if (hook && process.env.OFFLINE_RENDER === "1") {
+      const total = await renderPagesReel(
+        [{ path: hook, sec: 3 }, { path: "roundup-reel-preview.jpg", sec: 5 }],
+        null,
+        "roundup-reel-preview.mp4"
+      );
+      console.log(`오프라인 릴스 렌더 — roundup-reel-preview.mp4 (${total}초)`);
+    }
+    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-hook-preview.jpg, roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg, countdown-card-preview.jpg`);
     return;
   }
 
@@ -2098,6 +2128,14 @@ async function main() {
       console.log("DRY — countdown-intro-preview.jpg / countdown-rank-preview.jpg 저장");
     } else {
       fs.copyFileSync(reelCover, "roundup-reel-preview.jpg");
+      if (STYLE !== "carousel" && coverStyle !== "pages") {
+        // 실발행에서 첫 3초에 나갈 훅 컷 — 폰에서 그림으로 확인해야 판단이 된다
+        const hook = await buildHookCut(theme, places, pkBg?.url);
+        if (hook) {
+          fs.copyFileSync(hook, "roundup-hook-preview.jpg");
+          console.log("DRY — roundup-hook-preview.jpg 저장 (첫 3초 훅 컷)");
+        }
+      }
       if (coverStyle === "pages") {
         const stills = await buildPageStills(sharpMod, reelCover, places);
         stills.forEach((st, i) => fs.copyFileSync(st.path, `pages-preview-${String(i + 1).padStart(2, "0")}.jpg`));
@@ -2237,6 +2275,13 @@ async function main() {
       p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
     });
 
+  // 첫 3초 훅 컷 — 그리드(classic·dark) 릴스에만. cdMode(카운트다운·hero)는 이미
+  // 인트로 컷이 있고, pages는 표지 4초 뒤 카드가 이어져 훅이 따로 필요 없다.
+  const HOOK_SEC = 3;
+  const hookCut = !cdMode && coverStyle !== "pages"
+    ? await buildHookCut(theme, places, pkBg?.url)
+    : null;
+
   if (cdMode) {
     // 카드들을 순서대로 이어붙임 (인트로 3초, 순위 카드 2.6초, 아웃트로 2.6초)
     // 나레이션 음성 — TTS는 릴스당 1회만 호출(무료 한도 보호). 실패하면 무음 진행.
@@ -2331,11 +2376,22 @@ async function main() {
     const stills = await buildPageStills(sharpMod, reelCover, places);
     const total = await renderPagesReel(stills, bgm, reelMp4);
     console.log(`페이지형 릴스 렌더 완료 (${stills.length}컷, ${total}초)`);
-  } else {
-    // 리스트 표지 → 8초 고정 세로 릴스 (기존 모음집).
-    // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
+  } else if (hookCut) {
+    // 리스트 표지 → 훅 컷 3초 + 그리드 표지 5초 (총 8초, 모션 없음).
+    // 8초 단일컷이던 것을 2컷으로 나눈 이유: 평균 시청 4.9초라 그리드를 다 읽기 전에
+    // 이탈한다. 첫 3초는 음식 풀샷으로 붙잡고, 정보(6곳 그리드)는 그 뒤에 준다.
+    // 장면 전환은 1회뿐 — 줌인 등 모션 금지 규칙은 그대로다.
     // 체크리스트 2컷은 사용자 피드백("너무 이상하다", 2026-09-02)으로 제외 —
     // 체크리스트 카드는 캐러셀 마지막 장에만 남는다.
+    const total = await renderPagesReel(
+      [{ path: hookCut, sec: HOOK_SEC }, { path: reelCover, sec: 8 - HOOK_SEC }],
+      bgm,
+      reelMp4
+    );
+    console.log(`그리드 릴스 렌더 완료 (훅 ${HOOK_SEC}초 + 표지 ${8 - HOOK_SEC}초, ${total}초)`);
+  } else {
+    // 훅 컷 실패 폴백 — 기존 표지 8초 고정 단일컷.
+    // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
     const gridAudio = bgm
       ? ["-stream_loop", "-1", "-i", bgm.path]
       : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
@@ -2363,9 +2419,12 @@ ${bgm.attribution}`;
   const musicOpt = igMusic
     ? { audioId: igMusic.id, audioVolume: cdMode ? 30 : 100, videoVolume: 100 } // 나레이션 있는 형식은 음악을 낮게
     : null;
+  // 프로필 그리드 썸네일 — 훅 컷을 붙인 회차는 0프레임이 음식 풀샷이라, 정보가 담긴
+  // 그리드 표지 구간(훅 다음 1초 지점)을 커버로 지정한다.
+  const thumbMs = hookCut ? (HOOK_SEC + 1) * 1000 : 0;
   let mediaId;
   try {
-    mediaId = await publishReelSmart(reelUrl, finalCaption, musicOpt);
+    mediaId = await publishReelSmart(reelUrl, finalCaption, musicOpt, { thumbOffsetMs: thumbMs });
   } catch (e) {
     // 인스타가 사유 없이 컨테이너 ERROR를 주는 경우(9/3 성수 편 실측). 같은 규격의 영상이
     // 전날은 정상 발행됐으니 호스트에서 영상을 못 받아온 일시 오류일 가능성이 크다 —
@@ -2375,7 +2434,7 @@ ${bgm.attribution}`;
     await new Promise((r) => setTimeout(r, 20000));
     const retryUrl = await uploadPublic(reelMp4, { avoidHostOf: reelUrl });
     console.log("모음집 릴스 재업로드:", retryUrl);
-    mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt);
+    mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt, { thumbOffsetMs: thumbMs });
   }
   console.log("✅ 모음집 릴스 발행:", mediaId);
   await db.execute({

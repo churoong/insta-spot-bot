@@ -8,7 +8,7 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 - **무료만**: 유료 API·플랜 추천 금지. 카드 등록은 "과금 0 조건"에서만 허용됨(구글 Places 대기 중).
 - **남의 콘텐츠 금지**: 블로그·인스타 사진/영상 스크래핑·리그램 금지(저작권·잡코리아 판례). 비공식 프라이빗 API 금지.
 - **재제안 금지 목록**: 폐업 필터(행안부 데이터) / 기상청·천문연 연동 / 릴스에 도장깨기 체크리스트 / 정답 공개 스토리 / 밸런스 게임 / dark 표지.
-- **표지 문구**: 서술형(~해요) 금지, 개조식 명사구 2~3개. 관형형 종결 금지. 줌인 등 모션 금지(표지 8초 고정). "N선"(예: 6선) 금지 → "N대 맛집"/"TOP N".
+- **표지 문구**: 서술형(~해요) 금지, 개조식 명사구 2~3개. 관형형 종결 금지. 줌인 등 모션 금지(그리드 릴스 총 8초 고정 — 2026-09-07부터 훅 컷 3초 + 그리드 표지 5초, 장면 전환 1회만). "N선"(예: 6선) 금지 → "N대 맛집"/"TOP N".
 - **훅 문구**: 감탄사·명사형·반문. 서술형 종결 금지, "이유" 단어 금지, 설명에 없는 숫자 금지.
 - **조건형 팔로우 유도 문구 금지** ("팔로우하면 ~해줄게").
 - 성과 판단은 좋아요가 아니라 **조회수·도달·저장**.
@@ -35,6 +35,14 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
   비교용으로 남긴다. **주기는 홀수를 유지할 것** — 서체 A/B(font_idx %2)와 표지 포인터가 함께 움직여서
   짝수면 특정 표지에 특정 서체만 붙어 두 실험이 엉킨다.
 - 서체: 본문 `FONT`=Pretendard, 제목·상호명·순위 `TFONT`=G마켓 산스. **서체 A/B 진행 중**(G마켓 vs 잘난체, font_idx 교대, posts.title_font 기록) — 판정은 `scripts/cover-report.mjs` 서체별 평균(서체당 5건 이상).
+- **그리드 릴스 첫 3초 = 훅 컷**(2026-09-07 사용자 결정): 음식 풀샷 + 제목만(= hero 표지 렌더러
+  `composeHeroCover`)을 3초 보여준 뒤 그리드 표지 5초. 총 8초·모션 없음·전환 1회는 그대로.
+  이유는 평균 시청 4.9초 — 정보가 빽빽한 그리드를 다 읽기 전에 이탈한다. 훅 컷 생성이 실패하면
+  기존 표지 8초 단일컷으로 자동 폴백한다(`buildHookCut` → null).
+  단 **프로필 그리드 썸네일은 여전히 그리드 표지**다 — 발행 시 `thumb_offset=4000ms`(훅 다음 1초)을
+  지정한다. 안 하면 0프레임(음식 풀샷)이 커버가 되는데, 조회수 실측이 그리드 표지 쪽(classic 1,565
+  vs hero 150)이라 커버까지 바꾸지는 않는다. API가 `thumb_offset`을 거부하면 그것만 빼고 재시도한다.
+  카운트다운·hero·pages·캐러셀은 해당 없음(이미 첫 컷이 따로 있다).
 - 표지 음식명 크기 캡 116px(`ms`). 콘텐츠는 4:5 안전영역(y 285~1635) 안에.
 - 그리드 셀에 데이터 배지("🔎 후기·YT"), 캡션에 "🔎 선정 기준" 라인. 도장깨기 체크리스트는 **캐러셀 마지막 장에만**.
 - 카운트다운 인트로 "맛집 브리핑, {음식} 톱N" 페르소나. TTS Laomedeia 1.18배속.
@@ -54,7 +62,8 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 # 클라우드 세션 첫 작업: 의존성·폰트·ffmpeg 설치 + 오프라인 렌더까지 한 번에
 bash scripts/cloud-setup.sh
 # 시크릿 없이 (클라우드 세션 기본) — 표지·캐러셀 카드 렌더
-ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs      # → roundup-reel-preview.jpg, carousel-preview-*.jpg
+ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs      # → roundup-hook-preview.jpg(첫 3초), roundup-reel-preview.jpg, carousel-preview-*.jpg
+OFFLINE_RENDER=1 ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs  # 위 + 8초 릴스까지 실제 렌더 → roundup-reel-preview.mp4
 COVER_TFONT="'Jalnan','Pretendard',sans-serif" ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs  # 서체 시안
 
 # 시크릿 있을 때 — 실제 수집 포함 DRY (발행 없음)

@@ -203,7 +203,7 @@ export async function publishImage(imageUrl: string, caption: string): Promise<s
 export async function publishReel(
   videoUrl: string,
   caption: string,
-  opts: { trial?: boolean } = {}
+  opts: { trial?: boolean; thumbOffsetMs?: number } = {}
 ): Promise<string> {
   // 트라이얼 릴스(2025-12 API 지원, Instagram Login 포함): 비팔로워에게만 72시간
   // 테스트 노출, SS_PERFORMANCE면 성과 기준 통과 시 자동 전체공개(graduation).
@@ -214,6 +214,10 @@ export async function publishReel(
     caption,
     share_to_feed: true,
   };
+  // 프로필 그리드 썸네일로 쓸 프레임(ms). 지정하지 않으면 0프레임이 커버가 되는데,
+  // 모음집 릴스는 첫 3초가 훅 컷(음식 풀샷)이라 그러면 정보가 다 담긴 그리드 표지가
+  // 프로필에서 사라진다 — 조회수 실측이 그리드 표지 쪽이라(classic 1,565 vs hero 150) 유지.
+  if (opts.thumbOffsetMs) base.thumb_offset = String(Math.round(opts.thumbOffsetMs));
   let container;
   if (opts.trial) {
     try {
@@ -226,7 +230,17 @@ export async function publishReel(
       console.error("[publish] 트라이얼 생성 실패 — 일반 릴스로 폴백:", String(e).slice(0, 160));
     }
   }
-  if (!container) container = await graphPost(`${igUserId()}/media`, base);
+  if (!container) {
+    try {
+      container = await graphPost(`${igUserId()}/media`, base);
+    } catch (e) {
+      // 커버 프레임 지정 하나 때문에 발행 자체를 잃지는 않는다
+      if (base.thumb_offset === undefined) throw e;
+      console.error("[publish] thumb_offset 거부 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
+      delete base.thumb_offset;
+      container = await graphPost(`${igUserId()}/media`, base);
+    }
+  }
 
   // 동영상 처리 대기 (인코딩 검증에 수십 초~수 분)
   const id = String(container.id);
@@ -287,7 +301,8 @@ async function publishReelFb(
   videoUrl: string,
   caption: string,
   music: ReelMusic | null,
-  trial = false
+  trial = false,
+  thumbOffsetMs = 0
 ): Promise<string> {
   const igId = process.env.FB_IG_USER_ID!;
   const params: Record<string, unknown> = {
@@ -297,6 +312,7 @@ async function publishReelFb(
     share_to_feed: true,
   };
   if (trial) params.trial_params = { graduation_strategy: "SS_PERFORMANCE" };
+  if (thumbOffsetMs) params.thumb_offset = String(Math.round(thumbOffsetMs)); // 커버 = 그리드 표지 구간
   if (music) {
     params.audio_configuration = {
       audio_id: music.audioId,
@@ -304,7 +320,15 @@ async function publishReelFb(
       ...(music.videoVolume !== undefined ? { video_volume: music.videoVolume } : {}),
     };
   }
-  const container = await fbPost(`${igId}/media`, params);
+  let container;
+  try {
+    container = await fbPost(`${igId}/media`, params);
+  } catch (e) {
+    if (params.thumb_offset === undefined) throw e;
+    console.error("[publish] FB thumb_offset 거부 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
+    delete params.thumb_offset;
+    container = await fbPost(`${igId}/media`, params);
+  }
   const id = String(container.id);
   for (let i = 0; i < 80; i++) {
     const status: any = await fetch(
@@ -330,17 +354,17 @@ export async function publishReelSmart(
   videoUrl: string,
   caption: string,
   music: ReelMusic | null,
-  opts: { trial?: boolean } = {}
+  opts: { trial?: boolean; thumbOffsetMs?: number } = {}
 ): Promise<string> {
   if (music && fbConfigured()) {
     try {
-      const id = await publishReelFb(videoUrl, caption, music, opts.trial);
+      const id = await publishReelFb(videoUrl, caption, music, opts.trial, opts.thumbOffsetMs);
       console.log("[publish] FB 경로 발행 (라이브러리 음악 첨부):", id);
       return id;
     } catch (e) {
       console.error("[publish] 음악 첨부 발행 실패 — 음악 없이 재시도:", String(e).slice(0, 200));
       try {
-        const id = await publishReelFb(videoUrl, caption, null, opts.trial);
+        const id = await publishReelFb(videoUrl, caption, null, opts.trial, opts.thumbOffsetMs);
         console.log("[publish] FB 경로 발행 (음악 없음):", id);
         return id;
       } catch (e2) {
