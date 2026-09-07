@@ -29,7 +29,11 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - 지도 DM: 인스타 DM은 1,000바이트 한도 → `buildMapListDm`은 상호+지역 + 짧은 리다이렉트 `/go/{posts.id}/{n}`(app/go)만 담는다. 긴 주소·네이버 URL을 넣으면 전송이 거부된다.
 
 ## 표지·디자인 결정사항
-- 스타일 순환 **classic 6 : hero 1** (cover_idx %7, dark 제외). classic 흰 카드 그리드가 실측 압승.
+- 스타일 순환 **classic 10 : pages 2 : hero 1** (13주기, `COVER_STYLES` 배열 길이가 곧 주기, dark 제외).
+  2026-09-07 실측(cover-report, 17건): classic 조회 평균 1,565(중앙값 약 800) vs hero 150 · pages 181 · dark 256
+  → hero를 1/7에서 1/13으로 축소(사용자 지시). hero는 카운트다운형 렌더를 타는 유일한 모음집 경로라 포맷
+  비교용으로 남긴다. **주기는 홀수를 유지할 것** — 서체 A/B(font_idx %2)와 표지 포인터가 함께 움직여서
+  짝수면 특정 표지에 특정 서체만 붙어 두 실험이 엉킨다.
 - 서체: 본문 `FONT`=Pretendard, 제목·상호명·순위 `TFONT`=G마켓 산스. **서체 A/B 진행 중**(G마켓 vs 잘난체, font_idx 교대, posts.title_font 기록) — 판정은 `scripts/cover-report.mjs` 서체별 평균(서체당 5건 이상).
 - 표지 음식명 크기 캡 116px(`ms`). 콘텐츠는 4:5 안전영역(y 285~1635) 안에.
 - 그리드 셀에 데이터 배지("🔎 후기·YT"), 캡션에 "🔎 선정 기준" 라인. 도장깨기 체크리스트는 **캐러셀 마지막 장에만**.
