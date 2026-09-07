@@ -21,7 +21,8 @@ export async function llmText(
   // 2순위: Groq (무료 — console.groq.com)
   if (process.env.GROQ_KEY) {
     try {
-      const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+      // llama-3.3-70b-versatile은 2026-08 서비스 종료 — Groq 권장 대체 모델을 기본값으로
+      const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
       const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {

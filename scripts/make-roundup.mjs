@@ -574,8 +574,8 @@ async function pickFoodImage(place, food) {
         })),
     ]
       .filter((v, i, a) => v.url && a.findIndex((x) => x.url === v.url) === i)
-      .slice(0, 6);
-    if (cands.length < 1 || !process.env.GEMINI_API_KEY) return;
+      .slice(0, 5); // Groq 비전 폴백이 요청당 5장까지라 맞춤
+    if (cands.length < 1 || !(process.env.GEMINI_API_KEY || process.env.GROQ_KEY)) return;
     const sharp = (await import("sharp")).default;
     // 해상도 게이트 — 작은 사진은 아무리 음식이 잘 보여도 릴스 풀블리드에 못 쓴다.
     // 비전에는 썸네일(small)을 보내므로 크기는 반드시 '원본(url)'으로 재야 한다
@@ -605,16 +605,17 @@ async function pickFoodImage(place, food) {
     }
     if (valid.length < 1) return;
 
-    const text =
-      (await geminiCall(
-        [
+    const visionParts = [
           { text: `식당 사진 ${valid.length}장이야. ${food ? `"${food}" 요리가 실제로 화면에 보이는 사진의 번호만 좋은 순서대로 JSON 배열로 답해 (1번부터). 반찬·곁들임·다른 요리만 보이는 사진은 제외하고, ${food}가 보이는 사진이 한 장도 없으면 반드시 []로 답해.` : `음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터).`} 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
           ...parts,
-        ],
-        60
-      )) ?? "";
-    const m = text.match(/\[[\d,\s]*\]/);
-    const order = m ? JSON.parse(m[0]) : [];
+        ];
+    let text = await geminiCall(visionParts, 60);
+    if (!text) text = await groqVision(visionParts, 60); // Gemini 과부하 시 무료 Groq 비전으로
+    text = (text ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
+    const arrs = [...text.matchAll(/\[[\d,\s]*\]/g)];
+    const m = arrs.length ? arrs[arrs.length - 1] : null;
+    let order = [];
+    try { order = m ? JSON.parse(m[0]) : []; } catch { order = []; }
     // 비전이 고른 순서대로 원본 해상도를 확인해 첫 합격을 채택 (원본은 여기서만 받는다)
     let best = null;
     for (const n of order) {
@@ -644,32 +645,156 @@ function geminiModel() {
   const m = process.env.GEMINI_MODEL;
   return m && m !== "gemini-flash-latest" ? m : "gemini-flash-lite-latest";
 }
+// Gemini 과부하(503 high demand)·타임아웃은 몇 초 뒤 다시 부르면 되는 경우가 많다
+// (9/2 런 #34, 9/4 런 #61: 24곳 중 22곳이 503으로 비전 탈락 → 발행 건너뜀).
+// 다만 러너 15분 제한이 있어 런 전체 재시도 횟수에 상한을 둔다.
+let geminiRetryBudget = 8;
+// 연속 실패 회로 차단: 503·타임아웃이 3번 연달아 나면 이번 런은 Gemini를 더 부르지 않는다.
+// (9/4 DRY #65 실측: 곳마다 40초 타임아웃+재시도로 60초씩 써서 24곳에 15분 제한 초과)
+let geminiConsecutiveFail = 0;
 async function geminiCall(parts, maxTokens) {
   if (!process.env.GEMINI_API_KEY) return null;
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
-        signal: AbortSignal.timeout(40000),
-      }
-    );
-    const j = await res.json();
-    if (j?.error) {
-      console.log("[llm] Gemini 실패:", j.error.code ?? "", String(j.error.message ?? "").slice(0, 80));
-      return null;
-    }
-    const cand = j?.candidates?.[0];
-    const t = (cand?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("") ?? "").trim();
-    if (t && cand?.finishReason === "STOP") return t;
-    if (t && cand?.finishReason) console.log("[llm] Gemini 응답 잘림:", cand.finishReason);
-    return null;
-  } catch (e) {
-    console.log("[llm] Gemini 오류:", String(e).slice(0, 80));
+  if (geminiConsecutiveFail >= 3) {
+    if (geminiConsecutiveFail === 3) { console.log("[llm] Gemini 연속 3회 실패 — 이번 런은 Groq로만 진행"); geminiConsecutiveFail++; }
     return null;
   }
+  for (let attempt = 0; ; attempt++) {
+    let retryable = false;
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: [{ parts }], generationConfig: { maxOutputTokens: maxTokens } }),
+          signal: AbortSignal.timeout(30000),
+        }
+      );
+      const j = await res.json();
+      if (j?.error) {
+        console.log("[llm] Gemini 실패:", j.error.code ?? "", String(j.error.message ?? "").slice(0, 80));
+        retryable = j.error.code === 503 || j.error.code === 429 || /UNAVAILABLE|RESOURCE_EXHAUSTED/.test(String(j.error.status ?? ""));
+      } else {
+        const cand = j?.candidates?.[0];
+        const t = (cand?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? "").join("") ?? "").trim();
+        if (t && cand?.finishReason === "STOP") { geminiConsecutiveFail = 0; return t; }
+        if (t && cand?.finishReason) console.log("[llm] Gemini 응답 잘림:", cand.finishReason);
+        return null;
+      }
+    } catch (e) {
+      console.log("[llm] Gemini 오류:", String(e).slice(0, 80));
+      retryable = /TimeoutError|fetch failed|ECONNRESET/.test(String(e));
+    }
+    if (!retryable || attempt >= 1 || geminiRetryBudget <= 0) { if (retryable) geminiConsecutiveFail++; return null; }
+    geminiRetryBudget--;
+    const wait = 6000 + attempt * 6000;
+    console.log(`[llm] Gemini ${wait / 1000}초 후 재시도 (남은 예산 ${geminiRetryBudget})`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
+/**
+ * 비전 폴백: Gemini가 과부하(503)면 Groq 무료 멀티모달로 같은 판정을 한다.
+ * (9/4 밤 실측: 재시도 8회를 다 써도 Gemini 전멸 → 발행 건너뜀. 텍스트는 Groq 폴백이
+ *  있었는데 사진 판정만 없었다.) parts는 geminiCall과 같은 형식, 이미지는 5장까지.
+ */
+// Groq 모델 id는 자주 바뀐다. 9/4 실측: llama-4-scout는 "does not exist", 텍스트 기본값이던
+// llama-3.3-70b-versatile은 2026-08 서비스 종료(권장 대체: openai/gpt-oss-120b, qwen/qwen3.6-27b —
+// qwen3.6-27b는 이미지 입력도 됨). 그래서 고정하지 않고 /models 목록에서 고른다.
+// GROQ_MODEL(텍스트)·GROQ_VISION_MODEL(비전)로 고정 지정 가능.
+let groqModelIds = null;
+async function groqModels() {
+  if (groqModelIds) return groqModelIds;
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${process.env.GROQ_KEY}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    const j = await res.json();
+    groqModelIds = (j?.data ?? []).map((m) => String(m.id)).filter((id) => !/guard|whisper|tts|embed|safeguard/i.test(id));
+    console.log(`[llm] Groq 모델 목록 ${groqModelIds.length}개: ${groqModelIds.join(", ")}`);
+  } catch (e) {
+    console.log("[llm] Groq 모델 목록 실패:", String(e).slice(0, 80));
+    groqModelIds = [];
+  }
+  return groqModelIds;
+}
+const pickModel = (ids, prefs) => { for (const p of prefs) { const hit = ids.find((id) => p.test(id)); if (hit) return hit; } return null; };
+async function resolveGroqVisionModel() {
+  if (process.env.GROQ_VISION_MODEL) return process.env.GROQ_VISION_MODEL;
+  const pick = pickModel(await groqModels(), [/qwen3\.6/i, /qwen.*vl/i, /llama-4.*(maverick|scout)/i, /llama-4/i, /vision/i]);
+  if (!pick) console.log("[llm] Groq 비전 모델 없음");
+  return pick;
+}
+async function resolveGroqTextModel() {
+  if (process.env.GROQ_MODEL) return process.env.GROQ_MODEL;
+  return pickModel(await groqModels(), [/gpt-oss-120b/i, /qwen3\.6/i, /gpt-oss-20b/i, /llama-3\.3-70b/i, /llama/i, /./]);
+}
+// Groq 비전은 무료 등급이라 호출마다 한도 대기가 붙는다(9/4 실측 20~30초). 런당 상한을 둬서
+// Gemini 장기 장애 때 빨리 건너뛰고 다음 예약 슬롯(1시간 간격)이 재시도하게 한다.
+let groqVisionCalls = 0;
+const GROQ_VISION_MAX_CALLS = 10;
+async function groqVision(parts, maxTokens) {
+  if (!process.env.GROQ_KEY) return null;
+  if (groqVisionCalls >= GROQ_VISION_MAX_CALLS) {
+    if (groqVisionCalls === GROQ_VISION_MAX_CALLS) { console.log(`[llm] Groq 비전 런당 상한(${GROQ_VISION_MAX_CALLS}회) 도달 — 이후 생략`); groqVisionCalls++; }
+    return null;
+  }
+  groqVisionCalls++;
+  const model = await resolveGroqVisionModel();
+  if (!model) return null;
+  const sharp = (await import("sharp")).default;
+  // 무료 등급 한도 대응 (9/4 실측: 720px 3장이면 'Request too large'·rate limit, 응답은 thinking에
+  // 잘림) — 2장·512px로 줄이고 사고를 끈다. qwen3.6-27b는 이미지 3장 상한이기도 하다.
+  // 프롬프트의 장수도 맞춘다 (번호는 1번부터 그대로 대응)
+  const MAX_IMGS = 2;
+  const imgParts = parts.filter((p) => p.inlineData).slice(0, MAX_IMGS);
+  if (!imgParts.length) return null;
+  const content = [];
+  for (const p of parts) if (p.text) content.push({ type: "text", text: p.text.replace(/식당 사진 \d+장/, `식당 사진 ${imgParts.length}장`) });
+  for (const p of imgParts) {
+    let b = Buffer.from(p.inlineData.data, "base64");
+    try { b = await sharp(b).resize(512, 512, { fit: "inside" }).jpeg({ quality: 70 }).toBuffer(); } catch { /* 원본 그대로 */ }
+    content.push({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b.toString("base64")}` } });
+  }
+  const body = { model, messages: [{ role: "user", content }], max_tokens: Math.max(maxTokens, 512), temperature: 0, reasoning_effort: "none" };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_KEY}` },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(40000),
+      });
+      const j = await res.json();
+      if (j?.error) {
+        const msg = String(j.error.message ?? "");
+        if (/reasoning/i.test(msg) && body.reasoning_effort) {
+          delete body.reasoning_effort; body.max_tokens = 2048; // 모델이 파라미터를 모르면 빼고 재시도
+          continue;
+        }
+        if (/rate limit|too many requests/i.test(msg) && attempt < 1) {
+          const m = msg.match(/try again in ([\d.]+)\s*s/i);
+          const wait = Math.min(30000, m ? Math.ceil(Number(m[1]) * 1000) + 500 : 15000);
+          console.log(`[llm] Groq 비전 한도 — ${Math.round(wait / 1000)}초 후 재시도`);
+          await new Promise((r) => setTimeout(r, wait));
+          continue;
+        }
+        console.log("[llm] Groq 비전 실패:", msg.slice(0, 80));
+        return null;
+      }
+      // thinking 모델은 <think>…</think>를 본문에 섞어 내기도 한다 — 걷어내고 답만. 닫히지 않았으면 잘린 것
+      let t = String(j?.choices?.[0]?.message?.content ?? "").replace(/<think>[\s\S]*?<\/think>/g, "");
+      if (/<think>/i.test(t)) { console.log("[llm] Groq 비전 응답이 사고 중에 잘림"); return null; }
+      t = t.trim();
+      if (t) console.log(`[llm] Groq 비전 폴백 사용 (${model}): ${t.slice(0, 40).replace(/\s+/g, " ")}`);
+      return t || null;
+    } catch (e) {
+      console.log("[llm] Groq 비전 오류:", String(e).slice(0, 80));
+      return null;
+    }
+  }
+  return null;
 }
 
 /** 텍스트 생성 폴백 체인: Gemini → Groq(무료). 모두 실패하면 null. */
@@ -682,7 +807,7 @@ async function llmGenerate(prompt, maxTokens) {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_KEY}` },
         body: JSON.stringify({
-          model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+          model: await resolveGroqTextModel(),
           messages: [{ role: "user", content: prompt }],
           max_tokens: maxTokens,
           temperature: 0.8,
@@ -1701,54 +1826,68 @@ async function main() {
   // 풀을 10곳 이상 요구하는 이유: 뒤이어 음식 사진 검증에서 몇 곳이 탈락하는데,
   // 딱 6곳만 모인 테마(예: 제주 흑돼지 9곳)를 잡으면 6칸을 못 채워 그날 발행이
   // 통째로 날아간다. 여유가 있는 테마를 먼저 쓰고, 전부 얇으면 그중 제일 큰 풀을 쓴다.
-  let best = null;
-  for (let t = 0; !theme && t < Math.min(5, ordered.length); t++) {
-    const cand = ordered[t];
-    const got = await collectPlaces(cand, cand.areaCode || cand.mode === "area" ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
-    console.log(`[${cand.key}] 수집 풀: ${got.length}곳`);
-    if (got.length >= 10) { theme = cand; places = got; break; }
-    if (!best || got.length > best.places.length) best = { theme: cand, places: got };
-  }
-  if (!theme && best && best.places.length >= 6) {
-    theme = best.theme;
-    places = best.places;
-    console.log(`풀이 얇아 최대 후보로 진행: ${theme.key} (${places.length}곳)`);
-  }
-  if (!theme) throw new Error("수집 가능한 테마 없음");
-
   // 음식 사진 검증을 표지 구성보다 먼저 한다.
   // 왜: 비전이 음식 사진을 못 찾으면 예전에는 원본(간판·외관)을 그대로 썼고,
   //     그 결과 표지에 가게 간판이 올라갔다. 검증 통과한 곳만 표지에 세우고
   //     탈락한 곳은 다음 후보로 대체한다. (무료 등급 분당 한도 고려해 4초 간격)
-  // 같은 브랜드 지점은 한 곳만 — 본점·무지점명을 우선하고 나머지 지점은 풀에서 뺀다
+  // 통과가 4곳 미만이면 그 테마는 포기하고 다음 테마로 넘어간다 (9/4 실측: 서울 상권 풀은
+  // 서울 DB 저해상도 메뉴 사진이 대부분이라 해상도 게이트 뒤에 6곳이 안 나올 수 있다).
+  // 테마를 돌더라도 전체 8분 예산 안에서 — 넘기면 확보한 만큼으로 진행한다.
+  // 같은 브랜드 지점은 한 곳만 — 본점·무지점명을 우선하고 나머지 지점은 뺀다
   // (실측: 홍대 편에 벽제갈비 본점·신촌점이 함께 선정됨). 비전 전에 걸러야 비전 호출도 절약.
-  {
+  function dedupeBrand(list) {
     const byBrand = new Map();
-    for (const p of places) {
+    for (const p of list) {
       const k = brandOf(p.name);
       const cur = byBrand.get(k);
       if (!cur || (isBranchName(cur.name) && !isBranchName(p.name))) byBrand.set(k, p);
     }
-    if (byBrand.size < places.length) console.log(`브랜드 중복 제거: ${places.length} → ${byBrand.size}곳`);
-    places = [...byBrand.values()];
+    if (byBrand.size < list.length) console.log(`브랜드 중복 제거: ${list.length} → ${byBrand.size}곳`);
+    return [...byBrand.values()];
   }
   const NEED = 6;
-  const passed = [];
-  for (const p of places) {
-    if (passed.length >= NEED) break;
-    await pickFoodImage(p, theme.food);
-    if (p.foodPicked) passed.push(p);
-    else console.log(`  음식 사진 없음 → 제외: ${p.name}`);
-    await new Promise((r) => setTimeout(r, 4000));
+  const PHOTO_PHASE_BUDGET_MS = 8 * 60 * 1000;
+  const photoDeadline = Date.now() + PHOTO_PHASE_BUDGET_MS;
+  async function pickPhotos(cands, th) {
+    const ok = [];
+    for (const p of dedupeBrand(cands)) {
+      if (ok.length >= NEED) break;
+      if (Date.now() > photoDeadline) {
+        console.log(`사진 판정 시간 예산(8분) 초과 — 확보한 ${ok.length}곳으로 진행`);
+        break;
+      }
+      await pickFoodImage(p, th.food);
+      if (p.foodPicked) ok.push(p);
+      else console.log(`  음식 사진 없음 → 제외: ${p.name}`);
+      await new Promise((r) => setTimeout(r, 4000));
+    }
+    return ok;
   }
-  // 2열 그리드라 홀수면 마지막 칸이 혼자 남아 비대칭 → 짝수로만
+  let passed = [];
+  if (theme) {
+    passed = await pickPhotos(places, theme);
+  } else {
+    let best = null;
+    for (let t = 0; t < Math.min(5, ordered.length) && Date.now() < photoDeadline; t++) {
+      const cand = ordered[t];
+      const got = await collectPlaces(cand, cand.areaCode || cand.mode === "area" ? 24 : 16); // 지자체 소스는 대표사진에 외관 컷이 많아 비전 통과율이 낮다(제주 실측 33%) — 풀을 넉넉히
+      console.log(`[${cand.key}] 수집 풀: ${got.length}곳`);
+      if (got.length < 6) continue;
+      const ok = await pickPhotos(got, cand);
+      if (!best || ok.length > best.passed.length) best = { theme: cand, places: got, passed: ok };
+      if (ok.length >= NEED) break;
+      console.log(`[${cand.key}] 음식 사진 ${ok.length}곳 — ${ok.length >= 4 ? "보류하고 " : ""}다음 테마 시도`);
+    }
+    if (!best) throw new Error("수집 가능한 테마 없음");
+    theme = best.theme; places = best.places; passed = best.passed;
+  }
   const useCount = passed.length >= 6 ? 6 : passed.length >= 4 ? 4 : 0;
   if (!useCount) {
     console.log(`⏭️ 음식 사진 확보 ${passed.length}곳뿐 — 이번 모음집 발행 건너뜀`);
     return;
   }
   places = passed.slice(0, useCount);
-  console.log(`음식 사진 확보: ${places.length}곳`);
+  console.log(`음식 사진 확보: ${places.length}곳 (${theme.key})`);
 
   // 자극형 제목 랜덤 생성
   const tt = buildPunchyTitle(theme, places.length);

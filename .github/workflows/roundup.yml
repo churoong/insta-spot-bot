@@ -32,7 +32,7 @@ on:
 jobs:
   roundup:
     runs-on: ubuntu-latest
-    timeout-minutes: 25 # TourAPI가 느린 날 15분을 넘겨 타임아웃(9/6 실측)
+    timeout-minutes: 25 # TourAPI가 느린 날 15분을 넘겨 타임아웃(9/6 실측) — 사진 판정은 8분 예산으로 별도 제한
     # 같은 워크플로의 런은 직렬 실행 — Vercel 트리거 런과 지연 도착한 schedule 런이 병렬로 돌면
     # 둘 다 하루 1회 가드를 통과해 이중 발행될 수 있다(가드→마커 사이 수 분). 두 번째 런은 대기 후 가드에 걸린다.
     concurrency:
