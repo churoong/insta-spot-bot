@@ -9,7 +9,11 @@
 //    회차별 원자료를 그대로 출력한다 — 숫자 하나만 보고 결론 내지 말 것.
 
 const B = "https://graph.instagram.com/v23.0";
-const TOKEN = process.env.IG_ACCESS_TOKEN;
+// 토큰은 DB의 최신 값(config.ig_token)이 우선 — env IG_ACCESS_TOKEN은 최초 시드용이라
+// 60일 지나면 만료돼 있을 수 있다(lib/instagram.ts getToken과 같은 규칙).
+let TOKEN = process.env.IG_ACCESS_TOKEN;
+// 토큰이 URL 쿼리에 들어가므로 예외 메시지에 그대로 실릴 수 있다 — 로그에 남기기 전에 가린다
+const safe = (e) => String(e && e.stack ? e.stack : e).replace(/access_token=[^&\s"']+/g, "access_token=***");
 
 const STYLES = ["classic", "hero", "pages", "dark"];
 const LABEL = { classic: "기존(흰 카드)", hero: "A안(히어로)", pages: "페이지형(슬라이드)", dark: "C안(다크)" };
@@ -31,13 +35,17 @@ async function insights(mediaId) {
 }
 
 async function main() {
-  if (!TOKEN) throw new Error("IG_ACCESS_TOKEN 없음");
   const { db, initDb } = await import("../lib/db.ts");
   await initDb();
+  try {
+    const t = await db.execute("SELECT value FROM config WHERE key = 'ig_token'");
+    if (t.rows[0]?.value) TOKEN = String(t.rows[0].value);
+  } catch { /* config 없음 — env 토큰으로 */ }
+  if (!TOKEN) console.log("⚠️ IG 토큰 없음 — 크론이 저장한 DB 지표만 사용합니다(공유·시청 시간 제외).");
 
   const rows = (
     await db.execute(
-      `SELECT content_id, cover_style, title_font, ig_media_id, created_at
+      `SELECT content_id, cover_style, title_font, ig_media_id, created_at, views, reach, saved, metrics_at
          FROM posts
         WHERE category = '모음집' AND status = 'published'
           AND ig_media_id IS NOT NULL AND cover_style IS NOT NULL
@@ -52,9 +60,17 @@ async function main() {
 
   const stat = Object.fromEntries(STYLES.map((s) => [s, []]));
   const fontStat = {}; // 서체 A/B (title_font 기록이 있는 회차만)
+  let fromApi = 0, fromDb = 0, noData = 0;
   console.log("── 회차별 ──");
   for (const r of rows) {
-    const ins = await insights(String(r.ig_media_id));
+    // 라이브 인사이트가 1순위. 토큰 만료·한도로 막히면 /api/cron/metrics(하루 2회)가
+    // posts에 저장해 둔 조회·도달·저장으로 대신한다 — 공유·시청 시간은 그때 못 본다.
+    let ins = await insights(String(r.ig_media_id));
+    if (ins) fromApi++;
+    else if (r.views != null) {
+      ins = { views: Number(r.views), reach: Number(r.reach ?? 0), saved: Number(r.saved ?? 0) };
+      fromDb++;
+    } else noData++;
     const style = String(r.cover_style);
     if (ins && stat[style]) stat[style].push(ins);
     const font = r.title_font ? String(r.title_font) : null;
@@ -69,6 +85,7 @@ async function main() {
         ` | ${r.content_id}`
     );
   }
+  console.log(`(지표 출처: 라이브 ${fromApi}건 / DB 저장분 ${fromDb}건 / 없음 ${noData}건)`);
 
   const avg = (a, k) => (a.length ? a.reduce((s, x) => s + (x[k] ?? 0), 0) / a.length : 0);
   console.log("\n── 스타일별 평균 ──");
@@ -118,6 +135,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error("표지 성과 분석 실패:", e);
+  console.error("표지 성과 분석 실패:", safe(e));
   process.exit(1);
 });
