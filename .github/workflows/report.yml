@@ -32,11 +32,15 @@ jobs:
           # 최신 토큰은 DB(config.ig_token)에 있고 이건 폴백 — 둘 다 없으면 DB 저장 지표만 쓴다
           IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
         run: |
-          set -eo pipefail
-          npx tsx scripts/cover-report.mjs | tee cover-report.txt
+          # 실패해도 요약은 남긴다 — 폰에서 읽을 게 없으면 실행한 의미가 없다.
+          # (기본 셸이 -e -o pipefail이라 파이프 실패 시 즉시 종료되므로 rc를 직접 받는다)
+          set +e
+          npx tsx scripts/cover-report.mjs 2>&1 | tee cover-report.txt
+          rc=${PIPESTATUS[0]}
           {
             echo '## 표지 스타일·서체 A/B 성과'
             echo '```'
             cat cover-report.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
