@@ -1125,7 +1125,8 @@ async function composeHeroCover(theme, places, bgUrl = null, outName = "reel-cov
   const CH = Math.round(W * 5 / 4); // 1350
 
   const p = places.find((x) => x.foodPicked) ?? places[0];
-  const heroBuf = await fetchPhoto(bgUrl ?? p.imageUrl, p.name);
+  let heroBuf = await fetchPhoto(bgUrl ?? p.imageUrl, p.name);
+  if (!heroBuf && bgUrl) heroBuf = await fetchPhoto(p.imageUrl, p.name); // 포토코리아 실패 → 식당 사진
   if (!heroBuf) throw new Error("히어로 배경 사진 실패");
   // 그리드형과 달리 사진 자체가 주인공이라 블러를 넣지 않는다
   const bgPhoto = await sharp(heroBuf)
@@ -1372,12 +1373,15 @@ async function renderPagesReel(stills, bgm, outMp4) {
   const audio = bgm
     ? ["-stream_loop", "-1", "-i", bgm.path]
     : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
+  // 비디오는 재인코딩하지 않는다 — 컷을 이미 crf18 -tune stillimage로 구웠고 concat도
+  // 무손실이라, 여기서 다시 인코딩하면 그리드 표지 글자에 세대 손실만 얹힌다(PSNR -1.1dB 실측).
   await ff([
     "-y", "-i", joined, ...audio,
-    "-filter_complex",
-    `[0:v]fps=30,format=yuv420p[v]${bgm ? `;[1:a]volume=0.35,afade=t=out:st=${(total - 0.8).toFixed(1)}:d=0.8[a]` : ""}`,
-    "-map", "[v]", "-map", bgm ? "[a]" : "1:a",
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac",
+    ...(bgm
+      ? ["-filter_complex", `[1:a]volume=0.35,afade=t=out:st=${(total - 0.8).toFixed(1)}:d=0.8[a]`]
+      : []),
+    "-map", "0:v", "-map", bgm ? "[a]" : "1:a",
+    "-c:v", "copy", "-c:a", "aac",
     "-t", String(total), "-movflags", "+faststart", outMp4,
   ]);
   return total;
@@ -1772,6 +1776,8 @@ async function main() {
   await initDb();
   // 서체 A/B 기록용 컬럼 (없으면 추가 — 이미 있으면 조용히 무시)
   try { await db.execute("ALTER TABLE posts ADD COLUMN title_font TEXT"); } catch { /* 존재함 */ }
+  // 실제로 나간 릴스 구성. cover_style만으로는 2026-09-07 훅 컷 도입 전후가 구분되지 않는다.
+  try { await db.execute("ALTER TABLE posts ADD COLUMN reel_format TEXT"); } catch { /* 존재함 */ }
 
   // 발행 쿨다운(행동차단 회복) 중이면 모음집도 쉼 — 시도 반복이 차단을 연장시킴
   if (!DRY) {
@@ -2278,9 +2284,11 @@ async function main() {
   // 첫 3초 훅 컷 — 그리드(classic·dark) 릴스에만. cdMode(카운트다운·hero)는 이미
   // 인트로 컷이 있고, pages는 표지 4초 뒤 카드가 이어져 훅이 따로 필요 없다.
   const HOOK_SEC = 3;
-  const hookCut = !cdMode && coverStyle !== "pages"
-    ? await buildHookCut(theme, places, pkBg?.url)
-    : null;
+  const hookApplies = !cdMode && coverStyle !== "pages";
+  const hookCut = hookApplies ? await buildHookCut(theme, places, pkBg?.url) : null;
+  if (hookApplies && !hookCut) console.error("⚠️ 훅 컷 없이 발행합니다 — 표지 8초 단일컷(reel_format=grid8)");
+  // 성과 비교용으로 '무엇이 실제로 나갔는가'를 남긴다 (cover-report가 이 값으로 표본을 가른다)
+  const reelFormat = cdMode ? "countdown" : coverStyle === "pages" ? "pages" : hookCut ? "hook3+grid5" : "grid8";
 
   if (cdMode) {
     // 카드들을 순서대로 이어붙임 (인트로 3초, 순위 카드 2.6초, 아웃트로 2.6초)
@@ -2434,12 +2442,13 @@ ${bgm.attribution}`;
     await new Promise((r) => setTimeout(r, 20000));
     const retryUrl = await uploadPublic(reelMp4, { avoidHostOf: reelUrl });
     console.log("모음집 릴스 재업로드:", retryUrl);
-    mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt, { thumbOffsetMs: thumbMs });
+    // 마지막 시도는 커버 프레임 지정 없이 — 커버 하나 때문에 그날 콘텐츠를 통째로 잃지 않는다
+    mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt, { thumbOffsetMs: 0 });
   }
   console.log("✅ 모음집 릴스 발행:", mediaId);
   await db.execute({
-    sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
-    args: [mediaId, cid],
+    sql: `UPDATE posts SET ig_media_id = ?, status = 'published', reel_format = ? WHERE content_id = ?`,
+    args: [mediaId, reelFormat, cid],
   });
 
   // 발행 직후 표지를 스토리로도 공유 — 팔로워 재도달 + 프로필 방문 루프.

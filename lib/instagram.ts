@@ -230,30 +230,40 @@ export async function publishReel(
       console.error("[publish] 트라이얼 생성 실패 — 일반 릴스로 폴백:", String(e).slice(0, 160));
     }
   }
-  if (!container) {
-    try {
-      container = await graphPost(`${igUserId()}/media`, base);
-    } catch (e) {
-      // 커버 프레임 지정 하나 때문에 발행 자체를 잃지는 않는다
-      if (base.thumb_offset === undefined) throw e;
-      console.error("[publish] thumb_offset 거부 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
-      delete base.thumb_offset;
-      container = await graphPost(`${igUserId()}/media`, base);
-    }
-  }
-
   // 동영상 처리 대기 (인코딩 검증에 수십 초~수 분)
-  const id = String(container.id);
-  for (let i = 0; i < 80; i++) {
-    const status = await fetch(
-      `${GRAPH}/${id}?fields=status_code,status&access_token=${encodeURIComponent(await getToken())}`,
-      { signal: AbortSignal.timeout(15000) }
-    ).then((r) => r.json());
-    if (status.status_code === "FINISHED") break;
-    if (status.status_code === "ERROR") {
-      throw new Error(`릴스 컨테이너 처리 실패: ${JSON.stringify(status)}`);
+  const waitReady = async (cid: string) => {
+    for (let i = 0; i < 80; i++) {
+      const status = await fetch(
+        `${GRAPH}/${cid}?fields=status_code,status&access_token=${encodeURIComponent(await getToken())}`,
+        { signal: AbortSignal.timeout(15000) }
+      ).then((r) => r.json());
+      if (status.status_code === "FINISHED") return cid;
+      if (status.status_code === "ERROR") {
+        throw new Error(`릴스 컨테이너 처리 실패: ${JSON.stringify(status)}`);
+      }
+      await new Promise((r) => setTimeout(r, 3000));
     }
-    await new Promise((r) => setTimeout(r, 3000));
+    throw new Error("릴스 컨테이너 처리 시간 초과");
+  };
+
+  let id: string;
+  if (container) {
+    id = await waitReady(String(container.id));
+  } else {
+    // ⚠️ 생성과 폴링을 한 덩어리로 묶는다. 인스타는 안 받는 파라미터를 생성 시점에는
+    //    200으로 받아 놓고 처리 중 status=ERROR로 떨어뜨리는 경로가 있어(9/3 성수 편 실측),
+    //    생성 호출만 try로 감싸면 thumb_offset 폴백이 걸리지 않는다.
+    //    커버 프레임 지정 하나 때문에 그날 발행을 통째로 잃지 않는 것이 목적.
+    const createAndWait = async (params: Record<string, unknown>) =>
+      waitReady(String((await graphPost(`${igUserId()}/media`, params)).id));
+    try {
+      id = await createAndWait(base);
+    } catch (e) {
+      if (base.thumb_offset === undefined) throw e;
+      console.error("[publish] thumb_offset 의심 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
+      delete base.thumb_offset;
+      id = await createAndWait(base);
+    }
   }
 
   return publishContainer(id, caption);
@@ -320,26 +330,30 @@ async function publishReelFb(
       ...(music.videoVolume !== undefined ? { video_volume: music.videoVolume } : {}),
     };
   }
-  let container;
+  // IG 경로와 같은 이유로 생성+폴링을 묶는다 — 비동기 ERROR도 thumb_offset 폴백에 걸려야 한다
+  const createAndWait = async (ps: Record<string, unknown>) => {
+    const cid = String((await fbPost(`${igId}/media`, ps)).id);
+    for (let i = 0; i < 80; i++) {
+      const status: any = await fetch(
+        `${GRAPH_FB}/${cid}?fields=status_code,status&access_token=${encodeURIComponent(process.env.FB_ACCESS_TOKEN!)}`,
+        { signal: AbortSignal.timeout(15000) }
+      ).then((r) => r.json());
+      if (status.status_code === "FINISHED") return cid;
+      if (status.status_code === "ERROR") {
+        throw new Error(`FB 릴스 컨테이너 처리 실패: ${JSON.stringify(status).slice(0, 300)}`);
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    throw new Error("FB 릴스 컨테이너 처리 시간 초과");
+  };
+  let id: string;
   try {
-    container = await fbPost(`${igId}/media`, params);
+    id = await createAndWait(params);
   } catch (e) {
     if (params.thumb_offset === undefined) throw e;
-    console.error("[publish] FB thumb_offset 거부 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
+    console.error("[publish] FB thumb_offset 의심 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
     delete params.thumb_offset;
-    container = await fbPost(`${igId}/media`, params);
-  }
-  const id = String(container.id);
-  for (let i = 0; i < 80; i++) {
-    const status: any = await fetch(
-      `${GRAPH_FB}/${id}?fields=status_code,status&access_token=${encodeURIComponent(process.env.FB_ACCESS_TOKEN!)}`,
-      { signal: AbortSignal.timeout(15000) }
-    ).then((r) => r.json());
-    if (status.status_code === "FINISHED") break;
-    if (status.status_code === "ERROR") {
-      throw new Error(`FB 릴스 컨테이너 처리 실패: ${JSON.stringify(status).slice(0, 300)}`);
-    }
-    await new Promise((r) => setTimeout(r, 3000));
+    id = await createAndWait(params);
   }
   const published = await fbPost(`${igId}/media_publish`, { creation_id: id });
   return String(published.id);
