@@ -386,7 +386,7 @@ async function photoKoreaPhoto(keyword) {
 // 순수 음식점만 (사용자 정책: 카페·제과·주점 제외) — TourAPI cat3 + 상호 정규식. 보조 소스(부산·제주·서울 DB)
 // 에도 상호 필터를 건다 (실측: 비짓제주에서 노티드·라운지 바, 서울 DB에서 카페 드 파리가 새어 들어옴).
 const AREA_BAD_CAT = /^A0502(0900|1000)/;
-const AREA_BAD_NAME = /(카페|까페|cafe|coffee|커피|로스터|베이커리|bakery|제과|빵집|디저트|dessert|케이크|도넛|노티드|와플|아이스크림|젤라또|치즈|초콜|티하우스|찻집|다방|와인바|라운지|lounge|펍|pub|호프|바\b|주점|술집|포차|맥주|브런치)/i;
+const AREA_BAD_NAME = /(카페|까페|cafe|coffee|커피|로스터|베이커리|bakery|제과|빵집|디저트|dessert|케이크|도넛|노티드|와플|아이스크림|젤라또|치즈|초콜|티하우스|찻집|다방|와인바|라운지|lounge|펍|pub|호프|바(?![가-힣A-Za-z0-9])|주점|술집|포차|맥주|브런치)/i;
 
 async function collectAreaPlaces(theme, limit) {
   const t = theme.tour ?? {};
@@ -509,12 +509,14 @@ async function collectPlaces(theme, limit) {
   const seen = {};
   const picked = [];
   const names = new Set();
+  // 보조 소스(부산·제주 API)는 풀의 절반까지만 — 영남·호남 권역 테마가 부산으로만 채워지던 문제 방지
+  const extraCap = Math.ceil((limit ?? theme.count) / 2);
   for (const b of extra.sort(() => Math.random() - 0.5)) {
-    if (picked.length >= (limit ?? theme.count)) break;
+    if (picked.length >= extraCap) break;
     // 지자체 보강 소스는 지역 상한을 안 건다 — 제주는 시군구가 2개뿐이라 4곳 상한이면
     // 풀이 9곳으로 잘려 비전 탈락 후 6칸을 못 채운다(실측). 테마 자체가 지역 한정이라
     // 카드가 같은 지역이어도 자연스럽다.
-    names.add(b.name.replace(/s+/g, ""));
+    names.add(normName(b.name));
     picked.push(b);
   }
   // 시군구 편중 방지 상한. 지역 한정 테마(areaCode)는 시군구 수 자체가 적어
@@ -523,7 +525,7 @@ async function collectPlaces(theme, limit) {
   for (const it of items.sort(() => Math.random() - 0.5)) {
     const rg = shortRegion(it.addr1);
     if ((seen[rg] ?? 0) >= perRegion) continue;
-    if (names.has(String(it.title).replace(/[[^]]*]/g, "").replace(/s+/g, "").trim())) continue; // 부산 API와 중복
+    if (names.has(normName(it.title))) continue; // 보조 소스와 중복
     seen[rg] = (seen[rg] ?? 0) + 1;
     picked.push({
       contentId: String(it.contentid),
@@ -832,7 +834,7 @@ async function enrichPlaces(places) {
   const clean = (v) =>
     String(v ?? "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   for (const p of places) {
-    if (/^(busan|jeju)-/.test(p.contentId)) continue; // 지자체 API가 소개(·메뉴)를 이미 줬고 TourAPI 조회도 불가
+    if (/^(busan|jeju|seoul)-/.test(p.contentId)) continue; // 지자체·서울DB 항목은 TourAPI 콘텐츠가 아니라 상세조회 불가
     try {
       const it = (await tourCall("detailIntro2", { contentId: p.contentId, contentTypeId: "39" }))[0] ?? {};
       const menu = (clean(it.firstmenu) || clean(it.treatmenu))
@@ -961,7 +963,8 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   // 배경: 음식 사진 풀블리드 + 오버레이. 블러는 원본에 박힌 타 블로그 워터마크를
   // 뭉개기 위한 것(배경은 장식일 뿐이라 카드가 도드라지는 효과도 있다).
   const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
-  const bgBuf = await fetchPhoto(bgUrl ?? bgPlace.imageUrl, bgPlace.name);
+  let bgBuf = await fetchPhoto(bgUrl ?? bgPlace.imageUrl, bgPlace.name);
+  if (!bgBuf && bgUrl) bgBuf = await fetchPhoto(bgPlace.imageUrl, bgPlace.name); // 포토코리아 실패 → 식당 사진
   if (!bgBuf) throw new Error("릴스 배경 사진 실패");
   const bgPhoto = await sharp(bgBuf)
     .resize(W, H, { fit: "cover" })
@@ -1159,6 +1162,28 @@ async function composeHeroCover(theme, places, bgUrl = null) {
  * "국밥전문점"까지 지워져 "3.3"만 남은 적이 있어(2026-08-19), 지점으로 볼 수 있는
  * 짧은 마지막 어절만 지우고 업종어는 지키도록 한다.
  */
+/** 지점명인가 — "(신촌점)"·"강남점"·"본점" 같은 꼬리표가 붙은 상호 */
+function isBranchName(raw) {
+  const s = String(raw);
+  if (/\([^)]*점\)/.test(s)) return true;
+  const parts = s.replace(/\([^)]*\)/g, "").trim().split(/\s+/);
+  const last = parts[parts.length - 1] ?? "";
+  return parts.length > 1 && /점$/.test(last) && last.length <= 4;
+}
+
+/**
+ * 브랜드 키 — 같은 브랜드의 지점들을 하나로 묶는다 (벽제갈비 / 벽제갈비(신촌점) / 벽제갈비 본점 → 동일).
+ * 한 편에 같은 브랜드 지점이 2곳 들어가던 실측(2026-09-07 홍대 DRY) 대응. 순수 상호 비교라
+ * "3.3 국밥전문점"처럼 업종어가 붙은 이름은 coverName과 같은 예외로 보존한다.
+ */
+function brandOf(raw) {
+  const NOT_BRANCH = ["전문점", "음식점", "분식점", "할인점", "가맹점", "체인점"];
+  const parts = String(raw).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().split(" ");
+  const last = parts[parts.length - 1] ?? "";
+  if (parts.length > 1 && /점$/.test(last) && last.length <= 4 && !NOT_BRANCH.includes(last)) parts.pop();
+  return parts.join("").replace(/(본점|본관|총본점|직영점)$/, "").toLowerCase();
+}
+
 function coverName(raw) {
   const NOT_BRANCH = ["전문점", "음식점", "분식점", "할인점", "가맹점", "체인점"];
   const parts = String(raw).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().split(" ");
@@ -1344,9 +1369,14 @@ async function renderPagesReel(stills, bgm, outMp4) {
 async function buildPageStills(sharp, reelCover, places) {
   const stills = [{ path: reelCover, sec: 4 }];
   for (let i = 0; i < places.length; i++) {
-    const card = await composeCarouselCard(sharp, places[i], i + 1);
-    stills.push({ path: await composePageFrame(sharp, card, path.join(TMP, `pg_frame_${i + 1}.jpg`)), sec: 2.5 });
+    try {
+      const card = await composeCarouselCard(sharp, places[i], i + 1);
+      stills.push({ path: await composePageFrame(sharp, card, path.join(TMP, `pg_frame_${i + 1}.jpg`)), sec: 2.5 });
+    } catch (e) {
+      console.error(`페이지 카드 ${i + 1} 실패(제외):`, String(e).slice(0, 80));
+    }
   }
+  if (stills.length < 5) throw new Error("페이지형 카드 부족"); // 표지 + 최소 4장
   return stills;
 }
 
@@ -1727,8 +1757,11 @@ async function main() {
       : process.env.ROUNDUP_STYLE === "carousel" ? "carousel-%"
       : "roundup-%";
     const today = await db.execute({
-      sql: `SELECT 1 FROM posts WHERE content_id LIKE ? AND status IN ('published','publishing')
-              AND date(created_at) = date('now') LIMIT 1`,
+      // KST 날짜 기준(UTC면 KST 새벽 수동 발행이 전날로 묶임). 'publishing'은 진행 중(30분 이내)만 인정.
+      sql: `SELECT 1 FROM posts WHERE content_id LIKE ?
+              AND date(created_at, '+9 hours') = date('now', '+9 hours')
+              AND (status = 'published' OR (status = 'publishing' AND created_at >= datetime('now', '-30 minutes')))
+              LIMIT 1`,
       args: [prefix],
     });
     if (today.rows.length) {
@@ -1793,15 +1826,31 @@ async function main() {
   // 풀을 10곳 이상 요구하는 이유: 뒤이어 음식 사진 검증에서 몇 곳이 탈락하는데,
   // 딱 6곳만 모인 테마(예: 제주 흑돼지 9곳)를 잡으면 6칸을 못 채워 그날 발행이
   // 통째로 날아간다. 여유가 있는 테마를 먼저 쓰고, 전부 얇으면 그중 제일 큰 풀을 쓴다.
-  // 사진 판정: 후보를 순서대로 비전에 넣어 음식 사진이 있는 곳만 남긴다. 4곳 미만이면 그 테마는
-  // 포기하고 다음 테마로 넘어간다 (9/4 실측: 서울 상권 풀은 서울 DB 저해상도 메뉴 사진이 대부분이라
-  // 해상도 게이트 뒤에 한 테마에서 6곳이 안 나올 수 있다). 테마를 돌더라도 전체 8분 예산 안에서.
+  // 음식 사진 검증을 표지 구성보다 먼저 한다.
+  // 왜: 비전이 음식 사진을 못 찾으면 예전에는 원본(간판·외관)을 그대로 썼고,
+  //     그 결과 표지에 가게 간판이 올라갔다. 검증 통과한 곳만 표지에 세우고
+  //     탈락한 곳은 다음 후보로 대체한다. (무료 등급 분당 한도 고려해 4초 간격)
+  // 통과가 4곳 미만이면 그 테마는 포기하고 다음 테마로 넘어간다 (9/4 실측: 서울 상권 풀은
+  // 서울 DB 저해상도 메뉴 사진이 대부분이라 해상도 게이트 뒤에 6곳이 안 나올 수 있다).
+  // 테마를 돌더라도 전체 8분 예산 안에서 — 넘기면 확보한 만큼으로 진행한다.
+  // 같은 브랜드 지점은 한 곳만 — 본점·무지점명을 우선하고 나머지 지점은 뺀다
+  // (실측: 홍대 편에 벽제갈비 본점·신촌점이 함께 선정됨). 비전 전에 걸러야 비전 호출도 절약.
+  function dedupeBrand(list) {
+    const byBrand = new Map();
+    for (const p of list) {
+      const k = brandOf(p.name);
+      const cur = byBrand.get(k);
+      if (!cur || (isBranchName(cur.name) && !isBranchName(p.name))) byBrand.set(k, p);
+    }
+    if (byBrand.size < list.length) console.log(`브랜드 중복 제거: ${list.length} → ${byBrand.size}곳`);
+    return [...byBrand.values()];
+  }
   const NEED = 6;
   const PHOTO_PHASE_BUDGET_MS = 8 * 60 * 1000;
   const photoDeadline = Date.now() + PHOTO_PHASE_BUDGET_MS;
   async function pickPhotos(cands, th) {
     const ok = [];
-    for (const p of cands) {
+    for (const p of dedupeBrand(cands)) {
       if (ok.length >= NEED) break;
       if (Date.now() > photoDeadline) {
         console.log(`사진 판정 시간 예산(8분) 초과 — 확보한 ${ok.length}곳으로 진행`);
@@ -2071,7 +2120,7 @@ async function main() {
   }
 
   // 중복발행 방지: 오늘 같은 테마가 이미 발행됐으면 스킵 + 발행 '전에' 마커 선기록.
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, ""); // KST
   const cid = `${STYLE === "countdown" ? "countdown" : STYLE === "carousel" ? "carousel" : "roundup"}-${theme.key}-${today}`;
   if (FORCE) {
     // 인스타에서 지운 게시물의 행(ig_media_id 포함)을 치운다 — 지표 크론이 죽은 미디어를 조회하지 않게
@@ -2150,6 +2199,7 @@ async function main() {
       console.error("표지 스토리 실패(무시):", String(e).slice(0, 240));
     }
     const chosenIdx2 = all.findIndex((t) => t.key === theme.key);
+    if (chosenIdx2 >= 0) // ROUNDUP_THEME로 슬롯 밖 테마를 강제한 회차는 포인터 유지
     await db.execute({
       sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
       args: [IDX_KEY, String((chosenIdx2 + 1) % all.length)],
@@ -2358,6 +2408,7 @@ ${bgm.attribution}`;
 
   // 포인터 이동 (계절 스킵돼도 로테이션 유지)
   const chosenIdx = all.findIndex((t) => t.key === theme.key);
+  if (chosenIdx >= 0) // ROUNDUP_THEME로 슬롯 밖 테마를 강제한 회차는 포인터 유지
   await db.execute({
     sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
     args: [IDX_KEY, String((chosenIdx + 1) % all.length)],
@@ -2422,6 +2473,17 @@ async function uploadPublic(filePath, { avoidHostOf = "" } = {}) {
   if (out.startsWith("http")) return out;
   throw new Error("모든 업로드 실패: " + out.slice(0, 200));
 }
+
+// 러너 타임아웃·취소는 SIGTERM으로 온다 — catch를 못 타므로 여기서 pending 행을 failed로
+process.on("SIGTERM", async () => {
+  if (pending) {
+    try {
+      await pending.db.execute({ sql: "UPDATE posts SET status = 'failed' WHERE content_id = ? AND status = 'publishing'", args: [pending.cid] });
+      console.error("SIGTERM — posts 행을 failed로 표시:", pending.cid);
+    } catch { /* 무시 */ }
+  }
+  process.exit(1);
+});
 
 main()
   .then(() => process.exit(0))
