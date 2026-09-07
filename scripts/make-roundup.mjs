@@ -89,6 +89,22 @@ const FONT_AB = {
   jalnan: "'Jalnan','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif",
 };
 
+// 표지 스타일 순환. 배열 길이가 곧 주기이고, 포인터 이동도 이 길이를 쓴다.
+//
+// 실측(2026-09-07 cover-report, 발행 17건): classic 조회 평균 1,565(중앙값 약 800) vs
+// hero 150 · pages 181 · dark 256. hero는 표본 4회 중 2회만 지표가 잡혔고 둘 다 150 안팎으로
+// classic의 5분의 1이다. 그래서 hero 비중을 1/7 → 1/13으로 줄인다(2026-09-07 사용자 지시).
+// 완전히 빼지 않는 이유: hero 회차는 카운트다운형(순차 공개) 렌더를 타는 유일한 모음집
+// 경로라, 남겨 두면 포맷 비교를 계속할 수 있다. pages는 9/3에 시작한 A/B라 빈도를 유지하려고
+// 13주기에 2번 넣었다(1/7 ≈ 2/13).
+//
+// ⚠️ 길이는 홀수를 유지할 것. 서체 A/B(font_idx %2)와 표지 포인터가 매 회차 함께 1씩
+// 움직이므로, 주기가 짝수면 특정 표지에 특정 서체만 영원히 붙어 두 실험이 엉킨다.
+const COVER_STYLES = [
+  "classic", "classic", "pages", "classic", "classic", "classic", "hero",
+  "classic", "classic", "pages", "classic", "classic", "classic",
+];
+
 const SIDO_SHORT = {
   서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
   광주광역시: "광주", 대전광역시: "대전", 울산광역시: "울산", 세종특별자치시: "세종",
@@ -1932,17 +1948,12 @@ async function main() {
   let coverStyle = null;
   if (STYLE === "carousel") coverStyle = "carousel"; // 성과 추적용 (cover_idx 순환과 무관)
   if (STYLE === "grid") {
-    // 표지 실험 판정(2026-09-01, 스타일별 4건): classic 평균 2,205(돌파 3/4) vs
-    // dark 210(0/4) vs hero 142(0/2) — 검증된 승자 classic에 몰고 hero만 주 1회
-    // 실험 유지, dark는 제외. (되돌리려면 배열만 바꾸면 됨)
-    // 2026-09-03 사용자 지시: 페이지형(표지 → 식당 카드 6장 슬라이드쇼, 장당 2.5초)을
-    // A/B로 추가 — classic 5 : hero 1 : pages 1. 판정은 cover-report.
-    const STYLES = ["classic", "classic", "hero", "classic", "classic", "pages", "classic"];
-    if (process.env.COVER_STYLE && STYLES.includes(process.env.COVER_STYLE)) {
+    // 순환 정의와 근거는 COVER_STYLES(모듈 상단) 참조. 판정은 cover-report.
+    if (process.env.COVER_STYLE && COVER_STYLES.includes(process.env.COVER_STYLE)) {
       coverStyle = process.env.COVER_STYLE; // 시안 확인용 수동 지정
     } else {
       const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
-      coverStyle = STYLES[(ci.rows.length ? Number(ci.rows[0].value) : 0) % STYLES.length];
+      coverStyle = COVER_STYLES[(ci.rows.length ? Number(ci.rows[0].value) : 0) % COVER_STYLES.length];
     }
     console.log("표지 스타일:", coverStyle);
   }
@@ -2390,7 +2401,8 @@ ${bgm.attribution}`;
   // (수동 지정 COVER_STYLE로 돌린 회차는 표본을 흔들지 않도록 포인터를 건드리지 않는다)
   if (STYLE === "grid" && coverStyle && !process.env.COVER_STYLE) {
     const ci = await db.execute("SELECT value FROM config WHERE key = 'cover_idx'");
-    const next = ((ci.rows.length ? Number(ci.rows[0].value) : 0) + 1) % 7; // classic 6 : hero 1 주기
+    // 주기는 배열 길이를 따른다 — 7로 하드코딩돼 있어 배열을 바꾸면 순환이 어긋났다
+    const next = ((ci.rows.length ? Number(ci.rows[0].value) : 0) + 1) % COVER_STYLES.length;
     await db.execute({
       sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
       args: ["cover_idx", String(next)],
