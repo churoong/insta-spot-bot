@@ -1,0 +1,70 @@
+name: 발행 누락 점검
+
+# 하루 단위로 "오늘 나갔어야 할 게 나갔는가"를 보고, 빠졌으면 GitHub 이슈로 알린다.
+# 이슈는 무료이고 폰 알림으로 바로 온다.
+#
+# 왜: 발행이 빠지는 경로가 둘 다 조용하다. 하드 실패(2026-09-06 일요일 TourAPI 장애로
+# 5개 슬롯 연속 실패 → 모음집 통째로 누락)는 Actions가 빨갛지만 아무도 안 보고,
+# "음식 사진 0곳"·"AI 한도 소진" 같은 스킵은 exit 0이라 초록이라 더 안 보인다.
+on:
+  schedule:
+    # KST 22:30 (= UTC 13:30). 모음집 발행 창 17:30~22:00이 닫힌 직후.
+    - cron: "30 13 * * *"
+    # 크론이 밀려 드롭되는 경우 대비 안전망 (KST 01:30). 스크립트가 3일치를 되돌아보므로
+    # 늦게 도착해도 놓친 날을 잡아낸다.
+    - cron: "30 16 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write # 누락 시 이슈 생성
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 두 크론 슬롯이 겹쳐 돌아 이슈가 두 번 열리지 않게
+    concurrency:
+      group: publish-check
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 발행 기록 점검
+        shell: bash
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 실패한 런 목록 조회용
+        run: |
+          set +e
+          npx tsx scripts/publish-check.mjs 2>&1 | tee check.txt
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## 발행 누락 점검'
+            echo '```'
+            cat check.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
+
+      - name: 누락 시 이슈 열기
+        if: hashFiles('missing.md') != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eo pipefail
+          TITLE="발행 누락 $(TZ=Asia/Seoul date +%Y-%m-%d 2>/dev/null || date -u -d '+9 hours' +%Y-%m-%d)"
+          # 같은 제목의 이슈가 이미 있으면(열려 있든 닫혀 있든) 다시 열지 않는다 — 알림 소음 방지
+          if gh issue list --state all --search "\"$TITLE\" in:title" --json title \
+              | grep -q "$TITLE"; then
+            echo "이미 보고된 누락 — 이슈 생성 안 함: $TITLE"
+            exit 0
+          fi
+          gh issue create --title "$TITLE" --body-file missing.md
