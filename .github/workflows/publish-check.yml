@@ -1,29 +1,31 @@
 name: 발행 누락 점검
 
-# 하루 단위로 "오늘 나갔어야 할 게 나갔는가"를 보고, 빠졌으면 GitHub 이슈로 알린다.
+# 하루 단위로 "그날 나갔어야 할 게 나갔는가"를 보고, 빠졌으면 GitHub 이슈로 알린다.
 # 이슈는 무료이고 폰 알림으로 바로 온다.
 #
-# 왜: 발행이 빠지는 경로가 둘 다 조용하다. 하드 실패(2026-09-06 일요일 TourAPI 장애로
+# 왜: 발행이 빠지는 두 경로가 다 조용하다. 하드 실패(2026-09-06 일요일 TourAPI 장애로
 # 5개 슬롯 연속 실패 → 모음집 통째로 누락)는 Actions가 빨갛지만 아무도 안 보고,
 # "음식 사진 0곳"·"AI 한도 소진" 같은 스킵은 exit 0이라 초록이라 더 안 보인다.
 on:
   schedule:
     # KST 22:30 (= UTC 13:30). 모음집 발행 창 17:30~22:00이 닫힌 직후.
     - cron: "30 13 * * *"
-    # 크론이 밀려 드롭되는 경우 대비 안전망 (KST 01:30). 스크립트가 3일치를 되돌아보므로
-    # 늦게 도착해도 놓친 날을 잡아낸다.
+    # 크론 지연·슬롯 드롭 대비 안전망 (KST 23:30 / 01:30). 스크립트가 3일치를 되돌아보고
+    # 이슈 제목 키가 '누락된 날짜'라, 늦게 도착해도 중복 없이 같은 사건을 가리킨다.
+    - cron: "30 14 * * *"
     - cron: "30 16 * * *"
   workflow_dispatch: {}
 
 permissions:
   contents: read
   issues: write # 누락 시 이슈 생성
+  actions: read # 그날 실패한 런 조회 — 없으면 하드 실패를 '조용한 스킵'으로 오진한다
 
 jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # 두 크론 슬롯이 겹쳐 돌아 이슈가 두 번 열리지 않게
+    # 크론 슬롯이 겹쳐 돌 때 이슈가 두 번 열리지 않게 (제목 대조 → 생성 사이의 경합 방지)
     concurrency:
       group: publish-check
       cancel-in-progress: false
@@ -36,11 +38,12 @@ jobs:
         run: npm ci
 
       - name: 발행 기록 점검
+        id: check
         shell: bash
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 실패한 런 목록 조회용
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 실패한 런 목록 조회용 (actions: read)
         run: |
           set +e
           npx tsx scripts/publish-check.mjs 2>&1 | tee check.txt
@@ -53,18 +56,50 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
+      # 누락된 날마다 이슈 하나. 제목 키가 '누락된 날짜'라 어느 슬롯이 잡아도 같은 키가 되고,
+      # 다음 날 새 누락이 생겨도 앞 이슈에 가려지지 않는다.
+      # 수동 실행에서는 만들지 않는다 — 낮에 눌러보면 아직 안 나간 날이 누락으로 잡힌다.
       - name: 누락 시 이슈 열기
-        if: hashFiles('missing.md') != ''
+        if: github.event_name == 'schedule' && hashFiles('missing-*.md') != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -eo pipefail
-          TITLE="발행 누락 $(TZ=Asia/Seoul date +%Y-%m-%d 2>/dev/null || date -u -d '+9 hours' +%Y-%m-%d)"
-          # 같은 제목의 이슈가 이미 있으면(열려 있든 닫혀 있든) 다시 열지 않는다 — 알림 소음 방지
-          if gh issue list --state all --search "\"$TITLE\" in:title" --json title \
-              | grep -q "$TITLE"; then
-            echo "이미 보고된 누락 — 이슈 생성 안 함: $TITLE"
+          # 검색 인덱스는 방금 만든 이슈를 놓칠 수 있어 목록 API로 정확히 대조한다
+          gh issue list --state all --limit 100 --json title --jq '.[].title' > titles.txt || : > titles.txt
+          for f in missing-*.md; do
+            day="${f#missing-}"; day="${day%.md}"
+            title="발행 누락 $day"
+            if grep -Fxq "$title" titles.txt; then
+              echo "이미 보고됨 — 건너뜀: $title"
+              continue
+            fi
+            gh issue create --title "$title" --body-file "$f"
+            echo "$title" >> titles.txt
+          done
+
+      # 감시자가 감시 대상과 똑같이 조용히 죽으면 안 된다 — 점검 자체가 실패하면 그것도 알린다.
+      # (Turso 장애·시크릿 만료 등. 이때는 missing-*.md가 없어 위 스텝이 스킵된다)
+      - name: 점검 실패 시 이슈 열기
+        if: failure() && github.event_name == 'schedule'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eo pipefail
+          title="발행 점검 실패 $(date -u -d '+9 hours' +%F)"
+          if gh issue list --state all --limit 100 --json title --jq '.[].title' | grep -Fxq "$title"; then
+            echo "이미 보고됨 — 건너뜀: $title"
             exit 0
           fi
-          gh issue create --title "$TITLE" --body-file missing.md
+          {
+            echo "발행 누락 점검이 실패해 **오늘 발행이 빠졌는지 확인하지 못했습니다.**"
+            echo ""
+            echo "실행: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo ""
+            echo '```'
+            tail -c 2000 check.txt 2>/dev/null || echo "(로그 없음)"
+            echo '```'
+          } > fail.md
+          gh issue create --title "$title" --body-file fail.md

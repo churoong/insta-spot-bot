@@ -1,18 +1,20 @@
-// 발행 누락 감지 — "오늘 나갔어야 할 게 나갔는가"를 하루 단위로 확인한다.
+// 발행 누락 감지 — "그날 나갔어야 할 게 나갔는가"를 날짜 단위로 확인한다.
 //   npx tsx --env-file=.env scripts/publish-check.mjs
 //
-// 왜 필요한가: 발행이 빠지는 경로가 두 가지인데 둘 다 조용하다.
-//  (1) 하드 실패 — 2026-09-06 일요일 저녁, TourAPI가 전부 `fetch failed`라 수집 풀이 0곳이
-//      되어 5개 슬롯이 연속 실패했다. 그날 모음집은 통째로 안 나갔는데 아무도 몰랐다.
-//  (2) 조용한 스킵 — "음식 사진 확보 0곳", "AI 한도 소진"은 exit 0이라 Actions가 초록이다.
-// 개별 런은 창 밖 게이트로 정상 스킵되는 게 많아서, 런 단위가 아니라 **날짜 단위**로
-// "그날 발행물이 DB에 있는가"를 봐야 신호가 된다.
+// 왜 필요한가: 발행이 빠지는 경로가 둘 다 조용하다.
+//  (1) 하드 실패 — 2026-09-06(일) 저녁 TourAPI가 전부 `fetch failed`라 수집 풀이 0곳이 되어
+//      모음집 슬롯이 5번 연속 실패했다. 그날 발행이 통째로 비었는데 아무도 몰랐다.
+//  (2) 조용한 스킵 — "음식 사진 0곳", "AI 한도 소진"은 exit 0이라 Actions가 초록이다.
+// 개별 런은 창 밖 게이트로 정상 스킵되는 게 많아 런 단위로는 신호가 안 된다.
 //
-// 출력: 누락이 있으면 이슈 본문(마크다운)을 MISSING_FILE에 쓰고 종료. 없으면 파일을 안 만든다.
-// (종료 코드로 알리지 않는 이유 — 워크플로가 실패로 보이면 진짜 실패와 구분이 안 된다)
+// 출력: 누락된 KST 날짜마다 `missing-<날짜>.md`(이슈 본문)를 쓴다. 파일명이 곧 이슈 제목의
+// 키다 — 제목을 '실행일'로 잡으면 같은 누락에 이슈가 두 번 열리고, 반대로 다음 날의 진짜
+// 누락이 같은 제목에 막혀 조용히 삼켜진다(검토에서 시뮬레이션으로 확인).
+// 종료 코드로 누락을 알리지 않는다 — 워크플로가 빨개지면 진짜 고장과 구분이 안 된다.
 import fs from "node:fs";
+import path from "node:path";
 
-const MISSING_FILE = process.env.MISSING_FILE || "missing.md";
+const OUT_DIR = process.env.OUT_DIR || ".";
 
 // 하루에 나갔어야 할 것. CLAUDE.md '현재 발행 구성'과 같이 유지할 것.
 // dow: 0=일 … 6=토. prefix는 posts.content_id 접두사.
@@ -25,32 +27,51 @@ const EXPECTED = [
 
 // 마지막 발행 창(모음집 17:30~22:00 KST)이 닫힌 뒤에야 그날을 판정한다.
 const DAY_CLOSED_KST_HOUR = 22;
-const LOOKBACK_DAYS = 3; // 크론이 몇 시간 밀려도 놓친 날을 뒤늦게 잡도록
+const LOOKBACK_DAYS = 3; // 크론이 밀려 슬롯이 드롭돼도 놓친 날을 뒤늦게 잡도록
+
+// 성공·스킵이 아닌 종료는 전부 '실패한 런'으로 본다. failure만 세면 타임아웃(cancelled로
+// 기록됨)을 놓치는데, 9/6 사건에도 15분 타임아웃으로 cancelled된 런이 섞여 있었다.
+const BAD_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "startup_failure", "action_required"]);
 
 const kstNow = () => new Date(Date.now() + 9 * 3600 * 1000);
 const ymd = (d) => d.toISOString().slice(0, 10);
 
-/** 그날 실패한 Actions 런 — 이슈에 붙여 원인 추적을 바로 시작할 수 있게 (실패해도 무시) */
+/**
+ * 그날 정상 종료하지 못한 Actions 런 — 이슈에 붙여 원인 추적을 바로 시작할 수 있게.
+ * 조회 자체가 막힌 경우(권한 없음 등)와 "실패한 런이 없음"을 반드시 구분한다. 뭉뚱그리면
+ * 하드 실패를 '조용한 스킵'으로 오진한다 — actions:read 권한이 없던 초안이 그랬다.
+ * @returns {Promise<string[]|null>} 런 목록, 조회 불가면 null
+ */
 async function failedRuns(workflow, dateKst) {
   const repo = process.env.GITHUB_REPOSITORY;
   const token = process.env.GITHUB_TOKEN;
-  if (!repo || !token) return [];
+  if (!repo || !token) return null;
   try {
     const res = await fetch(
-      `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/runs?per_page=50`,
+      `https://api.github.com/repos/${repo}/actions/workflows/${workflow}/runs?per_page=60`,
       { headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }, signal: AbortSignal.timeout(20000) }
     );
+    if (!res.ok) {
+      console.error(`  런 조회 실패 ${workflow}: HTTP ${res.status} (permissions에 actions:read 있는지 확인)`);
+      return null;
+    }
     const j = await res.json();
     return (j?.workflow_runs ?? [])
       .filter((r) => ymd(new Date(new Date(r.created_at).getTime() + 9 * 3600 * 1000)) === dateKst)
-      .filter((r) => r.conclusion === "failure")
-      .map((r) => `[${r.id}](${r.html_url})`);
-  } catch {
-    return [];
+      .filter((r) => BAD_CONCLUSIONS.has(r.conclusion))
+      .map((r) => `[${r.id} — ${r.conclusion}](${r.html_url})`);
+  } catch (e) {
+    console.error(`  런 조회 오류 ${workflow}: ${String(e).slice(0, 80)}`);
+    return null;
   }
 }
 
 async function main() {
+  // Turso가 없으면 lib/db.ts가 조용히 file:local.db로 폴백한다 — 러너에는 그 파일이 없으니
+  // 빈 DB를 읽고 "전부 누락"이라고 이슈를 연다. 오탐 한 번이면 이 알림은 못 믿게 된다.
+  if (!process.env.TURSO_DATABASE_URL) {
+    throw new Error("TURSO_DATABASE_URL 없음 — 로컬 빈 DB로 폴백하면 전부 누락으로 오판하므로 중단");
+  }
   const { db, initDb } = await import("../lib/db.ts");
   await initDb();
 
@@ -64,10 +85,6 @@ async function main() {
     if (day === todayKst && now.getUTCHours() < DAY_CLOSED_KST_HOUR) continue;
     days.push({ day, dow: d.getUTCDay() });
   }
-  if (!days.length) {
-    console.log(`아직 발행 창이 닫히지 않았습니다 (KST ${String(now.getUTCHours()).padStart(2, "0")}시) — 판정 보류`);
-    return;
-  }
 
   // 최근 발행분을 한 번에 읽고 날짜별로 나눈다. created_at은 UTC 저장이라 +9시간이 KST 날짜.
   const rows = (
@@ -80,7 +97,7 @@ async function main() {
     })
   ).rows;
 
-  const sections = [];
+  let wrote = 0;
   for (const { day, dow } of days) {
     const got = rows.filter((r) => String(r.kst_day) === day).map((r) => String(r.content_id));
     const due = EXPECTED.filter((e) => e.dows.includes(dow));
@@ -91,35 +108,32 @@ async function main() {
     );
     if (!missing.length) continue;
 
-    const lines = [`### ${day} (${"일월화수목금토"[dow]})`, ""];
+    const lines = [`**${day} (${"일월화수목금토"[dow]})** 에 나갔어야 할 것이 빠졌습니다.`, ""];
     for (const m of missing) {
       const runs = await failedRuns(m.workflow, day);
-      lines.push(
-        `- **${m.label}** (\`${m.prefix}*\`) 발행 없음 — \`${m.workflow}\`` +
-          (runs.length ? `\n  - 그날 실패한 런: ${runs.join(", ")}` : `\n  - 실패한 런 없음 → 조용한 스킵(사진 부족·AI 한도·창 밖)일 수 있음`)
-      );
+      lines.push(`- **${m.label}** (\`${m.prefix}*\`) 발행 없음 — \`${m.workflow}\``);
+      if (runs === null) {
+        lines.push(`  - 그날 런 조회 불가 (권한·네트워크) — Actions에서 직접 확인하세요`);
+      } else if (runs.length) {
+        lines.push(`  - 정상 종료하지 못한 런: ${runs.join(", ")}`);
+      } else {
+        lines.push(`  - 실패한 런 없음 → 조용한 스킵(사진 부족·AI 한도·쿨다운·창 밖)일 수 있음`);
+      }
     }
     if (got.length) lines.push("", `그날 나간 것: ${got.join(", ")}`);
-    sections.push(lines.join("\n"));
+    lines.push(
+      "",
+      "---",
+      "확인 후 닫아 주세요. 같은 날짜로는 다시 열리지 않습니다.",
+      "",
+      "판정 기준: `posts`에 그 KST 날짜로 `status='published'` 행이 있는지. 발행 창이 닫힌(KST 22시) 날만 봅니다.",
+      "요일 기대치: 릴스·모음집 매일 / 큐레이션 월·금 / 캐러셀 토 (CLAUDE.md '현재 발행 구성')"
+    );
+    fs.writeFileSync(path.join(OUT_DIR, `missing-${day}.md`), lines.join("\n"));
+    wrote++;
   }
 
-  if (!sections.length) {
-    console.log("누락 없음");
-    return;
-  }
-
-  const body = [
-    "최근 발행분에 빠진 회차가 있습니다. 각 항목의 실패 런 로그부터 확인하세요.",
-    "",
-    ...sections,
-    "",
-    "---",
-    "확인 후 이 이슈는 닫아 주세요. 같은 날짜로는 다시 열리지 않습니다.",
-    "",
-    "판정 기준: `posts`에 그 KST 날짜로 `status='published'` 행이 있는지. 발행 창이 닫힌(KST 22시) 날만 봅니다.",
-  ].join("\n");
-  fs.writeFileSync(MISSING_FILE, body);
-  console.log(`\n누락 ${sections.length}일치 — ${MISSING_FILE} 작성`);
+  console.log(wrote ? `\n누락 ${wrote}일치 — missing-<날짜>.md 작성` : "\n누락 없음");
 }
 
 main().catch((e) => {
