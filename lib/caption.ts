@@ -169,8 +169,9 @@ ${gp ? `착한가격업소(정부 지정): ${gp.menu} ${gp.price.toLocaleString(
   // 훅에 쓰인 숫자는 실제 데이터(설명·메뉴·상호명)에 있는 것만 허용.
   // 실측: 숫자 패턴을 지정받으면 예시의 "200그릇"을 그대로 베껴 없는 숫자를 지어냈다.
   const factText = `${spot.overview ?? ""} ${opts.menu ?? ""} ${spot.name} ${gp ? `${gp.price} ${gp.price.toLocaleString()}` : ""}`;
+  // 부분 문자열 포함(includes)이면 "3"이 "30년"에 묻어 통과한다 — 숫자 단위로 정확히 있는지 본다
   const numbersOk = (line: string) =>
-    (line.match(/\d+/g) ?? []).every((n) => factText.includes(n));
+    (line.match(/\d+/g) ?? []).every((n) => new RegExp(`(^|\\D)${n}(\\D|$)`).test(factText));
   for (let attempt = 0; attempt < 2; attempt++) {
     const p =
       attempt === 0
@@ -236,24 +237,33 @@ ${persona.narrationStyle.map((s: string) => `- ${s}`).join("\n")}
  * 모음집 "지도" 댓글용 DM — 리스트 전체 + 지도 링크 + 팔로우 전환 마무리.
  * addressLines: posts.address에 저장된 "N. 상호 — 주소" 줄들.
  */
-export function buildMapListDm(title: string, addressLines: string): string {
+export function buildMapListDm(title: string, addressLines: string, postId: number | string): string {
+  // 인스타 DM 본문은 1,000바이트 한도 — 한글은 3바이트라 주소·긴 지도 URL을 넣으면 1,700바이트를
+  // 넘겨 전송 자체가 거부됐다(2026-09 점검). 상호+지역만 쓰고 지도는 짧은 리다이렉트 링크(/go/id/n)로.
+  const base = (process.env.APP_BASE_URL || "https://insta-spot-bot.vercel.app").replace(/\/$/, "");
   const rows = addressLines
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
     .slice(0, 8)
-    .map((l) => {
-      const m = l.match(/^\d+\.\s*(.+?)\s*—\s*(.+)$/);
+    .map((l, i) => {
+      const m = l.match(/^(\d+)\.\s*(.+?)\s*—\s*(.+)$/);
       if (!m) return l;
-      const name = m[1].trim();
-      const region = m[2].split(/\s+/).slice(0, 2).join(" ");
-      return `${l}\n   🗺 ${searchMapUrl(name, region)}`;
+      const n = m[1], name = m[2].trim();
+      const region = m[3].split(/\s+/).slice(0, 2).join(" ");
+      return `${n}. ${name} (${region})\n🗺 ${base}/go/${postId}/${n}`;
     });
-  return (
-    `📌 ${title}\n전체 리스트와 지도 링크 보내드려요!\n\n` +
+  const text =
+    `📌 ${title}\n전체 리스트와 지도 링크예요!\n\n` +
     rows.join("\n") +
-    `\n\n다음 편 리스트도 받아보시려면 팔로우해 두세요 🙌`
-  );
+    `\n\n다음 편도 받아보시려면 팔로우해 두세요 🙌`;
+  // 안전장치: 그래도 넘치면 뒤에서부터 줄을 덜어낸다
+  let t = text;
+  while (Buffer.byteLength(t) > 980 && rows.length > 3) {
+    rows.pop();
+    t = `📌 ${title}\n전체 리스트와 지도 링크예요!\n\n` + rows.join("\n") + `\n\n다음 편도 받아보시려면 팔로우해 두세요 🙌`;
+  }
+  return t;
 }
 
 /** 게시물명에서 음식 종류 추출 (SEO 본문·해시태그용) */

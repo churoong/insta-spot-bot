@@ -71,7 +71,8 @@ export async function POST(req: NextRequest) {
 
       if (fromId === process.env.IG_USER_ID) { log("skip: 내 계정 댓글"); continue; }
       // 모음집 지도 요청 — "지도" 키워드는 리스트 전체+지도 링크 DM (팔로우 전환 장치)
-      const isMapReq = text.includes("지도");
+      // "지도"·"지도요"·"지도 주세요"처럼 짧은 요청만 — 긴 댓글에 '지도'가 섞인 오탐은 추천함으로
+      const isMapReq = /^\s*지도\s*[!?.~요]*\s*$/.test(text) || (text.includes("지도") && text.replace(/\s/g, "").length <= 12);
       if (!text.includes(keyword) && !isMapReq) {
         // 키워드가 아닌 일반 댓글은 "팔로워 추천 모음"으로 수집 (모음집 후보 발굴용)
         if (text.trim().length >= 2) {
@@ -95,7 +96,7 @@ export async function POST(req: NextRequest) {
       if (seen.rows.length > 0) { log("skip: 이미 발송함"); continue; }
 
       const post = await db.execute({
-        sql: "SELECT place_name, address, category, mapx, mapy, featured_by, map_url FROM posts WHERE ig_media_id = ?",
+        sql: "SELECT id, place_name, address, category, mapx, mapy, featured_by, map_url FROM posts WHERE ig_media_id = ?",
         args: [mediaId],
       });
       if (post.rows.length === 0) { log(`skip: 게시물 못찾음(media=${mediaId})`); continue; }
@@ -105,7 +106,7 @@ export async function POST(req: NextRequest) {
         let dmText: string;
         if (isMapReq && String(p.category) === "모음집") {
           // 모음집의 address 컬럼에는 "N. 상호 — 주소" 줄들이 저장돼 있다
-          dmText = buildMapListDm(String(p.place_name), String(p.address ?? ""));
+          dmText = buildMapListDm(String(p.place_name), String(p.address ?? ""), Number(p.id));
         } else {
           // 근처 추천 2곳 (좌표 있을 때만, 실패해도 DM은 발송)
           const nearby =

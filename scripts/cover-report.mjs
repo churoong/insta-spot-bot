@@ -88,7 +88,7 @@ async function main() {
     );
   }
 
-  const n = Math.min(...STYLES.map((s) => stat[s].length));
+  const n = Math.min(...STYLES.filter((s) => stat[s].length > 0).map((s) => stat[s].length)); // 순환에서 빠진 스타일(dark)은 제외
   if (n < 5) {
     console.log(
       `\n⚠️ 가장 적은 스타일의 표본이 ${n}건입니다. 조회수 편차가 커서 스타일당 5건은 모여야 판단할 수 있습니다.`

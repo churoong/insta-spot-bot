@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       sql: `SELECT id, ig_media_id FROM posts
              WHERE status = 'published' AND ig_media_id IS NOT NULL
                AND (metrics_at IS NULL OR created_at >= datetime('now', ?))
-             ORDER BY id DESC LIMIT 80`,
+             ORDER BY (metrics_at IS NULL) DESC, id DESC LIMIT 80`, -- 미집계분 우선
       args: [`-${days} days`],
     })
   ).rows as any[];
