@@ -1037,6 +1037,28 @@ async function composeHeroCover(theme, places, bgUrl = null) {
  * "국밥전문점"까지 지워져 "3.3"만 남은 적이 있어(2026-08-19), 지점으로 볼 수 있는
  * 짧은 마지막 어절만 지우고 업종어는 지키도록 한다.
  */
+/** 지점명인가 — "(신촌점)"·"강남점"·"본점" 같은 꼬리표가 붙은 상호 */
+function isBranchName(raw) {
+  const s = String(raw);
+  if (/\([^)]*점\)/.test(s)) return true;
+  const parts = s.replace(/\([^)]*\)/g, "").trim().split(/\s+/);
+  const last = parts[parts.length - 1] ?? "";
+  return parts.length > 1 && /점$/.test(last) && last.length <= 4;
+}
+
+/**
+ * 브랜드 키 — 같은 브랜드의 지점들을 하나로 묶는다 (벽제갈비 / 벽제갈비(신촌점) / 벽제갈비 본점 → 동일).
+ * 한 편에 같은 브랜드 지점이 2곳 들어가던 실측(2026-09-07 홍대 DRY) 대응. 순수 상호 비교라
+ * "3.3 국밥전문점"처럼 업종어가 붙은 이름은 coverName과 같은 예외로 보존한다.
+ */
+function brandOf(raw) {
+  const NOT_BRANCH = ["전문점", "음식점", "분식점", "할인점", "가맹점", "체인점"];
+  const parts = String(raw).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().split(" ");
+  const last = parts[parts.length - 1] ?? "";
+  if (parts.length > 1 && /점$/.test(last) && last.length <= 4 && !NOT_BRANCH.includes(last)) parts.pop();
+  return parts.join("").replace(/(본점|본관|총본점|직영점)$/, "").toLowerCase();
+}
+
 function coverName(raw) {
   const NOT_BRANCH = ["전문점", "음식점", "분식점", "할인점", "가맹점", "체인점"];
   const parts = String(raw).replace(/\([^)]*\)/g, "").replace(/\s+/g, " ").trim().split(" ");
@@ -1698,6 +1720,18 @@ async function main() {
   // 왜: 비전이 음식 사진을 못 찾으면 예전에는 원본(간판·외관)을 그대로 썼고,
   //     그 결과 표지에 가게 간판이 올라갔다. 검증 통과한 곳만 표지에 세우고
   //     탈락한 곳은 다음 후보로 대체한다. (무료 등급 분당 한도 고려해 4초 간격)
+  // 같은 브랜드 지점은 한 곳만 — 본점·무지점명을 우선하고 나머지 지점은 풀에서 뺀다
+  // (실측: 홍대 편에 벽제갈비 본점·신촌점이 함께 선정됨). 비전 전에 걸러야 비전 호출도 절약.
+  {
+    const byBrand = new Map();
+    for (const p of places) {
+      const k = brandOf(p.name);
+      const cur = byBrand.get(k);
+      if (!cur || (isBranchName(cur.name) && !isBranchName(p.name))) byBrand.set(k, p);
+    }
+    if (byBrand.size < places.length) console.log(`브랜드 중복 제거: ${places.length} → ${byBrand.size}곳`);
+    places = [...byBrand.values()];
+  }
   const NEED = 6;
   const passed = [];
   for (const p of places) {
