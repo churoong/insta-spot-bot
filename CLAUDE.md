@@ -26,7 +26,8 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 
 **발행 시각 구조**: Vercel Cron(vercel.json, ±59분) → `/api/cron/trigger/[wf]` → GitHub `workflow_dispatch` 즉시 실행이 주 경로.
 GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실측). 각 yml 첫 스텝의 **KST 발행 창 게이트**가 창 밖 런을 수 초에 스킵하고, 스크립트의 **하루 1회 가드**(KST 날짜, 'publishing'은 30분 이내만 인정)가 중복을 막는다. 가드→마커 사이가 수 분이라 **yml job-level `concurrency`(직렬 실행)** 가 병렬 런의 이중 발행을 막는 실제 장치(2026-09-07 점검). 발행 중 실패·타임아웃(SIGTERM)은 마커를 `failed`로 정리해 폴백 슬롯이 재시도한다. 수동 실행(workflow_dispatch)은 게이트 통과. 타임아웃 25분(TourAPI 느린 날 15분 초과 실측 9/6).
-- 지도 DM: 인스타 DM은 1,000바이트 한도 → `buildMapListDm`은 상호+지역 + 짧은 리다이렉트 `/go/{posts.id}/{n}`(app/go)만 담는다. 긴 주소·네이버 URL을 넣으면 전송이 거부된다.
+- 지도 DM: 인스타 DM은 1,000바이트 한도 → `buildMapListDm`은 상호+지역 + 짧은 리다이렉트 `/go/{posts.id}/{n}`(app/go)만 담는다. 긴 주소·네이버 URL을 넣으면 전송이 거부된다. `/go`는 카카오 로컬 API(`KAKAO_REST_KEY`, Vercel 환경변수)로 그 가게의 카카오맵 상세 페이지를 찾아 보내고, 미등록이면 네이버 검색 링크로 폴백한다.
+- ❌ 카카오 로컬 카테고리로 카페·주점을 거르는 건 **실익 없음**(2026-09-09 실측: 발행분 28곳 전원 순수 음식점). 현행 상호명+cat3 필터로 충분 — 다시 제안하지 말 것. ❌ 카카오 PlayMCP는 카카오 계정 OAuth 기반 대화형 AI 전용이라 무인 크론 파이프라인에 붙일 수 없다.
 
 ## 표지·디자인 결정사항
 - 스타일 순환 **classic 10 : pages 2 : hero 1** (13주기, `COVER_STYLES` 배열 길이가 곧 주기, dark 제외).
