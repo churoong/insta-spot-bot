@@ -29,6 +29,27 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - 지도 DM: 인스타 DM은 1,000바이트 한도 → `buildMapListDm`은 상호+지역 + 짧은 리다이렉트 `/go/{posts.id}/{n}`(app/go)만 담는다. 긴 주소·네이버 URL을 넣으면 전송이 거부된다. `/go`는 카카오 로컬 API(`KAKAO_REST_KEY`, Vercel 환경변수)로 그 가게의 카카오맵 상세 페이지를 찾아 보내고, 미등록이면 네이버 검색 링크로 폴백한다.
 - ❌ 카카오 로컬 카테고리로 카페·주점을 거르는 건 **실익 없음**(2026-09-09 실측: 발행분 28곳 전원 순수 음식점). 현행 상호명+cat3 필터로 충분 — 다시 제안하지 말 것. ❌ 카카오 PlayMCP는 카카오 계정 OAuth 기반 대화형 AI 전용이라 무인 크론 파이프라인에 붙일 수 없다.
 
+## 지금 진행 중인 것 (2026-09-09 기준 — 세션 인계용)
+숫자는 스냅샷이라 낡는다. **최신 수치는 `gh workflow run report.yml` → 런 로그**(시크릿 없는 클라우드 세션도 실행·조회 가능).
+발행 누락은 `publish-check.yml`이 매일 자동 점검해 GitHub 이슈로 알린다.
+
+| 실험 | 현황 | 판정 조건 |
+|---|---|---|
+| 서체 A/B (G마켓 vs 잘난체) | gmarket 6 · jalnan 2 | 서체당 5건 이상. ⚠️ **grid만 A/B 대상** — countdown·carousel도 `title_font='gmarket'`으로 기록되니 집계에서 걸러야 한다(그래서 gmarket 쪽이 부풀어 보인다) |
+| 훅 컷 A/B (`grid8` vs `hook3+grid5`) | hook3+grid5 1건 (9/8 도입) | **시청 시간** 우선. 도입 전 표본과 조회수 직접 비교 금지 |
+| 표지 순환 (classic 10 : pages 2 : hero 1) | classic 9(평균 1,259) · hero 4(75) · pages 1(183) | pages가 얇다 — 5건 모이면 재판정 |
+
+**대기 중(사용자 액션 필요)**: 구글 Places(카드 등록, 과금 0 조건) · 인스타 음악 카탈로그 한국 개방(현재 0곡, CC BGM 폴백 중).
+
+## 환경변수·시크릿 맵 (어디에 있어야 하는가)
+| 키 | 로컬 .env | GitHub Actions | Vercel | 쓰는 곳 |
+|---|---|---|---|---|
+| TOUR_API_KEY, GEMINI/GROQ, TURSO_*, IG_*, FB_*, YOUTUBE, JEJU, NAVER_* | ✅ | ✅ | 일부(웹훅·크론용) | 발행 파이프라인 |
+| `KAKAO_REST_KEY` | ✅ | 불필요 | ✅ (2026-09-09 등록) | `/go` 지도 링크 전용 |
+| `GITHUB_TOKEN`(PAT, Actions 쓰기) + `GITHUB_REPO` | — | — | ✅ | Vercel 크론 → workflow_dispatch |
+
+클라우드 세션에는 시크릿이 없다 — 코드 수정·오프라인 렌더·PR·`gh workflow run`까지가 범위이고, 실발행·DB 조회는 로컬 세션이나 Actions를 거친다.
+
 ## 표지·디자인 결정사항
 - 스타일 순환 **classic 10 : pages 2 : hero 1** (13주기, `COVER_STYLES` 배열 길이가 곧 주기, dark 제외).
   2026-09-07 실측(cover-report, 17건): classic 조회 평균 1,565(중앙값 약 800) vs hero 150 · pages 181 · dark 256
