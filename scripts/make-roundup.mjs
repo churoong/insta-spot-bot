@@ -1774,10 +1774,8 @@ async function main() {
     fs.readFileSync(new URL("../data/roundup-themes.json", import.meta.url), "utf8")
   );
   await initDb();
-  // 서체 A/B 기록용 컬럼 (없으면 추가 — 이미 있으면 조용히 무시)
-  try { await db.execute("ALTER TABLE posts ADD COLUMN title_font TEXT"); } catch { /* 존재함 */ }
-  // 실제로 나간 릴스 구성. cover_style만으로는 2026-09-07 훅 컷 도입 전후가 구분되지 않는다.
-  try { await db.execute("ALTER TABLE posts ADD COLUMN reel_format TEXT"); } catch { /* 존재함 */ }
+  // title_font·reel_format 컬럼은 lib/db.ts initDb 마이그레이션에서 만든다 —
+  // 여기서만 만들면 발행이 한 번 돌기 전까지 컬럼이 없어 조회 전용 리포트가 죽는다(9/8 실측).
 
   // 발행 쿨다운(행동차단 회복) 중이면 모음집도 쉼 — 시도 반복이 차단을 연장시킴
   if (!DRY) {
