@@ -102,6 +102,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dry-preview
+          # 훅 컷(첫 3초)·페이지형 카드도 담는다 — 사용자는 폰에서 그림으로 판단한다.
+          # 스타일에 따라 없는 파일이 생기므로 경고를 내지 않게 ignore.
+          if-no-files-found: ignore
           path: |
+            roundup-hook-preview.jpg
             roundup-reel-preview.jpg
+            pages-preview-*.jpg
             roundup-dry-data.json

@@ -203,7 +203,7 @@ export async function publishImage(imageUrl: string, caption: string): Promise<s
 export async function publishReel(
   videoUrl: string,
   caption: string,
-  opts: { trial?: boolean } = {}
+  opts: { trial?: boolean; thumbOffsetMs?: number } = {}
 ): Promise<string> {
   // 트라이얼 릴스(2025-12 API 지원, Instagram Login 포함): 비팔로워에게만 72시간
   // 테스트 노출, SS_PERFORMANCE면 성과 기준 통과 시 자동 전체공개(graduation).
@@ -214,6 +214,10 @@ export async function publishReel(
     caption,
     share_to_feed: true,
   };
+  // 프로필 그리드 썸네일로 쓸 프레임(ms). 지정하지 않으면 0프레임이 커버가 되는데,
+  // 모음집 릴스는 첫 3초가 훅 컷(음식 풀샷)이라 그러면 정보가 다 담긴 그리드 표지가
+  // 프로필에서 사라진다 — 조회수 실측이 그리드 표지 쪽이라(classic 1,565 vs hero 150) 유지.
+  if (opts.thumbOffsetMs) base.thumb_offset = String(Math.round(opts.thumbOffsetMs));
   let container;
   if (opts.trial) {
     try {
@@ -226,20 +230,40 @@ export async function publishReel(
       console.error("[publish] 트라이얼 생성 실패 — 일반 릴스로 폴백:", String(e).slice(0, 160));
     }
   }
-  if (!container) container = await graphPost(`${igUserId()}/media`, base);
-
   // 동영상 처리 대기 (인코딩 검증에 수십 초~수 분)
-  const id = String(container.id);
-  for (let i = 0; i < 80; i++) {
-    const status = await fetch(
-      `${GRAPH}/${id}?fields=status_code,status&access_token=${encodeURIComponent(await getToken())}`,
-      { signal: AbortSignal.timeout(15000) }
-    ).then((r) => r.json());
-    if (status.status_code === "FINISHED") break;
-    if (status.status_code === "ERROR") {
-      throw new Error(`릴스 컨테이너 처리 실패: ${JSON.stringify(status)}`);
+  const waitReady = async (cid: string) => {
+    for (let i = 0; i < 80; i++) {
+      const status = await fetch(
+        `${GRAPH}/${cid}?fields=status_code,status&access_token=${encodeURIComponent(await getToken())}`,
+        { signal: AbortSignal.timeout(15000) }
+      ).then((r) => r.json());
+      if (status.status_code === "FINISHED") return cid;
+      if (status.status_code === "ERROR") {
+        throw new Error(`릴스 컨테이너 처리 실패: ${JSON.stringify(status)}`);
+      }
+      await new Promise((r) => setTimeout(r, 3000));
     }
-    await new Promise((r) => setTimeout(r, 3000));
+    throw new Error("릴스 컨테이너 처리 시간 초과");
+  };
+
+  let id: string;
+  if (container) {
+    id = await waitReady(String(container.id));
+  } else {
+    // ⚠️ 생성과 폴링을 한 덩어리로 묶는다. 인스타는 안 받는 파라미터를 생성 시점에는
+    //    200으로 받아 놓고 처리 중 status=ERROR로 떨어뜨리는 경로가 있어(9/3 성수 편 실측),
+    //    생성 호출만 try로 감싸면 thumb_offset 폴백이 걸리지 않는다.
+    //    커버 프레임 지정 하나 때문에 그날 발행을 통째로 잃지 않는 것이 목적.
+    const createAndWait = async (params: Record<string, unknown>) =>
+      waitReady(String((await graphPost(`${igUserId()}/media`, params)).id));
+    try {
+      id = await createAndWait(base);
+    } catch (e) {
+      if (base.thumb_offset === undefined) throw e;
+      console.error("[publish] thumb_offset 의심 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
+      delete base.thumb_offset;
+      id = await createAndWait(base);
+    }
   }
 
   return publishContainer(id, caption);
@@ -287,7 +311,8 @@ async function publishReelFb(
   videoUrl: string,
   caption: string,
   music: ReelMusic | null,
-  trial = false
+  trial = false,
+  thumbOffsetMs = 0
 ): Promise<string> {
   const igId = process.env.FB_IG_USER_ID!;
   const params: Record<string, unknown> = {
@@ -297,6 +322,7 @@ async function publishReelFb(
     share_to_feed: true,
   };
   if (trial) params.trial_params = { graduation_strategy: "SS_PERFORMANCE" };
+  if (thumbOffsetMs) params.thumb_offset = String(Math.round(thumbOffsetMs)); // 커버 = 그리드 표지 구간
   if (music) {
     params.audio_configuration = {
       audio_id: music.audioId,
@@ -304,18 +330,30 @@ async function publishReelFb(
       ...(music.videoVolume !== undefined ? { video_volume: music.videoVolume } : {}),
     };
   }
-  const container = await fbPost(`${igId}/media`, params);
-  const id = String(container.id);
-  for (let i = 0; i < 80; i++) {
-    const status: any = await fetch(
-      `${GRAPH_FB}/${id}?fields=status_code,status&access_token=${encodeURIComponent(process.env.FB_ACCESS_TOKEN!)}`,
-      { signal: AbortSignal.timeout(15000) }
-    ).then((r) => r.json());
-    if (status.status_code === "FINISHED") break;
-    if (status.status_code === "ERROR") {
-      throw new Error(`FB 릴스 컨테이너 처리 실패: ${JSON.stringify(status).slice(0, 300)}`);
+  // IG 경로와 같은 이유로 생성+폴링을 묶는다 — 비동기 ERROR도 thumb_offset 폴백에 걸려야 한다
+  const createAndWait = async (ps: Record<string, unknown>) => {
+    const cid = String((await fbPost(`${igId}/media`, ps)).id);
+    for (let i = 0; i < 80; i++) {
+      const status: any = await fetch(
+        `${GRAPH_FB}/${cid}?fields=status_code,status&access_token=${encodeURIComponent(process.env.FB_ACCESS_TOKEN!)}`,
+        { signal: AbortSignal.timeout(15000) }
+      ).then((r) => r.json());
+      if (status.status_code === "FINISHED") return cid;
+      if (status.status_code === "ERROR") {
+        throw new Error(`FB 릴스 컨테이너 처리 실패: ${JSON.stringify(status).slice(0, 300)}`);
+      }
+      await new Promise((r) => setTimeout(r, 3000));
     }
-    await new Promise((r) => setTimeout(r, 3000));
+    throw new Error("FB 릴스 컨테이너 처리 시간 초과");
+  };
+  let id: string;
+  try {
+    id = await createAndWait(params);
+  } catch (e) {
+    if (params.thumb_offset === undefined) throw e;
+    console.error("[publish] FB thumb_offset 의심 — 커버 지정 없이 재시도:", String(e).slice(0, 160));
+    delete params.thumb_offset;
+    id = await createAndWait(params);
   }
   const published = await fbPost(`${igId}/media_publish`, { creation_id: id });
   return String(published.id);
@@ -330,17 +368,17 @@ export async function publishReelSmart(
   videoUrl: string,
   caption: string,
   music: ReelMusic | null,
-  opts: { trial?: boolean } = {}
+  opts: { trial?: boolean; thumbOffsetMs?: number } = {}
 ): Promise<string> {
   if (music && fbConfigured()) {
     try {
-      const id = await publishReelFb(videoUrl, caption, music, opts.trial);
+      const id = await publishReelFb(videoUrl, caption, music, opts.trial, opts.thumbOffsetMs);
       console.log("[publish] FB 경로 발행 (라이브러리 음악 첨부):", id);
       return id;
     } catch (e) {
       console.error("[publish] 음악 첨부 발행 실패 — 음악 없이 재시도:", String(e).slice(0, 200));
       try {
-        const id = await publishReelFb(videoUrl, caption, null, opts.trial);
+        const id = await publishReelFb(videoUrl, caption, null, opts.trial, opts.thumbOffsetMs);
         console.log("[publish] FB 경로 발행 (음악 없음):", id);
         return id;
       } catch (e2) {

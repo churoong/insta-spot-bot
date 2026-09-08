@@ -45,7 +45,7 @@ async function main() {
 
   const rows = (
     await db.execute(
-      `SELECT content_id, cover_style, title_font, ig_media_id, created_at, views, reach, saved, metrics_at
+      `SELECT content_id, cover_style, title_font, reel_format, ig_media_id, created_at, views, reach, saved, metrics_at
          FROM posts
         WHERE category = '모음집' AND status = 'published'
           AND ig_media_id IS NOT NULL AND cover_style IS NOT NULL
@@ -60,6 +60,7 @@ async function main() {
 
   const stat = Object.fromEntries(STYLES.map((s) => [s, []]));
   const fontStat = {}; // 서체 A/B (title_font 기록이 있는 회차만)
+  const fmtStat = {}; // 릴스 구성별 (grid8 = 표지 8초 단일컷 / hook3+grid5 = 훅 컷 도입 후)
   let fromApi = 0, fromDb = 0, noData = 0;
   console.log("── 회차별 ──");
   for (const r of rows) {
@@ -77,12 +78,17 @@ async function main() {
     } else noData++;
     const style = String(r.cover_style);
     const font = r.title_font ? String(r.title_font) : null;
+    // 2026-09-07부터 classic 그리드는 '훅 3초 + 표지 5초'로 나간다. 그 전 표본(표지 8초
+    // 단일컷)과 같은 평균에 넣으면 표지 비교도 서체 A/B도 숨은 변수를 얻는다 — 갈라서 센다.
+    // reel_format이 NULL인 옛 행은 도입 전이므로 grid8로 본다.
+    const fmt = r.reel_format ? String(r.reel_format) : style === "classic" || style === "dark" ? "grid8" : "";
     // 서체 A/B는 그리드 모음집(순환 스타일)만 대상 — 캐러셀은 cover_style='carousel'이라
     // STYLES에 없고, 서체 교대(STYLE==='grid')도 안 타서 title_font가 늘 gmarket이다.
     // 스타일 집계와 같은 가드를 쓰지 않으면 토요일 캐러셀이 gmarket 표본만 부풀린다.
     if (ins && stat[style]) {
       stat[style].push(ins);
-      if (font && font !== "manual") (fontStat[font] ??= []).push({ ...ins, style });
+      if (fmt) (fmtStat[fmt] ??= []).push({ ...ins, style });
+      if (font && font !== "manual") (fontStat[font] ??= []).push({ ...ins, style, fmt });
     }
     const day = String(r.created_at ?? "").slice(0, 10);
     console.log(
@@ -91,6 +97,7 @@ async function main() {
         ` | 공유 ${String(ins?.shares ?? "-").padStart(3)}` +
         ` | 시청 ${ins?.ig_reels_avg_watch_time ? (ins.ig_reels_avg_watch_time / 1000).toFixed(1) + "s" : "-"}` +
         (font ? ` | ${font}` : "") +
+        (fmt ? ` | ${fmt}` : "") +
         ` | ${r.content_id}${src}`
     );
   }
@@ -123,6 +130,29 @@ async function main() {
     );
   }
 
+  // 훅 컷(2026-09-07 도입) 판정용 — grid8 vs hook3+grid5. 표지 스타일 표와 달리
+  // 여기서는 '같은 classic 안에서 첫 3초만 바뀐' 비교라 훅 효과가 바로 읽힌다.
+  const fmts = Object.keys(fmtStat);
+  if (fmts.length > 1) {
+    console.log("\n── 릴스 구성별 평균 (훅 컷 A/B) ──");
+    for (const f of fmts) {
+      const a = fmtStat[f];
+      console.log(
+        `${f.padEnd(13)} | 표본 ${String(a.length).padStart(2)}건` +
+          ` | 조회 ${Math.round(avg(a, "views")).toString().padStart(6)}` +
+          ` | 도달 ${Math.round(avg(a, "reach")).toString().padStart(5)}` +
+          ` | 저장 ${avg(a, "saved").toFixed(1).padStart(4)}` +
+          ` | 공유 ${shareCol(a)}` +
+          ` | 시청 ${watchCol(a)}` +
+          ` | 표지 ${STYLES.filter((st) => a.some((x) => x.style === st))
+            .map((st) => `${st} ${a.filter((x) => x.style === st).length}`)
+            .join(", ")}`
+      );
+    }
+    const hk = fmtStat["hook3+grid5"]?.length ?? 0;
+    if (hk < 5) console.log(`⚠️ 훅 컷 표본 ${hk}건 — 5건은 모여야 판단 가능. 시청 시간(완주)을 같이 볼 것.`);
+  }
+
   const n = Math.min(...STYLES.filter((s) => stat[s].length > 0).map((s) => stat[s].length)); // 순환에서 빠진 스타일(dark)은 제외
   if (n < 5) {
     console.log(
@@ -147,7 +177,11 @@ async function main() {
           // 맞아떨어진다. 그때까지는 서체 차이에 표지 차이가 섞이므로 구성을 함께 찍는다.
           ` | 표지구성 ${STYLES.filter((st) => a.some((x) => x.style === st))
             .map((st) => `${st} ${a.filter((x) => x.style === st).length}`)
-            .join(", ")}`
+            .join(", ")}` +
+          // 훅 컷 도입(2026-09-07)을 가로지르는 표본이면 서체 차이에 구성 차이가 섞인다
+          ` | 릴스구성 ${[...new Set(a.map((x) => x.fmt).filter(Boolean))]
+            .map((ft) => `${ft} ${a.filter((x) => x.fmt === ft).length}`)
+            .join(", ") || "-"}`
       );
     }
     const fn = Math.min(...fonts.map((f) => fontStat[f].length));
