@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { searchMapUrl } from "@/lib/kakao";
+import { findPlace, searchMapUrl } from "@/lib/kakao";
 
 /**
  * 모음집 지도 DM용 짧은 리다이렉트 — /go/{posts.id}/{n} → 네이버 지도 검색.
@@ -20,7 +20,10 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ post: stri
     if (!m) return new NextResponse("not found", { status: 404 });
     const name = m[1].trim();
     const region = m[2].split(/\s+/).slice(0, 2).join(" ");
-    return NextResponse.redirect(searchMapUrl(name, region), 302);
+    // 카카오맵에서 그 가게를 찾으면 상세 페이지로 바로 보낸다(길찾기·영업시간까지 한 번에).
+    // 못 찾거나 KAKAO_REST_KEY가 없으면 네이버 지도 '검색' 링크로 폴백 — 실측상 7%가 미등록.
+    const kp = await findPlace(name, region).catch(() => null);
+    return NextResponse.redirect(kp?.placeUrl || searchMapUrl(name, region), 302);
   } catch (e) {
     return new NextResponse(String(e).slice(0, 100), { status: 500 });
   }
