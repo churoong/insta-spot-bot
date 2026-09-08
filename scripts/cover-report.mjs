@@ -43,15 +43,24 @@ async function main() {
   } catch { /* config 없음 — env 토큰으로 */ }
   if (!TOKEN) console.log("⚠️ IG 토큰 없음 — 크론이 저장한 DB 지표만 사용합니다(공유·시청 시간 제외).");
 
-  const rows = (
-    await db.execute(
-      `SELECT content_id, cover_style, title_font, reel_format, ig_media_id, created_at, views, reach, saved, metrics_at
+  // 선택 컬럼(reel_format)이 아직 없는 DB에서도 리포트는 나와야 한다 — 조회 전용
+  // 워크플로가 'no such column'으로 죽으면 폰에서 읽을 게 없어진다(9/8 실측).
+  const sel = (cols) =>
+    db.execute(
+      `SELECT ${cols}
          FROM posts
         WHERE category = '모음집' AND status = 'published'
           AND ig_media_id IS NOT NULL AND cover_style IS NOT NULL
         ORDER BY id ASC`
-    )
-  ).rows;
+    );
+  const BASE_COLS = "content_id, cover_style, title_font, ig_media_id, created_at, views, reach, saved, metrics_at";
+  let rows;
+  try {
+    rows = (await sel(`${BASE_COLS}, reel_format`)).rows;
+  } catch (e) {
+    console.log("⚠️ reel_format 컬럼 없음 — 릴스 구성 구분 없이 진행합니다(다음 발행 때 생성됩니다).");
+    rows = (await sel(BASE_COLS)).rows;
+  }
 
   if (!rows.length) {
     console.log("아직 표지 스타일이 기록된 모음집이 없습니다. (3안 순환 발행 이후부터 쌓입니다)");

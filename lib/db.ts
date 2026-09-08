@@ -98,6 +98,11 @@ export async function initDb() {
     "ALTER TABLE posts ADD COLUMN metrics_at TEXT",
     // 모음집 표지 스타일(classic/hero/dark) — 어느 디자인이 유입이 좋은지 비교용
     "ALTER TABLE posts ADD COLUMN cover_style TEXT",
+    // 서체 A/B(gmarket/jalnan) — 표지 제목 서체 기록
+    "ALTER TABLE posts ADD COLUMN title_font TEXT",
+    // 실제로 나간 릴스 구성(hook3+grid5 / grid8 / pages / countdown).
+    // cover_style만으로는 2026-09-07 훅 컷 도입 전후가 구분되지 않는다.
+    "ALTER TABLE posts ADD COLUMN reel_format TEXT",
   ];
   for (const sql of migrations) {
     try {
