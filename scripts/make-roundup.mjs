@@ -240,16 +240,63 @@ async function themeWeights(db, all) {
   const sorted = avgs.map(([, v]) => v).sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)] || 1;
   const byKey = Object.fromEntries(avgs);
+  // 안 해본 테마의 사전 가중치 — 지역 인지도(시군구 방문자 수)로 매긴다.
+  // 없으면 전부 2.0이라 대전 유성(조회 95)과 가로수길이 같은 확률로 뽑힌다.
+  const prior = await visitorPrior(all);
   const weights = all.map((t) =>
-    byKey[t.key] === undefined ? 2.0 : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
+    byKey[t.key] === undefined
+      ? prior?.[t.key] ?? 2.0 // 실측 조회수가 없을 때만 사전 가중치
+      : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
   );
   console.log(
     "테마 가중치(조회수):",
     all
-      .map((t, i) => `${t.key} ${weights[i].toFixed(1)}${byKey[t.key] !== undefined ? `(${Math.round(byKey[t.key])}회)` : "(미시도)"}`)
+      .map((t, i) => {
+        const tag = byKey[t.key] !== undefined
+          ? `(${Math.round(byKey[t.key])}회)`
+          : prior?.[t.key] !== undefined ? "(미시도·방문자)" : "(미시도)";
+        return `${t.key} ${weights[i].toFixed(1)}${tag}`;
+      })
       .join(" · ")
   );
   return { weights, recent };
+}
+
+/**
+ * 시군구 방문자 수 → 미시도 테마의 사전 가중치.
+ * 조회수와 같은 스케일(중앙값 대비 log 배수)로 맞춰, 실측이 쌓이면 자연히 대체되게 한다.
+ * 지역편(mode:"area")에만 적용 — 전국 음식 테마는 지역이 없어 의미가 없다.
+ * 데이터·키·카카오 어느 하나라도 없으면 null → 기존 평탄한 2.0 유지.
+ */
+async function visitorPrior(all) {
+  const areas = all.filter((t) => t.mode === "area");
+  if (areas.length < 2) return null;
+  try {
+    const { fetchVisitorStats, resolveThemeSigungu } = await import("../lib/visitors.ts");
+    const stats = await fetchVisitorStats();
+    if (!stats) return null;
+    const sggMap = await resolveThemeSigungu(areas);
+    // 방문자 데이터 키가 "강남구"인지 "서울 강남구"인지 서비스마다 달라 부분일치로 찾는다
+    const lookup = (sgg) => {
+      if (!sgg) return null;
+      if (stats[sgg] != null) return stats[sgg];
+      const hit = Object.keys(stats).find((k) => k.includes(sgg) || sgg.includes(k));
+      return hit ? stats[hit] : null;
+    };
+    const got = areas
+      .map((t) => [t.key, lookup(sggMap[t.key])])
+      .filter(([, v]) => typeof v === "number" && v > 0);
+    if (got.length < 3) return null; // 표본이 적으면 비교가 안 된다
+    const sortedV = got.map(([, v]) => v).sort((a, b) => a - b);
+    const med = sortedV[Math.floor(sortedV.length / 2)] || 1;
+    // 실측(최대 6)보다 좁은 폭(0.8~4.0) — 사전 정보일 뿐이라 실측을 이기면 안 된다
+    return Object.fromEntries(
+      got.map(([k, v]) => [k, Math.max(0.8, Math.min(4, 1 + Math.log2(1 + v / med)))])
+    );
+  } catch (e) {
+    console.error("[visitors] 사전 가중치 실패(무시):", String(e).slice(0, 120));
+    return null;
+  }
 }
 
 /** 가중 랜덤으로 중복 없이 시도 순서를 만든다 (첫 자리는 최근에 쓴 테마 제외) */
