@@ -88,6 +88,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 
 ## 데이터 소스·랭킹
 - 식당·사진: TourAPI(공용키) + 서울 음식관광 DB(`data/seoul-food.json` 사전 빌드) + 부산맛집 API + 비짓제주 + **경주 먹거리 핫플레이스**(`5050000/eatHtpService`, 61곳 중 사진 생존 41곳 — URL에 스킴이 없어 https 접두 필요, 1/3이 404라 기동 시 병렬 확인해 캐시) + 포토코리아(표지 배경) + 착한가격업소(`data/goodprice.json`). `lib/vision.ts`가 음식 사진 여부를 비전으로 게이트("주제 음식 안 보이면 제외").
+- **원주 식당 DB**(강원 유일 사진 소스): `data/wonju-food.json` 300곳 · `lib/wonjufood.ts` · 빌드는 `scripts/build-wonju-db.mjs`. 원본 이미지 호스트가 DNS 소멸이라 빌드 때 서울판 버킷으로 치환한다. 파일데이터 uddi는 `infuser.odcloud.kr/oas/docs?namespace={pk}/v1`에서 얻는다.
 - **사진 있는 식당 API 전국 조사 완료(2026-09-09)** — 더 찾지 말 것. 남은 후보는 **광주·경남 레드테이블**(`{gwangju,gyeongnam}.openapi.redtable.global`, 서울판과 동일 스키마·`/rstr/img`·`/food/img` 보유, **지역별 토큰 별도 발급** — 서울 토큰 안 통함)과 **전북 권역별음식점**(`openapi.jbfood.go.kr`, 자동승인)뿐. ❌ 대구푸드(daegufood.go.kr)는 API에 사진이 없고 사진 경로 `/data/`가 **robots.txt 금지**라 제외. ❌ 인천·경기·충북·충남·세종·강릉은 공공 영역에 사진 소스 자체가 없음. ❌ 전주시 자체 API는 목록 조회 오퍼레이션이 없는 반쪽(과거 '빈 응답'의 원인).
 - 4축 합성 랭킹 `lib/ranking.ts`: 네이버 블로그·카페 후기 + 유튜브 조회수 + 네이버 리뷰순 진입 보너스. 전 스타일 적용.
 - 테마 123개 `data/roundup-themes.json`: 음식 테마 55(전국 40 + 권역×음식 15, areaCodes 배열) + **지역편 68**(`mode:"area"`: 상권 47 + 도시 21).
