@@ -272,20 +272,17 @@ async function visitorPrior(all) {
   const areas = all.filter((t) => t.mode === "area");
   if (areas.length < 2) return null;
   try {
-    const { fetchVisitorStats, resolveThemeSigungu } = await import("../lib/visitors.ts");
+    const { fetchVisitorStats, resolveThemeRegions, lookupVisitors } = await import("../lib/visitors.ts");
     const stats = await fetchVisitorStats();
     if (!stats) return null;
-    const sggMap = await resolveThemeSigungu(areas);
-    // 방문자 데이터 키가 "강남구"인지 "서울 강남구"인지 서비스마다 달라 부분일치로 찾는다
-    const lookup = (sgg) => {
-      if (!sgg) return null;
-      if (stats[sgg] != null) return stats[sgg];
-      const hit = Object.keys(stats).find((k) => k.includes(sgg) || sgg.includes(k));
-      return hit ? stats[hit] : null;
-    };
+    const regions = await resolveThemeRegions(areas);
+    // 시군구는 이름만으로 식별되지 않는다(중구·동구는 여러 시에 있다) — 시도까지 맞고
+    // 후보가 하나일 때만 값을 준다. 모호하면 null이라 그 테마는 기존 2.0으로 남는다.
     const got = areas
-      .map((t) => [t.key, lookup(sggMap[t.key])])
+      .map((t) => [t.key, regions[t.key] ? lookupVisitors(stats, regions[t.key]) : null])
       .filter(([, v]) => typeof v === "number" && v > 0);
+    const ambiguous = areas.length - got.length;
+    if (ambiguous) console.log(`[visitors] 지역 미확정 ${ambiguous}곳 — 해당 테마는 기존 가중치 유지`);
     if (got.length < 3) return null; // 표본이 적으면 비교가 안 된다
     const sortedV = got.map(([, v]) => v).sort((a, b) => a - b);
     const med = sortedV[Math.floor(sortedV.length / 2)] || 1;

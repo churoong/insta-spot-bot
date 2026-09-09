@@ -11,6 +11,11 @@
 //    그래서 파서를 필드명 패턴으로 관대하게 짰고, 경로는 env로 바꿀 수 있게 뒀다.
 //    실물 확인은 `scripts/probe-visitors.mjs`(러너에서 실행)로 한다.
 //    무엇이 됐든 실패하면 null을 돌려 기존 동작(평탄한 가중치)으로 돌아간다.
+//
+// ⚠️ 시군구는 **이름만으로 식별되지 않는다** — 중구·동구·서구·남구·북구는 여러 시에 있다.
+//    (대전 중구 / 부산 중구 / 대구 중구 …) 그래서 시도+시군구 쌍으로 맞추고,
+//    시도를 확정할 수 없어 후보가 둘 이상이면 **그 테마는 가중치를 주지 않는다**.
+//    잘못 붙은 가중치는 조용히 틀린 선택을 만들고 나중에 원인을 찾을 수 없다.
 
 import { db } from "./db";
 
@@ -22,10 +27,48 @@ const PATH_CANDIDATES = [
   "TatsCnctrRateService/tatsCnctrRatedList",
 ];
 
-const CACHE_KEY = "visitor_stats";
+const CACHE_KEY = "visitor_stats_v2"; // v1은 시군구 이름만 저장해 오매칭 위험이 있었다
+const SGG_CACHE_KEY = "theme_sgg_v2";
 const CACHE_DAYS = 30; // 월 1회 갱신 데이터
 
-export type VisitorStats = Record<string, number>; // 시군구명 → 방문자 수
+/** "시도|시군구" → 방문자 수. 시도를 못 얻은 행은 "|시군구". */
+export type VisitorStats = Record<string, number>;
+export interface Region { sido: string; sgg: string }
+
+// ===== 지역명 정규화 =====
+// 카카오는 "대전광역시/유성구", 관광 데이터는 "대전/유성구"처럼 표기가 갈린다.
+const SIDO_SHORT: Record<string, string> = {
+  서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천",
+  광주광역시: "광주", 대전광역시: "대전", 울산광역시: "울산",
+  세종특별자치시: "세종", 세종시: "세종",
+  경기도: "경기", 강원도: "강원", 강원특별자치도: "강원",
+  충청북도: "충북", 충청남도: "충남", 전라북도: "전북", 전북특별자치도: "전북",
+  전라남도: "전남", 경상북도: "경북", 경상남도: "경남",
+  제주도: "제주", 제주특별자치도: "제주",
+};
+
+export function normSido(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  if (SIDO_SHORT[s]) return SIDO_SHORT[s];
+  // 이미 짧은 형태거나 접미사만 붙은 경우
+  for (const [long, short] of Object.entries(SIDO_SHORT)) {
+    if (s === short || long.startsWith(s) || s.startsWith(short)) return short;
+  }
+  return s;
+}
+
+/** "창원시 성산구" 같은 2단 시군구는 그대로 두되, 앞 시(市)만 쓰는 데이터도 있어 후보를 함께 낸다 */
+export function sggCandidates(raw: string | null | undefined): string[] {
+  const s = String(raw ?? "").trim().replace(/\s+/g, " ");
+  if (!s) return [];
+  const out = [s];
+  const parts = s.split(" ");
+  if (parts.length > 1) out.push(parts[0], parts[parts.length - 1]);
+  return [...new Set(out)];
+}
+
+const keyOf = (sido: string, sgg: string) => `${sido}|${sgg}`;
 
 /** data.go.kr 응답 어디에 있든 item 배열을 찾아낸다 (JSON/래핑 형태가 서비스마다 다르다) */
 function findItems(json: any): any[] {
@@ -33,10 +76,7 @@ function findItems(json: any): any[] {
   const walk = (node: any, depth: number): any[] | null => {
     if (!node || typeof node !== "object" || depth > 6 || seen.has(node)) return null;
     seen.add(node);
-    if (Array.isArray(node)) {
-      return node.length && typeof node[0] === "object" ? node : null;
-    }
-    // items.item 형태가 표준이지만 item이 단일 객체로 오는 경우도 있다
+    if (Array.isArray(node)) return node.length && typeof node[0] === "object" ? node : null;
     if (node.item) return Array.isArray(node.item) ? node.item : [node.item];
     for (const v of Object.values(node)) {
       const hit = walk(v, depth + 1);
@@ -54,14 +94,18 @@ const pick = (row: any, re: RegExp): string | null => {
   return null;
 };
 
-/** 한 행에서 (시군구명, 방문자수)를 뽑는다. 필드명이 서비스마다 달라 패턴으로 찾는다. */
-export function parseRow(row: any): [string, number] | null {
-  const name = pick(row, /signgu.*nm|sgng.*nm|area.*nm|region.*nm|시군구/i);
+/**
+ * 한 행에서 (시도, 시군구, 방문자수)를 뽑는다. 필드명이 서비스마다 달라 패턴으로 찾는다.
+ * 시군구 필드가 없으면 null — 광역 단위 행은 상권 비교에 쓸 수 없다.
+ */
+export function parseRow(row: any): { sido: string; sgg: string; n: number } | null {
+  const sggRaw = pick(row, /signgu.*nm|sgng.*nm|시군구/i);
+  const sidoRaw = pick(row, /^(?!.*signgu)(?!.*sgng).*(area.*nm|metco.*nm|sido.*nm|시도)/i);
   const raw = pick(row, /touNum|visit|방문/i);
-  if (!name || raw == null) return null;
+  if (!sggRaw || raw == null) return null;
   const n = Number(String(raw).replace(/[^\d.]/g, ""));
   if (!Number.isFinite(n) || n <= 0) return null;
-  return [name.trim(), n];
+  return { sido: normSido(sidoRaw), sgg: String(sggRaw).trim(), n };
 }
 
 /** 전월(데이터가 아직 없을 수 있어 두 달 전까지 되짚는다) YYYYMM 목록 */
@@ -99,10 +143,11 @@ async function callOnce(path: string, ym: string): Promise<VisitorStats | null> 
   }
   const stats: VisitorStats = {};
   for (const row of findItems(JSON.parse(text))) {
-    const kv = parseRow(row);
-    if (!kv) continue;
+    const r = parseRow(row);
+    if (!r) continue;
     // 같은 시군구가 일자별로 여러 행이면 합산 (월 합계가 곧 규모)
-    stats[kv[0]] = (stats[kv[0]] ?? 0) + kv[1];
+    const k = keyOf(r.sido, r.sgg);
+    stats[k] = (stats[k] ?? 0) + r.n;
   }
   return Object.keys(stats).length >= 10 ? stats : null; // 너무 적으면 파싱 실패로 본다
 }
@@ -128,15 +173,16 @@ export async function fetchVisitorStats(): Promise<VisitorStats | null> {
     }
   } catch { /* 캐시 실패는 무시하고 새로 받는다 */ }
 
-  const paths = process.env.VISITOR_API_PATH
-    ? [process.env.VISITOR_API_PATH]
-    : PATH_CANDIDATES;
+  const paths = process.env.VISITOR_API_PATH ? [process.env.VISITOR_API_PATH] : PATH_CANDIDATES;
   for (const path of paths) {
     for (const ym of recentMonths()) {
       try {
         const stats = await callOnce(path, ym);
         if (!stats) continue;
-        console.log(`[visitors] ${path} ${ym} — 시군구 ${Object.keys(stats).length}개`);
+        const withSido = Object.keys(stats).filter((k) => !k.startsWith("|")).length;
+        console.log(
+          `[visitors] ${path} ${ym} — 시군구 ${Object.keys(stats).length}개 (시도 확인 ${withSido}개)`
+        );
         try {
           await db.execute({
             sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
@@ -152,14 +198,44 @@ export async function fetchVisitorStats(): Promise<VisitorStats | null> {
   return null;
 }
 
+/**
+ * (시도, 시군구) → 방문자 수. **모호하면 null**.
+ *
+ * 시도를 아는 경우: 정확히 그 시도의 시군구만 본다.
+ * 시도를 모르는 경우(또는 데이터에 시도가 없는 경우): 같은 시군구 이름을 가진 후보가
+ * 둘 이상이면 null을 돌린다 — "중구"를 아무 도시에나 붙이면 조용히 틀린다.
+ */
+export function lookupVisitors(stats: VisitorStats, region: Region): number | null {
+  const cands = sggCandidates(region.sgg);
+  if (!cands.length) return null;
+  const entries = Object.entries(stats).map(([k, v]) => {
+    const i = k.indexOf("|");
+    return { sido: k.slice(0, i), sgg: k.slice(i + 1), v };
+  });
+  for (const c of cands) {
+    const same = entries.filter((e) => e.sgg === c);
+    if (!same.length) continue;
+    if (region.sido) {
+      const exact = same.filter((e) => e.sido === region.sido);
+      if (exact.length === 1) return exact[0].v;
+      // 데이터에 시도가 비어 있는데 이름 후보가 하나뿐이면 그것만 인정
+      const noSido = same.filter((e) => !e.sido);
+      if (same.length === 1 && noSido.length === 1) return noSido[0].v;
+      if (exact.length > 1) return null; // 같은 시도에 동명 시군구 — 판단 불가
+      continue;
+    }
+    if (same.length === 1) return same[0].v;
+    return null; // 동명 시군구 여럿 + 시도 모름 → 포기
+  }
+  return null;
+}
+
 // ===== 테마 → 시군구 해석 =====
 // 방문자 데이터는 시군구 단위라 테마를 시군구에 붙여야 한다. 손으로 68개를 적으면
 // 틀리기 쉬워서, 이미 쓰고 있는 카카오 로컬 API로 좌표·지명에서 뽑는다.
-//   상권 테마: mapX/mapY → coord2regioncode → region_2depth_name
-//   도시 테마: keyword → search/address → region_2depth_name
+//   상권 테마: mapX/mapY → coord2regioncode → (시도, 시군구)
+//   도시 테마: keyword → search/address → (시도, 시군구)
 // 결과는 config에 영구 캐시한다(테마 좌표가 바뀌지 않는 한 다시 부를 이유가 없다).
-
-const SGG_CACHE_KEY = "theme_sgg";
 
 async function kakao(path: string, params: Record<string, string>): Promise<any | null> {
   const key = process.env.KAKAO_REST_KEY;
@@ -172,30 +248,36 @@ async function kakao(path: string, params: Record<string, string>): Promise<any 
   return res.json();
 }
 
-/** 지역명("서울 강남구" 등)에서 시군구만 — 방문자 데이터의 키와 맞추기 위해 */
-async function sigunguOf(theme: any): Promise<string | null> {
+function toRegion(d: any): Region | null {
+  const sido = normSido(d?.region_1depth_name);
+  // 세종은 시군구가 비어 있는 단층제 — 시도명을 그대로 쓴다
+  const sgg = String(d?.region_2depth_name ?? "").trim() || sido;
+  return sido || sgg ? { sido, sgg } : null;
+}
+
+async function regionOf(theme: any): Promise<Region | null> {
   try {
     const t = theme.tour ?? {};
     if (t.mapX && t.mapY) {
       const j = await kakao("geo/coord2regioncode.json", { x: String(t.mapX), y: String(t.mapY) });
       const d = (j?.documents ?? []).find((x: any) => x.region_type === "B") ?? j?.documents?.[0];
-      return d?.region_2depth_name ? String(d.region_2depth_name) : null;
+      return d ? toRegion(d) : null;
     }
     if (theme.keyword) {
       const j = await kakao("search/address.json", { query: String(theme.keyword), size: "1" });
       const d = j?.documents?.[0]?.address ?? j?.documents?.[0]?.road_address;
-      return d?.region_2depth_name ? String(d.region_2depth_name) : null;
+      return d ? toRegion(d) : null;
     }
   } catch { /* 개별 실패는 null */ }
   return null;
 }
 
 /**
- * 테마키 → 시군구명 매핑. 캐시에 없는 테마만 카카오로 조회하고 결과를 합쳐 저장한다.
+ * 테마키 → (시도, 시군구). 캐시에 없는 테마만 카카오로 조회하고 결과를 합쳐 저장한다.
  * 카카오 키가 없거나 전부 실패하면 빈 객체 — 호출부는 기존 동작 유지.
  */
-export async function resolveThemeSigungu(themes: any[]): Promise<Record<string, string>> {
-  let map: Record<string, string> = {};
+export async function resolveThemeRegions(themes: any[]): Promise<Record<string, Region>> {
+  let map: Record<string, Region> = {};
   try {
     const c = await db.execute({ sql: "SELECT value FROM config WHERE key = ?", args: [SGG_CACHE_KEY] });
     if (c.rows.length) map = JSON.parse(String(c.rows[0].value)) ?? {};
@@ -209,12 +291,13 @@ export async function resolveThemeSigungu(themes: any[]): Promise<Record<string,
   let added = 0;
   for (const t of missing) {
     if (Date.now() > deadline) break;
-    const sgg = await sigunguOf(t);
-    map[t.key] = sgg ?? ""; // 실패도 기록해 매번 다시 부르지 않게 (빈 문자열 = 해석 불가)
-    if (sgg) added++;
+    const r = await regionOf(t);
+    map[t.key] = r ?? { sido: "", sgg: "" }; // 실패도 기록해 매번 다시 부르지 않게
+    if (r?.sgg) added++;
   }
   if (added) {
-    console.log(`[visitors] 시군구 해석 +${added}곳 (누적 ${Object.values(map).filter(Boolean).length})`);
+    const ok = Object.values(map).filter((r) => r?.sgg).length;
+    console.log(`[visitors] 지역 해석 +${added}곳 (누적 ${ok})`);
     try {
       await db.execute({
         sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
