@@ -272,6 +272,11 @@ async function visitorPrior(all) {
   const areas = all.filter((t) => t.mode === "area");
   if (areas.length < 2) return null;
   try {
+    // 키가 없으면 조용히 꺼지는 대신 이유를 남긴다 — 왜 가중치가 안 붙는지 로그로 알 수 있게.
+    if (!process.env.KAKAO_REST_KEY) {
+      console.log("[visitors] KAKAO_REST_KEY 없음 — 지역 해석 불가로 사전 가중치 생략");
+      return null;
+    }
     const { fetchVisitorStats, resolveThemeRegions, lookupVisitors } = await import("../lib/visitors.ts");
     const stats = await fetchVisitorStats();
     if (!stats) return null;

@@ -61,6 +61,8 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
+          # 테마 → 시군구 해석용(지역 사전 가중치). 없으면 가중치만 비활성, 발행은 정상.
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
           JEJU_API_KEY: ${{ secrets.JEJU_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
