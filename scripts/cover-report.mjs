@@ -91,13 +91,18 @@ async function main() {
     // 단일컷)과 같은 평균에 넣으면 표지 비교도 서체 A/B도 숨은 변수를 얻는다 — 갈라서 센다.
     // reel_format이 NULL인 옛 행은 도입 전이므로 grid8로 본다.
     const fmt = r.reel_format ? String(r.reel_format) : style === "classic" || style === "dark" ? "grid8" : "";
-    // 서체 A/B는 그리드 모음집(순환 스타일)만 대상 — 캐러셀은 cover_style='carousel'이라
-    // STYLES에 없고, 서체 교대(STYLE==='grid')도 안 타서 title_font가 늘 gmarket이다.
-    // 스타일 집계와 같은 가드를 쓰지 않으면 토요일 캐러셀이 gmarket 표본만 부풀린다.
+    // 서체 A/B는 그리드 모음집만 대상 — 서체 교대(font_idx)가 `STYLE === "grid"`에서만
+    // 돌아서, 큐레이션·캐러셀은 title_font가 늘 'gmarket'으로 박힌다. 섞이면 gmarket만 부푼다.
+    // 지금은 우연히도 두 형식이 이미 빠진다(큐레이션은 cover_style이 NULL이라 위 SQL의
+    // `cover_style IS NOT NULL`에, 캐러셀은 'carousel'이라 STYLES 가드에 걸린다). 하지만
+    // 그건 부수 효과라 cover_style 기록 방식이 바뀌면 조용히 깨진다 — content_id로 명시한다.
+    const isGridRound = String(r.content_id).startsWith("roundup-");
     if (ins && stat[style]) {
       stat[style].push(ins);
       if (fmt) (fmtStat[fmt] ??= []).push({ ...ins, style });
-      if (font && font !== "manual") (fontStat[font] ??= []).push({ ...ins, style, fmt });
+      if (isGridRound && font && font !== "manual") {
+        (fontStat[font] ??= []).push({ ...ins, style, fmt });
+      }
     }
     const day = String(r.created_at ?? "").slice(0, 10);
     console.log(

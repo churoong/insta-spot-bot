@@ -22,7 +22,7 @@ const EXPECTED = [
   { key: "reel", prefix: "reel-", label: "일반 릴스", dows: [0, 1, 2, 3, 4, 5, 6], workflow: "reels.yml" },
   { key: "roundup", prefix: "roundup-", label: "모음집", dows: [0, 1, 2, 3, 4, 5, 6], workflow: "roundup.yml" },
   { key: "countdown", prefix: "countdown-", label: "큐레이션", dows: [1, 5], workflow: "countdown.yml" },
-  { key: "carousel", prefix: "carousel-", label: "캐러셀", dows: [6], workflow: "carousel.yml" },
+  { key: "carousel", prefix: "carousel-", label: "캐러셀", dows: [3, 6], workflow: "carousel.yml" },
 ];
 
 // 마지막 발행 창(모음집 17:30~22:00 KST)이 닫힌 뒤에야 그날을 판정한다.
