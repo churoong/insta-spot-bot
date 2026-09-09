@@ -1065,13 +1065,23 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   async function noPhotoPanel(p) {
     // ⚠️ 아래 54px은 기존 칩(지역·후기/YT·백년가게)이 사진 위에 얹히는 자리다 — 비워 둘 것.
     const CHIP_ZONE = 54;
-    const menu = String(p.menu || "").split(/[,·/]/)[0].trim().slice(0, 10);
+    const menu = String(p.menu || "").split(/[,·/]/)[0].trim().slice(0, 14);
     const label = menu ? "대표메뉴" : "";
-    const body = menu || coverName(p.name);
-    // 짧으면 크게, 길어도 너무 작아지지 않게 (칸마다 크기가 널뛰면 그리드가 산만해진다)
-    const fs2 = Math.max(48, Math.min(84, Math.floor(430 / Math.max(1, [...body].length))));
-    const midY = (PH_H - CHIP_ZONE) / 2;
-    const baseY = midY + fs2 * 0.36; // 글자 베이스라인
+    const raw = menu || coverName(p.name);
+    // 한 줄에 담기지 않으면 두 줄로 나눈다. 예전엔 최소 48px로 고정해서 11자만 넘어도
+    // 패널 밖으로 잘렸다(검토 실측) — 대표메뉴가 없어 상호명으로 폴백할 때 실제로 났다.
+    const MAXW = PH_W - 36;
+    const fit = (t, size) => [...t].length * size * 0.98 <= MAXW;
+    let lines = [raw], fs2 = Math.min(84, Math.floor(MAXW / Math.max(1, [...raw].length * 0.98)));
+    if (fs2 < 44) {
+      lines = wrapLines(raw, Math.ceil([...raw].length / 2), 2);
+      const longest = Math.max(...lines.map((l) => [...l].length), 1);
+      fs2 = Math.min(60, Math.floor(MAXW / (longest * 0.98)));
+    }
+    fs2 = Math.max(26, fs2); // 그래도 안 맞으면 더 줄인다 — 잘리는 것보다 낫다
+    while (lines.some((l) => !fit(l, fs2)) && fs2 > 26) fs2 -= 2;
+    const midY = (PH_H - CHIP_ZONE) / 2 - (lines.length - 1) * fs2 * 0.42;
+    const baseY = midY + fs2 * 0.36; // 첫 줄 베이스라인
     const svg = `<svg width="${PH_W}" height="${PH_H}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="np" x1="0" y1="0" x2="1" y2="1">
@@ -1086,8 +1096,8 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
       <rect width="${PH_W}" height="${PH_H}" rx="14" fill="url(#dots)"/>
       <rect x="1" y="1" width="${PH_W - 2}" height="${PH_H - 2}" rx="13" fill="none" stroke="${PAL.accent}" stroke-opacity="0.3" stroke-width="2"/>
       ${label ? `<text x="${PH_W / 2}" y="${midY - fs2 * 0.58}" font-family="${FONT}" font-size="21" font-weight="700" letter-spacing="2" fill="${dark ? "#c9b8b0" : "#a3796a"}" text-anchor="middle">${label}</text>` : ""}
-      <text x="${PH_W / 2}" y="${baseY}" font-family="${TFONT}" font-size="${fs2}" font-weight="900" fill="${dark ? "#ffd9c9" : PAL.name}" text-anchor="middle">${esc(body)}</text>
-      <rect x="${PH_W / 2 - 46}" y="${baseY + 18}" width="92" height="5" rx="2.5" fill="${PAL.accent}" fill-opacity="0.55"/>
+      ${lines.map((ln, k) => `<text x="${PH_W / 2}" y="${baseY + k * fs2 * 1.12}" font-family="${TFONT}" font-size="${fs2}" font-weight="900" fill="${dark ? "#ffd9c9" : PAL.name}" text-anchor="middle">${esc(ln)}</text>`).join("")}
+      <rect x="${PH_W / 2 - 46}" y="${baseY + (lines.length - 1) * fs2 * 1.12 + 18}" width="92" height="5" rx="2.5" fill="${PAL.accent}" fill-opacity="0.55"/>
     </svg>`;
     return sharp(Buffer.from(svg)).png().toBuffer();
   }

@@ -52,6 +52,13 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
   따로 찍고, 서체 A/B 표에도 구성을 병기한다.
   ⚠️ 위 **classic 1,565 vs hero 150(17건)은 훅 컷 도입 이전(표지 8초 단일컷) 표본**이다 —
   이후 classic과 직접 평균 비교 금지. 훅 효과 판정은 `grid8` vs `hook3+grid5`, 특히 **시청 시간**으로.
+- **사진 없는 칸 = 정보 패널**(2026-09-09): 발굴은 됐는데 사진이 없는 식당을 쓰려고, 빈칸 대신
+  `대표메뉴`(없으면 상호명, 최대 2줄) 패널을 그린다(`noPhotoPanel` in composeReelCover).
+  **생성 이미지는 쓰지 않는다** — 순위 카드의 사진은 "그 가게의 음식"이라는 진술이라 없는 사실을
+  만드는 셈이고, `lib/pexels.ts`가 스톡 사진에 대해 이미 정해 둔 원칙(특정 가게에 붙이지 않음,
+  사칭 방지)과 같은 선이다. 메타의 AI 라벨링 정책도 걸린다. 패널 하단 54px은 기존 칩
+  (지역·후기/YT·백년가게) 자리라 비워 둔다. 시안: `NOPHOTO_DEMO=1` 또는 `ROUNDUP_NOPHOTO="2,5"`.
+  ※ 무사진 칸 개수 상한은 아직 없다 — 3칸부터는 "사진 못 구한 편"으로 보인다(시안 판단).
 - 표지 음식명 크기 캡 116px(`ms`). 콘텐츠는 4:5 안전영역(y 285~1635) 안에.
 - 그리드 셀에 데이터 배지("🔎 후기·YT"), 캡션에 "🔎 선정 기준" 라인. 도장깨기 체크리스트는 **캐러셀 마지막 장에만**.
 - 카운트다운 인트로 "맛집 브리핑, {음식} 톱N" 페르소나. TTS Laomedeia 1.18배속.
@@ -64,6 +71,16 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **상권 풀 보강**: 상권 수집기가 좌표 반경 안의 부산맛집 API·비짓제주·서울 음식관광 DB 식당을 TourAPI에 합친다(`supplementNearby`, 보조 소스는 풀의 절반 또는 TourAPI 부족분까지). 부산(서면·광안리·남포·경성대·영도)·제주(동문시장·연동·올레시장·중문·성산·함덕·협재) 상권은 이 보강 없이는 불가. 후보 측정은 `scripts/measure-spot.mjs`. 2026-09-03 전국 조사 결과: 서울 외곽·부산 도심·대구·광주·전주·강릉 상권은 TourAPI가 얇아 탈락(카페 제외 후 <20).
 - **캡션에 사진 출처 라인 없음**(2026-09-03 사용자 지시 "캡션에 사진 출처 내용은 다 빼"): TourAPI·포토코리아 크레딧 라인 전부 제거. BGM CC BY 크레딧(🎵)은 라이선스 의무라 유지. ※ 공공누리 1·3유형은 출처표시가 이용조건 — 사용자가 인지한 결정.
 - **지역편(동네 맛집)**: 음식을 하나로 묶지 않고 "강릉 맛집 TOP 6"·"성수동 맛집 TOP 6"처럼 지역 우선(2026-09-03 사용자 지시). 도시는 TourAPI 시·군·구(`tour.areaCode/sigunguCode`), 상권은 좌표 반경 1.5km(`tour.mapX/mapY/radius`). 카페 제외 후 사진 풀 ≥30(도시)/≥20(상권)만 채택 — 골목 단위·도시×단일음식(춘천 닭갈비 등, 풀 0~9)은 불가. 카페·디저트·주점은 cat3(A05020900/A05021000)+상호 정규식으로 제외. 비전 게이트는 "음식 사진이면 통과"(food 없음), 랭킹 리뷰순 쿼리는 "{지역} 맛집", 포토코리아 배경 미사용.
+- **지역 테마 사전 가중치**(2026-09-09): 미시도 테마가 전부 2.0으로 평탄해 인지도 낮은 지역이
+  같은 확률로 뽑혔다(대전 유성 조회 95). `lib/visitors.ts`가 한국관광공사 **지역별 방문자수**
+  (data.go.kr 15101972, 무료, **해당 데이터셋 활용신청 별도 필요**)로 시군구 규모를 받아
+  실측 조회수가 없는 지역편 테마에만 0.8~4.0 사전 가중치를 준다. 테마→시군구는 카카오 로컬로
+  해석(`KAKAO_REST_KEY` — 이 브랜치에서 roundup/countdown/carousel.yml에 처음 추가됐다).
+  **시군구는 이름만으로 식별되지 않는다**(중구·동구·서구·남구·북구·고성군은 여러 시도에 있다)
+  → 시도까지 맞을 때만 값을 주고, 모호하면 포기해 기존 2.0으로 남긴다. 규칙 테스트:
+  `npx tsx scripts/test-visitors.mjs`(네트워크 없이 25건). 응답 스키마는 **아직 미확인** —
+  실물 확인은 `report.yml`을 `probe=true`로 실행(`scripts/probe-visitors.mjs`).
+  실패는 72시간 음성 캐시라 미승인 상태여도 발행이 느려지지 않는다.
 - **저녁 모음집 요일 슬롯**(사용자 우선순위 상권 > 지역 > 전국): 화·목·토 = 상권(spot_idx) / 월·금 = 지역(도시 종합 + 권역×음식, city_idx) / 수·일 = 전국 음식(roundup_idx). `SLOT_BY_DOW` in make-roundup. 큐레이션·캐러셀은 음식 테마만.
 
 ## 검증 방법
@@ -82,6 +99,8 @@ ROUNDUP_STYLE=carousel ROUNDUP_DRY=1 npx tsx --env-file=.env scripts/make-roundu
 
 npx tsc --noEmit && npx next build   # 웹훅·API·lib 변경 시 (Vercel 배포 대상)
 node --check scripts/make-roundup.mjs
+npx tsx scripts/test-visitors.mjs    # 시군구 매칭 규칙 (네트워크·시크릿 불필요)
+NOPHOTO_DEMO=1 ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs  # 무사진 칸 시안
 ```
 - GitHub 러너에서 실경로 렌더 확인: `gh workflow run roundup.yml -f dry=true` → 아티팩트 `dry-preview`.
 - 실패한 회차 재발행: `gh workflow run roundup.yml -f theme=<테마키>` (예: area-seongsu). 시작 시 30분 넘은 `publishing` 행은 `failed`로 정리되고, 같은 테마의 failed 행은 지워진 뒤 재시도된다. 시크릿 없는 클라우드 세션도 GitHub MCP로 workflow_dispatch(브랜치 ref 가능)는 할 수 있다 — 단 사용자가 명시적으로 요청했을 때만.
@@ -96,6 +115,10 @@ node --check scripts/make-roundup.mjs
 - 소스 파일은 CRLF일 수 있다 — 문자열 앵커 치환 시 `\r\n` 감안.
 - 로컬 Windows Git Bash는 tzdata가 없어 `TZ=Asia/Seoul date`가 UTC로 폴백한다(러너는 정상). 시간은 UTC+9 산술로.
 - 크론 지연 판단: `gh run list --json createdAt`으로 실측할 것. 추측 금지.
+- **클라우드 세션 네트워크 차단 목록**(2026-09 실측): `data.go.kr`·`apis.data.go.kr`·`api.visitkorea.or.kr`·
+  `docs.foursquare.com`·`overpass-api.de`·`huggingface.co`·`source.coop`, DuckDB 확장 서버(`extensions.duckdb.org`).
+  즉 **공공데이터 API 스펙도 실호출도 클라우드에서는 확인할 수 없다** — 러너(report.yml probe)로 넘길 것.
+  열리는 것: `overturemaps-us-west-2.s3.amazonaws.com`(Overture Maps 공개 버킷), npm·pip.
 - **클라우드 세션(claude.ai/code) 네트워크**: npm·apt는 되지만 `tong.visitkorea.or.kr` 등 사진 호스트는 403(허용 목록 밖). 오프라인 렌더는 `data/dry-sample-photos/` 캐시(샘플 6장 커밋돼 있음) → 네트워크 → 색 플레이스홀더 순으로 폴백하므로 클라우드에서도 샘플 실사진으로 검증된다. 샘플(data/dry-sample.json)을 바꾸면 로컬에서 `ROUNDUP_OFFLINE=1`을 한 번 돌려 캐시를 다시 채우고 커밋. `apt-get update`는 이미지의 무관한 PPA 때문에 실패하지만 install은 된다.
 
 ## 작업 방식

@@ -1,4 +1,6 @@
-// 지역별 방문자수 API 실물 확인 — 조회만 하고 아무것도 발행·저장하지 않는다.
+// 지역별 방문자수 API 실물 확인 — 발행은 하지 않는다.
+// ⚠️ 완전한 읽기 전용은 아니다: 캐시로 config에 visitor_stats_v2 / theme_sgg_v2 두 줄을 쓴다
+//    (실제 코드 경로를 그대로 태워야 결과가 의미가 있어서 그렇다). posts는 건드리지 않는다.
 //   npx tsx --env-file=.env scripts/probe-visitors.mjs
 //   (러너: report.yml 을 probe=true 로 실행)
 //
@@ -93,6 +95,14 @@ async function main() {
   const rows = Array.isArray(items) ? items : [items];
   console.log(`\n── 파싱 결과 (${rows.length}행) ──`);
   console.log("응답 필드명:", Object.keys(rows[0] ?? {}).join(", ") || "(없음)");
+  console.log("totalCount:", json?.response?.body?.totalCount ?? "(없음)");
+  // 방문자 구분(현지인/외지인/외국인)이 섞여 있으면 합계 의미가 달라진다 — 값 분포를 본다
+  const divKeys = Object.keys(rows[0] ?? {}).filter((k) => /div|gubun|se$|구분/i.test(k));
+  for (const k of divKeys) {
+    const vals = [...new Set(rows.map((r) => String(r[k])))].slice(0, 8);
+    console.log(`  구분 후보 ${k}: ${vals.join(" / ")}`);
+  }
+  if (!divKeys.length) console.log("  구분 필드 없음 — 시군구별 단일 값으로 보입니다");
   let ok = 0, noSido = 0;
   for (const r of rows.slice(0, 10)) {
     const kv = parseRow(r);
@@ -118,7 +128,7 @@ async function main() {
     console.log("  KAKAO_REST_KEY 없음 — 해석 불가(사전 가중치도 동작하지 않습니다)");
     return;
   }
-  const { resolveThemeRegions, fetchVisitorStats } = await import("../lib/visitors.ts");
+  const { resolveThemeRegions, fetchVisitorStats, clearVisitorCache } = await import("../lib/visitors.ts");
   const map = await resolveThemeRegions(themes);
   const done = themes.filter((t) => map[t.key]?.sgg);
   console.log(`  해석 ${done.length}/${themes.length}곳`);
@@ -129,8 +139,12 @@ async function main() {
   const failedResolve = themes.filter((t) => !map[t.key]?.sgg).map((t) => t.key);
   if (failedResolve.length) console.log(`  해석 실패: ${failedResolve.join(", ")}`);
 
-  // 전체 통계로 매칭 (fetchVisitorStats는 config에 30일 캐시를 남긴다 — 유일한 쓰기)
+  // 전체 통계로 매칭. 프로브는 **캐시를 먼저 지우고** 실제 호출을 강제한다 —
+  // 안 그러면 옛 캐시를 읽어 파서 수정이 반영됐는지 확인할 수 없다. 끝나고도 지운다:
+  // 프로브가 알려준 대로 parseRow를 고쳐도 잘못된 캐시가 30일간 살아 있으면 소용없다.
+  await clearVisitorCache();
   const stats = await fetchVisitorStats();
+  await clearVisitorCache();
   if (!stats) {
     console.log("\n  ⚠️ 전체 통계를 못 받아 매칭 수를 셀 수 없습니다.");
     return;

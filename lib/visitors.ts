@@ -28,12 +28,20 @@ const PATH_CANDIDATES = [
 ];
 
 const CACHE_KEY = "visitor_stats_v2"; // v1은 시군구 이름만 저장해 오매칭 위험이 있었다
+// 실패도 캐시한다. 데이터셋 미승인 상태면 경로 3 x 월 3 x 20초 = 최대 180초를
+// **매 발행마다** 임계경로에서 버린다(검토 실측 180.1초). 발행이 늦어질 이유가 없다.
+const FAIL_KEY = "visitor_stats_fail";
+const FAIL_RETRY_HOURS = 72;
 const SGG_CACHE_KEY = "theme_sgg_v2";
 const CACHE_DAYS = 30; // 월 1회 갱신 데이터
 
 /** "시도|시군구" → 방문자 수. 시도를 못 얻은 행은 "|시군구". */
 export type VisitorStats = Record<string, number>;
-export interface Region { sido: string; sgg: string }
+export interface Region { sido: string; sgg: string; failedAt?: string }
+
+// 카카오가 잠깐 죽은 것뿐인데 실패를 영원히 캐시하면 그 테마는 다시는 가중치를
+// 못 받는다. 실패는 날짜와 함께 저장하고 이 기간이 지나면 다시 시도한다.
+const RESOLVE_RETRY_DAYS = 7;
 
 // ===== 지역명 정규화 =====
 // 카카오는 "대전광역시/유성구", 관광 데이터는 "대전/유성구"처럼 표기가 갈린다.
@@ -69,6 +77,16 @@ export function sggCandidates(raw: string | null | undefined): string[] {
 }
 
 const keyOf = (sido: string, sgg: string) => `${sido}|${sgg}`;
+
+/**
+ * 여러 시도에 같은 이름으로 존재하는 시군구.
+ * 응답에 시도 필드가 없으면 이 이름들은 한 칸에 합쳐져 버려서 어느 도시 값인지
+ * 알 수 없다 — 그때는 값을 주지 않는다(찍으면 조용히 틀린다).
+ * 고성군은 강원·경남 둘 다, 나머지 구들은 광역시 여러 곳에 있다.
+ */
+const AMBIGUOUS_SGG = new Set([
+  "중구", "동구", "서구", "남구", "북구", "고성군",
+]);
 
 /** data.go.kr 응답 어디에 있든 item 배열을 찾아낸다 (JSON/래핑 형태가 서비스마다 다르다) */
 function findItems(json: any): any[] {
@@ -108,6 +126,12 @@ export function parseRow(row: any): { sido: string; sgg: string; n: number } | n
   return { sido: normSido(sidoRaw), sgg: String(sggRaw).trim(), n };
 }
 
+/** 그 달의 마지막 날 — `${ym}31`을 넣으면 30일 달·2월 조회가 거부될 수 있다 */
+function lastDay(ym: string): string {
+  const y = Number(ym.slice(0, 4)), m = Number(ym.slice(4, 6));
+  return String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0");
+}
+
 /** 전월(데이터가 아직 없을 수 있어 두 달 전까지 되짚는다) YYYYMM 목록 */
 function recentMonths(): string[] {
   const out: string[] = [];
@@ -119,7 +143,10 @@ function recentMonths(): string[] {
   return out;
 }
 
-async function callOnce(path: string, ym: string): Promise<VisitorStats | null> {
+const PAGE = 1000;
+const MAX_PAGES = 40; // 1000행 x 40 = 4만 행이면 시군구 229개 x 한 달 x 구분 몇 종을 덮는다
+
+async function fetchPage(path: string, ym: string, pageNo: number): Promise<any | null> {
   const key = process.env.TOUR_API_KEY;
   if (!key) return null;
   const qs = new URLSearchParams({
@@ -127,10 +154,10 @@ async function callOnce(path: string, ym: string): Promise<VisitorStats | null> 
     MobileOS: "ETC",
     MobileApp: "insta-spot-bot",
     _type: "json",
-    numOfRows: "1000",
-    pageNo: "1",
+    numOfRows: String(PAGE),
+    pageNo: String(pageNo),
     startYmd: `${ym}01`,
-    endYmd: `${ym}31`,
+    endYmd: `${ym}${lastDay(ym)}`,
   });
   const res = await fetch(`${BASE}/${path}?${qs}`, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) return null;
@@ -141,13 +168,59 @@ async function callOnce(path: string, ym: string): Promise<VisitorStats | null> 
     console.error(`[visitors] ${path} 비JSON 응답: ${reason}`);
     return null;
   }
+  return JSON.parse(text);
+}
+
+/**
+ * 한 달치를 **전부** 받아 시군구별로 합산한다.
+ *
+ * ⚠️ 한 페이지만 받으면 안 된다. 경로 후보가 전부 일자별(DDList)이라 응답이
+ *    시군구 x 일자 x 방문자구분으로 늘어나는데, 1000행만 받으면 합계가
+ *    "그 시군구가 앞쪽 1000행에 몇 번 실렸는가"가 된다 — 방문자 규모가 아니라
+ *    API 정렬 순서가 테마 확률을 정하게 된다(검토 확정, 2026-09-09).
+ *    그래서 totalCount를 보고 끝까지 받고, 못 받으면 **버린다**.
+ */
+async function callOnce(path: string, ym: string): Promise<VisitorStats | null> {
   const stats: VisitorStats = {};
-  for (const row of findItems(JSON.parse(text))) {
-    const r = parseRow(row);
-    if (!r) continue;
-    // 같은 시군구가 일자별로 여러 행이면 합산 (월 합계가 곧 규모)
-    const k = keyOf(r.sido, r.sgg);
-    stats[k] = (stats[k] ?? 0) + r.n;
+  const rowCount: Record<string, number> = {};
+  const deadline = Date.now() + 60_000; // 발행 경로라 예산을 둔다(30일 캐시라 월 1회)
+  let seen = 0;
+  let total = Infinity;
+
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    if (page > 1 && Date.now() > deadline) break;
+    const json = await fetchPage(path, ym, page);
+    if (!json) return null;
+    const tc = Number(json?.response?.body?.totalCount);
+    if (Number.isFinite(tc) && tc > 0) total = tc;
+    const items = findItems(json);
+    if (!items.length) break;
+    seen += items.length;
+    for (const row of items) {
+      const r = parseRow(row);
+      if (!r) continue;
+      // 같은 시군구의 일자별·구분별 행을 합산 = 그 달의 총량. 아래 균일성 검사가
+      // '어떤 시군구만 행이 더 많은' 절단 상태를 걸러 준다.
+      const k = keyOf(r.sido, r.sgg);
+      stats[k] = (stats[k] ?? 0) + r.n;
+      rowCount[k] = (rowCount[k] ?? 0) + 1;
+    }
+    if (seen >= total || items.length < PAGE) break;
+  }
+
+  if (seen < total) {
+    console.error(`[visitors] ${path} ${ym} 부분 응답 ${seen}/${total} — 합계가 왜곡되므로 폐기`);
+    return null;
+  }
+  // 스키마를 몰라도 쓸 수 있는 방어선: 시군구별 행 수가 고르지 않으면 커버리지가 깨진 것.
+  // (전 지역이 같은 일수·같은 구분 수만큼 나와야 합계가 서로 비교 가능하다)
+  const counts = Object.values(rowCount);
+  if (counts.length) {
+    const lo = Math.min(...counts), hi = Math.max(...counts);
+    if (hi > lo * 1.5) {
+      console.error(`[visitors] ${path} ${ym} 시군구별 행 수 불균일(${lo}~${hi}) — 비교 불가로 폐기`);
+      return null;
+    }
   }
   return Object.keys(stats).length >= 10 ? stats : null; // 너무 적으면 파싱 실패로 본다
 }
@@ -173,6 +246,24 @@ export async function fetchVisitorStats(): Promise<VisitorStats | null> {
     }
   } catch { /* 캐시 실패는 무시하고 새로 받는다 */ }
 
+  // 최근에 실패했으면 다시 시도하지 않는다 — 미승인 데이터셋에 매 발행 180초를 쓰지 않게
+  try {
+    const f = await db.execute({
+      sql: "SELECT updated_at FROM config WHERE key = ?",
+      args: [FAIL_KEY],
+    });
+    if (f.rows.length) {
+      const age =
+        Date.now() - new Date(String(f.rows[0].updated_at).replace(" ", "T") + "Z").getTime();
+      if (age < FAIL_RETRY_HOURS * 3_600_000) {
+        console.log(
+          `[visitors] 최근 조회 실패 기록 있음 — ${FAIL_RETRY_HOURS}시간 뒤 재시도(사전 가중치 생략)`
+        );
+        return null;
+      }
+    }
+  } catch { /* 기록 없음 — 그냥 진행 */ }
+
   const paths = process.env.VISITOR_API_PATH ? [process.env.VISITOR_API_PATH] : PATH_CANDIDATES;
   for (const path of paths) {
     for (const ym of recentMonths()) {
@@ -188,6 +279,7 @@ export async function fetchVisitorStats(): Promise<VisitorStats | null> {
             sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
             args: [CACHE_KEY, JSON.stringify(stats)],
           });
+          await db.execute({ sql: "DELETE FROM config WHERE key = ?", args: [FAIL_KEY] });
         } catch { /* 캐시 저장 실패는 무시 */ }
         return stats;
       } catch (e) {
@@ -195,7 +287,23 @@ export async function fetchVisitorStats(): Promise<VisitorStats | null> {
       }
     }
   }
+  // 전부 실패 — 다음 발행이 같은 시간을 또 버리지 않게 기록해 둔다
+  try {
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+      args: [FAIL_KEY, "1"],
+    });
+  } catch { /* 기록 실패는 무시 */ }
   return null;
+}
+
+/** 프로브가 캐시를 지우고 실제 호출을 강제할 때 쓴다(수정한 파서를 바로 확인하려고) */
+export async function clearVisitorCache(): Promise<void> {
+  for (const k of [CACHE_KEY, FAIL_KEY]) {
+    try {
+      await db.execute({ sql: "DELETE FROM config WHERE key = ?", args: [k] });
+    } catch { /* 무시 */ }
+  }
 }
 
 /**
@@ -215,17 +323,23 @@ export function lookupVisitors(stats: VisitorStats, region: Region): number | nu
   for (const c of cands) {
     const same = entries.filter((e) => e.sgg === c);
     if (!same.length) continue;
+
+    // 데이터 자체에 시도가 없는 행 — 전국의 동명 시군구가 한 칸에 합쳐져 있다.
+    // "응답 안에서 유일하다"는 건 "내가 찾는 그 도시다"라는 뜻이 아니다.
+    const noSido = same.filter((e) => !e.sido);
+    if (noSido.length && AMBIGUOUS_SGG.has(c)) return null;
+
     if (region.sido) {
       const exact = same.filter((e) => e.sido === region.sido);
       if (exact.length === 1) return exact[0].v;
-      // 데이터에 시도가 비어 있는데 이름 후보가 하나뿐이면 그것만 인정
-      const noSido = same.filter((e) => !e.sido);
+      if (exact.length > 1) return null; // 같은 시도에 동명 — 판단 불가
+      // 시도 표기가 없는 데이터라면, 모호하지 않은 이름에 한해 인정
       if (same.length === 1 && noSido.length === 1) return noSido[0].v;
-      if (exact.length > 1) return null; // 같은 시도에 동명 시군구 — 판단 불가
       continue;
     }
+    // 테마 쪽 시도를 모르는 경우 — 후보가 하나이고 모호하지 않을 때만
     if (same.length === 1) return same[0].v;
-    return null; // 동명 시군구 여럿 + 시도 모름 → 포기
+    return null;
   }
   return null;
 }
@@ -256,17 +370,24 @@ function toRegion(d: any): Region | null {
 }
 
 async function regionOf(theme: any): Promise<Region | null> {
+  // 테마 파일에 이미 시도가 있다(예: {"region":"강원"}). 카카오가 시도를 못 주거나
+  // 아예 실패해도 이걸로 채우면 동명 시군구를 가르는 데 쓸 수 있다.
+  const themeSido = normSido(theme?.region);
   try {
     const t = theme.tour ?? {};
     if (t.mapX && t.mapY) {
       const j = await kakao("geo/coord2regioncode.json", { x: String(t.mapX), y: String(t.mapY) });
       const d = (j?.documents ?? []).find((x: any) => x.region_type === "B") ?? j?.documents?.[0];
-      return d ? toRegion(d) : null;
+      const r = d ? toRegion(d) : null;
+      if (r && !r.sido && themeSido) r.sido = themeSido;
+      return r;
     }
     if (theme.keyword) {
       const j = await kakao("search/address.json", { query: String(theme.keyword), size: "1" });
       const d = j?.documents?.[0]?.address ?? j?.documents?.[0]?.road_address;
-      return d ? toRegion(d) : null;
+      const r = d ? toRegion(d) : null;
+      if (r && !r.sido && themeSido) r.sido = themeSido;
+      return r;
     }
   } catch { /* 개별 실패는 null */ }
   return null;
@@ -283,21 +404,28 @@ export async function resolveThemeRegions(themes: any[]): Promise<Record<string,
     if (c.rows.length) map = JSON.parse(String(c.rows[0].value)) ?? {};
   } catch { /* 캐시 없음 */ }
 
-  const missing = themes.filter((t) => !(t.key in map));
+  const stale = (r: Region | undefined) => {
+    if (!r) return true;
+    if (r.sgg) return false; // 이미 해석됨
+    if (!r.failedAt) return true; // 예전 형식(실패 기록에 날짜 없음) — 다시 시도
+    return Date.now() - new Date(r.failedAt).getTime() > RESOLVE_RETRY_DAYS * 86_400_000;
+  };
+  const missing = themes.filter((t) => stale(map[t.key]));
   if (!missing.length) return map;
 
   // 첫 실행에 68개를 다 부르면 발행이 그만큼 늦어진다 — 시간 예산을 두고 남은 건 다음 회차에.
   const deadline = Date.now() + 20_000;
-  let added = 0;
+  let added = 0, retried = 0;
   for (const t of missing) {
     if (Date.now() > deadline) break;
     const r = await regionOf(t);
-    map[t.key] = r ?? { sido: "", sgg: "" }; // 실패도 기록해 매번 다시 부르지 않게
-    if (r?.sgg) added++;
+    // 실패도 기록해 매 회차 다시 부르지는 않되, 날짜를 남겨 일정 기간 뒤 재시도한다
+    map[t.key] = r ?? { sido: "", sgg: "", failedAt: new Date().toISOString() };
+    if (r?.sgg) added++; else retried++;
   }
-  if (added) {
+  if (added || retried) {
     const ok = Object.values(map).filter((r) => r?.sgg).length;
-    console.log(`[visitors] 지역 해석 +${added}곳 (누적 ${ok})`);
+    console.log(`[visitors] 지역 해석 +${added}곳 (누적 ${ok}${retried ? `, 실패 ${retried}곳은 ${RESOLVE_RETRY_DAYS}일 뒤 재시도` : ""})`);
     try {
       await db.execute({
         sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",

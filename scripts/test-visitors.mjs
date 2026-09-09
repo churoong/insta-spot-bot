@@ -39,10 +39,18 @@ eq("시도 불일치 → null", lookupVisitors(withSido, { sido: "광주", sgg: 
 eq("시도 모름 + 동명 여럿 → null", lookupVisitors(withSido, { sido: "", sgg: "중구" }), null);
 eq("시도 모름 + 유일 → 값", lookupVisitors(withSido, { sido: "", sgg: "유성구" }), 500);
 
-// 데이터에 시도가 아예 없는 경우(응답에 시도 필드가 없을 때). 유일할 때만 인정.
-const noSido = { "|유성구": 500, "|중구": 300, "|강남구": 4000 };
-eq("데이터 시도없음 + 유일 → 값", lookupVisitors(noSido, { sido: "대전", sgg: "유성구" }), 500);
-eq("데이터 시도없음 + 중구 (구분 불가지만 유일) → 값", lookupVisitors(noSido, { sido: "부산", sgg: "중구" }), 300);
+// 데이터에 시도가 아예 없는 경우(응답에 시도 필드가 없을 때).
+// ⚠️ 이때 "|중구"는 전국 중구가 한 칸에 합쳐진 값이다. "응답 안에서 유일"은
+//    "내가 찾는 그 도시"라는 뜻이 아니다 — 모호한 이름은 거절해야 한다.
+//    (직전 버전은 이걸 값으로 인정했고, 이 테스트가 그 잘못된 동작을 정답으로 박아 뒀다)
+const noSido = { "|유성구": 500, "|중구": 300, "|강남구": 4000, "|해운대구": 700 };
+eq("데이터 시도없음 + 유일·비모호 → 값", lookupVisitors(noSido, { sido: "대전", sgg: "유성구" }), 500);
+eq("데이터 시도없음 + 해운대구 → 값", lookupVisitors(noSido, { sido: "부산", sgg: "해운대구" }), 700);
+eq("데이터 시도없음 + 중구 → null (전국 합산이라 못 씀)", lookupVisitors(noSido, { sido: "부산", sgg: "중구" }), null);
+eq("데이터 시도없음 + 남구 → null", lookupVisitors(noSido, { sido: "부산", sgg: "남구" }), null);
+eq("데이터 시도없음 + 고성군 → null (강원·경남 중복)", lookupVisitors(noSido, { sido: "강원", sgg: "고성군" }), null);
+// '남구'가 '강남구'에 substring으로 걸리던 사고 — 이제 정확 일치만 본다
+eq("남구가 강남구를 물지 않는다", lookupVisitors({ "부산|강남구": 9 }, { sido: "부산", sgg: "남구" }), null);
 
 // 시도 표기 정규화
 eq("대전광역시 → 대전", normSido("대전광역시"), "대전");
