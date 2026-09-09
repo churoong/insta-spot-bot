@@ -1047,13 +1047,64 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   for (const p of places) {
     photoBufs.push(await fetchPhoto(p.imageUrl, p.name));
   }
+  // 무사진 칸 디자인 확인용 — ROUNDUP_NOPHOTO="2,5" (1-based)면 그 칸의 사진을 버린다.
+  // 시안 렌더 전용이고 실발행에서는 이 값을 주지 않는다.
+  for (const i of String(process.env.ROUNDUP_NOPHOTO || "").split(",").map((x) => Number(x.trim()) - 1)) {
+    if (i >= 0 && i < photoBufs.length) photoBufs[i] = null;
+  }
+
+  /**
+   * 사진이 없는 칸에 넣을 패널. 이 봇의 사진 출처는 공공누리 등 합법 소스뿐이라
+   * 발굴은 됐는데 사진이 없는 식당이 생긴다(Overture 등). 그때 생성 이미지를 넣으면
+   * '이 가게 음식이 이렇게 생겼다'는 없는 사실을 만드는 셈이라(lib/pexels.ts 사칭 방지
+   * 원칙과 같은 이유) 대신 실제로 가진 데이터 — 대표메뉴와 후기·조회수 — 를 보여준다.
+   * 아무 주장도 하지 않으므로 사진이 없다는 사과 문구도 넣지 않는다.
+   */
+  async function noPhotoPanel(p) {
+    // ⚠️ 아래 54px은 기존 칩(지역·후기/YT·백년가게)이 사진 위에 얹히는 자리다 — 비워 둘 것.
+    const CHIP_ZONE = 54;
+    const menu = String(p.menu || "").split(/[,·/]/)[0].trim().slice(0, 10);
+    const label = menu ? "대표메뉴" : "";
+    const body = menu || coverName(p.name);
+    // 짧으면 크게, 길어도 너무 작아지지 않게 (칸마다 크기가 널뛰면 그리드가 산만해진다)
+    const fs2 = Math.max(48, Math.min(84, Math.floor(430 / Math.max(1, [...body].length))));
+    const midY = (PH_H - CHIP_ZONE) / 2;
+    const baseY = midY + fs2 * 0.36; // 글자 베이스라인
+    const svg = `<svg width="${PH_W}" height="${PH_H}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="np" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${dark ? "#2a1a12" : "#fff4ec"}"/>
+          <stop offset="100%" stop-color="${dark ? "#1a0f0a" : "#ffe2d2"}"/>
+        </linearGradient>
+        <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+          <circle cx="3" cy="3" r="1.5" fill="${PAL.accent}" fill-opacity="0.14"/>
+        </pattern>
+      </defs>
+      <rect width="${PH_W}" height="${PH_H}" rx="14" fill="url(#np)"/>
+      <rect width="${PH_W}" height="${PH_H}" rx="14" fill="url(#dots)"/>
+      <rect x="1" y="1" width="${PH_W - 2}" height="${PH_H - 2}" rx="13" fill="none" stroke="${PAL.accent}" stroke-opacity="0.3" stroke-width="2"/>
+      ${label ? `<text x="${PH_W / 2}" y="${midY - fs2 * 0.58}" font-family="${FONT}" font-size="21" font-weight="700" letter-spacing="2" fill="${dark ? "#c9b8b0" : "#a3796a"}" text-anchor="middle">${label}</text>` : ""}
+      <text x="${PH_W / 2}" y="${baseY}" font-family="${TFONT}" font-size="${fs2}" font-weight="900" fill="${dark ? "#ffd9c9" : PAL.name}" text-anchor="middle">${esc(body)}</text>
+      <rect x="${PH_W / 2 - 46}" y="${baseY + 18}" width="92" height="5" rx="2.5" fill="${PAL.accent}" fill-opacity="0.55"/>
+    </svg>`;
+    return sharp(Buffer.from(svg)).png().toBuffer();
+  }
 
   const mask = Buffer.from(
     `<svg width="${PH_W}" height="${PH_H}"><rect x="0" y="0" width="${PH_W}" height="${PH_H}" rx="14" ry="14" fill="#fff"/></svg>`
   );
   const photoLayers = [];
   for (let i = 0; i < places.length; i++) {
-    if (!photoBufs[i]) continue; // 사진 실패 시 텍스트만
+    const { x: px, y: py } = cellPos(i);
+    if (!photoBufs[i]) {
+      // 빈칸으로 두면 카드가 깨져 보인다 — 가진 데이터로 채운다
+      try {
+        photoLayers.push({ input: await noPhotoPanel(places[i]), left: px + 8 + IN, top: py + 6 + IN });
+      } catch (e) {
+        console.error(`무사진 패널 실패(빈칸): ${places[i].name}`, String(e).slice(0, 80));
+      }
+      continue;
+    }
     try {
       const { x, y } = cellPos(i);
       const rounded = await sharp(photoBufs[i])
@@ -1800,6 +1851,14 @@ async function main() {
       .extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 })
       .toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
     fs.writeFileSync("countdown-card-preview.jpg", await composeRankCard(sharpMod, places[0], 1));
+    // 무사진 칸 시안 — 2·5번 칸을 비운 표지를 따로 렌더
+    if (process.env.NOPHOTO_DEMO === "1") {
+      const keep = process.env.ROUNDUP_NOPHOTO;
+      process.env.ROUNDUP_NOPHOTO = "2,5";
+      fs.copyFileSync(await composeReelCover(theme, places, false, null), "roundup-nophoto-preview.jpg");
+      if (keep === undefined) delete process.env.ROUNDUP_NOPHOTO; else process.env.ROUNDUP_NOPHOTO = keep;
+      console.log("오프라인 — roundup-nophoto-preview.jpg 저장 (2·5번 칸 무사진 시안)");
+    }
     // 그리드 릴스 첫 3초 훅 컷 — 실발행과 같은 렌더러로 뽑아 폰에서 그림으로 확인한다
     const hook = await buildHookCut(theme, places, null);
     if (hook) fs.copyFileSync(hook, "roundup-hook-preview.jpg");
