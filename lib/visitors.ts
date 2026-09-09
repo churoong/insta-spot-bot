@@ -79,6 +79,17 @@ export function sggCandidates(raw: string | null | undefined): string[] {
 const keyOf = (sido: string, sgg: string) => `${sido}|${sgg}`;
 
 /**
+ * 법정동 코드 앞 2자리 → 시도(짧은 이름). 시군구 방문자 응답이 시도 이름을 안 주기 때문에
+ * 이걸로 복원한다. 42/51(강원), 45/52(전북)은 특별자치도 전환 전후 코드가 함께 쓰인다.
+ */
+const SIDO_BY_CODE: Record<string, string> = {
+  "11": "서울", "26": "부산", "27": "대구", "28": "인천", "29": "광주",
+  "30": "대전", "31": "울산", "36": "세종", "41": "경기",
+  "42": "강원", "51": "강원", "43": "충북", "44": "충남",
+  "45": "전북", "52": "전북", "46": "전남", "47": "경북", "48": "경남", "50": "제주",
+};
+
+/**
  * 여러 시도에 같은 이름으로 존재하는 시군구.
  * 응답에 시도 필드가 없으면 이 이름들은 한 칸에 합쳐져 버려서 어느 도시 값인지
  * 알 수 없다 — 그때는 값을 주지 않는다(찍으면 조용히 틀린다).
@@ -123,7 +134,16 @@ export function parseRow(row: any): { sido: string; sgg: string; n: number } | n
   if (!sggRaw || raw == null) return null;
   const n = Number(String(raw).replace(/[^\d.]/g, ""));
   if (!Number.isFinite(n) || n <= 0) return null;
-  return { sido: normSido(sidoRaw), sgg: String(sggRaw).trim(), n };
+  // 실측(2026-09-09, 승인 후): 시군구 응답에는 시도 이름이 아예 없고 `signguCode`만 온다
+  // ({"signguCode":"11110","signguNm":"종로구",...}). 그대로 두면 중구·동구처럼 여러 시도에
+  // 있는 이름이 한 칸에 합쳐져 행 수가 불균일해지고(실측 27~540) 통계 전체가 폐기된다.
+  // 법정동 코드 앞 2자리로 시도를 복원한다.
+  let sido = normSido(sidoRaw);
+  if (!sido) {
+    const code = pick(row, /signgu.*c(o)?de|sgng.*c(o)?de|시군구.*코드/i);
+    if (code) sido = SIDO_BY_CODE[String(code).trim().slice(0, 2)] ?? "";
+  }
+  return { sido, sgg: String(sggRaw).trim(), n };
 }
 
 /** 그 달의 마지막 날 — `${ym}31`을 넣으면 30일 달·2월 조회가 거부될 수 있다 */
