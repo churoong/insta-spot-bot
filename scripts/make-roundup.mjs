@@ -1298,16 +1298,36 @@ async function composeHeroCover(theme, places, bgUrl = null, outName = "reel-cov
   const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285 — 4:5로 잘려도 살아남는 위쪽 경계
   const CH = Math.round(W * 5 / 4); // 1350
 
-  const p = places.find((x) => x.foodPicked) ?? places[0];
-  let heroBuf = await fetchPhoto(bgUrl ?? p.imageUrl, p.name);
-  if (!heroBuf && bgUrl) heroBuf = await fetchPhoto(p.imageUrl, p.name); // 포토코리아 실패 → 식당 사진
+  // 훅 컷·히어로는 사진 한 장을 1080x1920 전체로 확대해 쓴다 — 그리드 칸(약 500px)과 달리
+  // 저해상도가 그대로 드러난다(원주 소스는 표본 12곳 중 7곳이 900px 미만). 후보 앞쪽에서
+  // 원본이 가장 큰 사진을 골라 쓴다. 배경이 지정된 경우(포토코리아)는 그대로.
+  let p = places.find((x) => x.foodPicked) ?? places[0];
+  let heroBuf = bgUrl ? await fetchPhoto(bgUrl, p.name) : null;
+  if (!heroBuf) {
+    const cands = [...places.filter((x) => x.foodPicked), ...places].slice(0, 4);
+    let bestW = 0;
+    for (const c of cands) {
+      if (!c?.imageUrl) continue;
+      try {
+        const buf = await fetchPhoto(c.imageUrl, c.name);
+        if (!buf) continue;
+        const w = (await sharp(buf).metadata()).width ?? 0;
+        if (w > bestW) { bestW = w; heroBuf = buf; p = c; }
+        if (w >= 1400) break; // 충분히 크면 더 볼 필요 없다
+      } catch { /* 다음 후보 */ }
+    }
+    if (bestW) console.log(`  훅 배경: ${p.name} (${bestW}px)`);
+  }
   if (!heroBuf) throw new Error("히어로 배경 사진 실패");
-  // 그리드형과 달리 사진 자체가 주인공이라 블러를 넣지 않는다
-  const bgPhoto = await sharp(heroBuf)
+  // 그리드형과 달리 사진 자체가 주인공이라 블러를 넣지 않는다.
+  // 단 원본이 작으면(원주 소스 등 500~900px) 1080x1920으로 늘리면서 깨짐이 그대로 보인다 —
+  // 그때만 약한 블러로 뭉갠다. 어차피 어둡게 깔고 큰 글자를 얹는 화면이라 위화감이 없다.
+  const heroW = (await sharp(heroBuf).metadata()).width ?? 0;
+  let heroPipe = sharp(heroBuf)
     .resize(W, H, { fit: "cover", position: "attention" })
-    .modulate({ saturation: 1.14, brightness: 1.02 })
-    .jpeg({ quality: 90 })
-    .toBuffer();
+    .modulate({ saturation: 1.14, brightness: 1.02 });
+  if (heroW && heroW < 1000) heroPipe = heroPipe.blur(1 + (1000 - heroW) / 220);
+  const bgPhoto = await heroPipe.jpeg({ quality: 90 }).toBuffer();
 
   const tp = theme.coverParts ?? {
     top: "", main: theme.food || theme.keyword, sub: `${places.length}대 ${theme.suffix || "맛집"}`,
@@ -1430,14 +1450,36 @@ async function composeCarouselCard(sharp, place, idx) {
  * 자극형 제목 — 표지에서 음식 이름(main)만 초대형으로 뽑아 쓰기 위해 3조각으로 나눠 준다.
  * text는 캡션·기록용 전체 문장.
  */
+/**
+ * 훅 컷(첫 3초) 전용 문구 — 반문형.
+ * 지금까지 훅 컷과 그리드 표지가 같은 제목을 써서 3초를 낭비했다(같은 글자를 두 번 보여줌).
+ * 실측(2026-09-09): 물음표 종결 2.02x · 통념파괴형 3.03x로 상위 공식이고,
+ * 사용자 확정 훅 규칙에 "반문"이 이미 허용돼 있어 규칙 변경 없이 비중만 올린다.
+ * 큰 글자를 살리려고 main(음식·지역명)은 그대로 두고 sub만 반문으로 바꾼다
+ * (main에 문장을 넣으면 980/글자수 계산 때문에 타이포가 작아진다).
+ */
+function buildHookTitle(theme, n) {
+  const main = theme.mode === "area" ? theme.keyword : theme.food || theme.keyword;
+  const subs =
+    theme.mode === "area"
+      ? ["여기가 끝?", "진짜 여기야?", "이 동네 실화?", "여기 가봤어?"]
+      : ["성지가 여기라고?", "여기가 원탑?", "이게 실화?", "진짜 여기야?"];
+  const sub = subs[Math.floor(Math.random() * subs.length)];
+  return { text: `${main} ${sub}`, top: "", main, sub };
+}
+
 function buildPunchyTitle(theme, n) {
   if (theme.mode === "area") {
-    // 지역편: 대형 타이포 = 동네 이름 ("성수동" / "강릉"), 수식어는 무지역형만
-    const tops = [`죽기 전에 꼭 먹어야 할`, `아는 사람만 간다는`, `줄 서서라도 먹는`, `놓치면 후회하는`, `웨이팅이 끊이질 않는`, `현지인들이 숨겨온`, `요즘 난리 난`];
+    // 지역편: 대형 타이포 = 동네 이름 ("성수동" / "강릉"), 수식어는 무지역형만.
+    // 2026-09-09 유튜브 실측(국내 식당 464건, 중앙 7.1만 기준):
+    //   "줄서는·현지인·웨이팅"류 117건 0.45x — 가장 흔하고 가장 안 먹힌다 → 제거
+    //   "TOP N" 40건 0.56x < "N대 맛집" 쪽 → TOP N 제거하고 N대 맛집으로 통일
+    const tops = [`죽기 전에 꼭 먹어야 할`, `아는 사람만 간다는`, `놓치면 후회하는`, `요즘 난리 난`];
     const top = tops[Math.floor(Math.random() * tops.length)];
-    const subs = [`${n}대 맛집`, `맛집 TOP ${n}`];
-    const sub = subs[Math.floor(Math.random() * subs.length)];
-    return { text: `${top} ${theme.keyword} ${sub}`, top, main: theme.keyword, sub };
+    const sub = `${n}대 맛집`;
+    // 캡션·검색 노출용 text는 지역명을 뒤로 뺀다 — 같은 실측에서 지역명이 앞 6글자 안이면
+    // 0.50x, 뒤쪽이면 1.96x였다. 표지 시각(초대형 지역명)은 지역편 정체성이라 그대로 둔다.
+    return { text: `${top} ${sub} · ${theme.keyword}`, top, main: theme.keyword, sub };
   }
   const r = theme.region || "전국";
   const f = theme.food || theme.keyword;
@@ -1448,13 +1490,10 @@ function buildPunchyTitle(theme, n) {
     `${r}에서 제일 맛있는`,
     `죽기 전에 꼭 먹어야 할`,
     `아는 사람만 간다는`,
-    `줄 서서라도 먹는`,
     `${r} 사람들이 인정한`,
     `놓치면 후회하는`,
-    `웨이팅이 끊이질 않는`,
-    `현지인들이 숨겨온`,
     `요즘 난리 난`,
-  ];
+  ]; // "줄서는·웨이팅·현지인"류는 실측 0.45x(가장 흔하고 가장 약함)라 뺐다
   // 지역 시리즈(전국이 아닌 테마)는 지역이 정체성 — 대형 타이포에 지역 포함
   // ("영남 순대국"). 이때 수식어는 지역 중복을 피해 무지역형만 쓴다.
   const regional = r !== "전국";
@@ -1463,7 +1502,8 @@ function buildPunchyTitle(theme, n) {
   const main = regional ? `${r} ${f}` : f;
   // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의
   // "N대 맛집"을 기본으로 하고 "TOP N"을 섞는다.
-  const subs = [`${n}대 ${sfx}`, `${sfx} TOP ${n}`];
+  // TOP N은 실측 0.56x(N대 맛집 대비 약함)라 뺐다 — 사용자 규칙상 둘 다 허용된 형태 중 선택
+  const subs = [`${n}대 ${sfx}`];
   const sub = subs[Math.floor(Math.random() * subs.length)];
   return { text: `${top} ${main} ${sub}`, top, main, sub };
 }
@@ -1570,7 +1610,9 @@ async function renderPagesReel(stills, bgm, outMp4) {
  */
 async function buildHookCut(theme, places, bgUrl) {
   try {
-    return await composeHeroCover(theme, places, bgUrl, "hook-cut.jpg");
+    // 표지(5초)와 다른 문구를 써야 3초가 제 몫을 한다 — 훅은 반문, 표지는 정보
+    const hookTheme = { ...theme, coverParts: buildHookTitle(theme, places.length) };
+    return await composeHeroCover(hookTheme, places, bgUrl, "hook-cut.jpg");
   } catch (e) {
     console.error("훅 컷 생성 실패(표지 8초 단일컷으로 진행):", String(e).slice(0, 120));
     return null;
