@@ -21,6 +21,8 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 | 모음집 릴스 + 표지 스토리 | 매일 17:30 (창 17:30~22:00) | roundup.yml | scripts/make-roundup.mjs |
 | 큐레이션(카운트다운) | 월·금 12:30 (창 12:30~16) | countdown.yml | make-roundup (ROUNDUP_STYLE=countdown) |
 | 캐러셀(저장형) | **수·토** 12:30 (창 12:30~16) | carousel.yml | make-roundup (ROUNDUP_STYLE=carousel) |
+
+⚠️ 발행 요일을 바꾸면 **`scripts/publish-check.mjs`의 `EXPECTED[].dows`도 같이 고칠 것.** 안 고치면 새 슬롯이 조용히 빠져도 이슈가 안 열린다(2026-09-09 캐러셀 주2회 전환 때 실제로 토요일만 보고 있었다).
 | 월간 쇼츠 벤치마크 | 매월 1일 | benchmark.yml | scripts/benchmark-shorts.mjs |
 
 **관리 페이지**(`/`, app/page.tsx): 게시물 목록에 ❤️💬 외에 👁 조회·도달·저장을 표시. 조회수 TOP3·주간 리포트·추천 시간대도 조회수 기준(2026-09-03). 값은 `/api/cron/metrics`(Vercel 크론 07:00·19:00 KST, CRON_SECRET)가 인스타 인사이트로 갱신해 posts.views/reach/saved/metrics_at에 저장. 좋아요는 `/api/cron/post`가 별도 갱신.
@@ -36,7 +38,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 
 | 실험 | 현황 | 판정 조건 |
 |---|---|---|
-| 서체 A/B (G마켓 vs 잘난체) | gmarket 6 · jalnan 2 | 서체당 5건 이상. ⚠️ **grid만 A/B 대상** — countdown·carousel도 `title_font='gmarket'`으로 기록되니 집계에서 걸러야 한다(그래서 gmarket 쪽이 부풀어 보인다) |
+| 서체 A/B (G마켓 vs 잘난체) | gmarket 6 · jalnan 2 | 서체당 5건 이상. **grid만 A/B 대상**(서체 교대가 `STYLE==='grid'`에서만 돌아 큐레이션·캐러셀은 `title_font`가 늘 gmarket) — **cover-report가 `content_id LIKE 'roundup-%'`로 이미 거른다(2026-09-09 확인).** 즉 gmarket 표본은 부풀어 있지 않으니 임의로 깎아서 보지 말 것 |
 | 훅 컷 A/B (`grid8` vs `hook3+grid5`) | hook3+grid5 1건 (9/8 도입) | **시청 시간** 우선. 도입 전 표본과 조회수 직접 비교 금지 |
 | 표지 순환 (classic 10 : pages 2 : hero 1) | classic 9(평균 1,259) · hero 4(75) · pages 1(183) | pages가 얇다 — 5건 모이면 재판정 |
 
