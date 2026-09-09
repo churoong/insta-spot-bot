@@ -1901,7 +1901,7 @@ function engagementLine(theme, count) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-function buildCaption(theme, places, descending = false, ep = null, basis = "") {
+function buildCaption(theme, places, descending = false, ep = null) {
   // 공개형 — "어디야→DM" 유도 문구 없음. 참여(추천 댓글)·저장 유도만.
   // descending: 카운트다운 영상과 같은 순서(N위 → 1위)로 번호를 매긴다.
   const lines = places.map((p, i) => {
@@ -1937,7 +1937,8 @@ function buildCaption(theme, places, descending = false, ep = null, basis = "") 
     `🔥 ${ep ? `전국맛집로드 EP.${ep} | ` : ""}${theme.titleResolved || theme.title}\n\n` +
     `${lines.join("\n")}\n\n` +
     hundredLine +
-    (basis ? `🔎 선정 기준: ${basis} 실데이터 집계\n\n` : "") +
+    // 선정 기준 라인 제외 (2026-09-09 사용자 지시 "캡션에 선정 기준 문구 다 빼줘").
+    // 랭킹 근거(rankBasis)는 카운트다운 인트로 카드에만 남는다.
     `💬 ${engagementLine(theme, places.length)}\n` +
     `🗺 ${places.length}곳 지도 링크가 필요하면 댓글에 '지도'라고 남겨주세요\n\n` +
     `${saveCta}\n` +
@@ -2285,8 +2286,8 @@ async function main() {
   // ⚠️ 캡션은 순위가 확정된 뒤에 만든다(정렬 전에 만들면 번호가 영상과 어긋남).
   //    카운트다운은 영상과 같은 순서로 N위 → 1위 내림차순 표기.
   const caption = cdMode
-    ? buildCaption(theme, ranked, true, ep, rankBasis)
-    : buildCaption(theme, places, false, ep, rankBasis);
+    ? buildCaption(theme, ranked, true, ep)
+    : buildCaption(theme, places, false, ep);
 
   const cards = []; // countdown에서 쓸 카드 파일들
   let pkBg = null; // 포토코리아 배경 (쓰면 캡션에 출처표시 의무)
