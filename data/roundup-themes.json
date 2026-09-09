@@ -2007,6 +2007,24 @@
     "mapY": 36.3283,
     "radius": 2000
    }
+  },
+  {
+   "key": "area-wonju",
+   "mode": "area",
+   "keyword": "원주",
+   "region": "강원",
+   "count": 6,
+   "emoji": "📍",
+   "tags": [
+    "원주맛집",
+    "원주여행",
+    "강원맛집"
+   ],
+   "tour": {
+    "mapX": 127.9422,
+    "mapY": 37.3443,
+    "radius": 3000
+   }
   }
  ]
 }

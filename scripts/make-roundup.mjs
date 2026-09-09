@@ -577,6 +577,19 @@ async function supplementNearby(theme, x, y, radius) {
       for (const p of await busanPlaces("")) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
     } else if (region.startsWith("제주")) {
       for (const p of await jejuPlaces("")) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
+    } else if (region.startsWith("강원")) {
+      const { wonjuNearby } = await import("../lib/wonjufood.ts");
+      for (const p of wonjuNearby(y, x, radius)) {
+        out.push({
+          contentId: `wonju-${p.id}`,
+          name: String(p.name).trim(),
+          address: String(p.addr),
+          region: shortRegion(p.addr),
+          imageUrl: p.imgs[0],
+          extraImages: p.imgs.slice(1, 6), // 비전이 음식 컷을 고르도록 나머지 사진도 후보로
+          overview: String(p.intro ?? "").slice(0, 300),
+        });
+      }
     } else if (region.startsWith("경북")) {
       for (const p of await gyeongjuPlaces()) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
     } else if (region.startsWith("서울")) {
@@ -674,7 +687,7 @@ async function markHundredYear(db, places) {
 async function pickFoodImage(place, food) {
   try {
     // 지자체 소스(busan-·jeju-)는 TourAPI 콘텐츠가 아니라 추가 이미지 조회가 없다 — 대표 1장만 검사
-    const items = /^(busan|jeju|seoul|gyeongju)-/.test(place.contentId)
+    const items = /^(busan|jeju|seoul|gyeongju|wonju)-/.test(place.contentId)
       ? []
       : await tourCall("detailImage2", {
           contentId: place.contentId, imageYN: "Y", numOfRows: "15",
@@ -950,7 +963,7 @@ async function enrichPlaces(places) {
   const clean = (v) =>
     String(v ?? "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   for (const p of places) {
-    if (/^(busan|jeju|seoul|gyeongju)-/.test(p.contentId)) continue; // 지자체·서울DB 항목은 TourAPI 콘텐츠가 아니라 상세조회 불가
+    if (/^(busan|jeju|seoul|gyeongju|wonju)-/.test(p.contentId)) continue; // 지자체·서울DB 항목은 TourAPI 콘텐츠가 아니라 상세조회 불가
     try {
       const it = (await tourCall("detailIntro2", { contentId: p.contentId, contentTypeId: "39" }))[0] ?? {};
       const menu = (clean(it.firstmenu) || clean(it.treatmenu))
