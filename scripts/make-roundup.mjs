@@ -374,6 +374,55 @@ async function jejuPlaces(keyword) {
 // 부산 한정 테마(areaCode=6)의 수집 풀 보강용. TourAPI 부산 풀은 돼지국밥 8곳·밀면
 // 6곳으로 얇았는데, 이 소스가 각각 19곳·15곳을 더 준다(2026-08 실측).
 
+// ===== 경주 먹거리 핫플레이스 (경주시, 61곳 — 사진·좌표·대표메뉴 포함) =====
+// 황리단길 상권이 TourAPI만으로는 21곳이라 얇았다. 이 소스가 식당 13곳을 더 준다(실측 2026-09-09).
+// 사진 URL에 스킴이 없어 https:// 를 붙여야 하고, 약 1/3은 404라 살아있는 것만 남긴다.
+let gyeongjuCache = null;
+let gyeongjuAlive = null;
+async function gyeongjuPlaces() {
+  if (!gyeongjuCache) {
+    try {
+      const u = `https://apis.data.go.kr/5050000/eatHtpService/getEatHtp?serviceKey=${encodeURIComponent(process.env.TOUR_API_KEY ?? "")}&pageNo=1&numOfRows=200`;
+      const j = await (await fetch(u, { signal: AbortSignal.timeout(25000) })).json();
+      const it = j.response?.body?.items?.item ?? j.body?.items?.item;
+      gyeongjuCache = Array.isArray(it) ? it : it ? [it] : [];
+      console.log(`[gyeongju] 캐시: ${gyeongjuCache.length}곳`);
+    } catch (e) {
+      console.error("[gyeongju] 수집 실패(건너뜀):", String(e).slice(0, 90));
+      gyeongjuCache = [];
+    }
+  }
+  const clean = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+  const mapped = gyeongjuCache
+    .filter((x) => x.CON_IMGFILENAME && x.CON_LATITUDE && x.CON_LONGITUDE)
+    .map((x) => ({
+      contentId: `gyeongju-${x.CON_UID}`,
+      name: clean(x.CON_TITLE),
+      address: clean(x.CON_DESC1),
+      region: shortRegion(clean(x.CON_DESC1)) || "경북 경주",
+      imageUrl: /^https?:/.test(String(x.CON_IMGFILENAME)) ? String(x.CON_IMGFILENAME) : "https://" + String(x.CON_IMGFILENAME).replace(/^\/+/, ""),
+      lat: Number(x.CON_LATITUDE) || null,
+      lng: Number(x.CON_LONGITUDE) || null,
+    }));
+  // 살아있는 사진만 (8개씩 병렬 — 61곳이라 몇 초면 끝난다). 한 번만 하고 캐시에 굳힌다.
+  if (!gyeongjuAlive) {
+    const alive = [];
+    for (let i = 0; i < mapped.length; i += 8) {
+      const chunk = mapped.slice(i, i + 8);
+      const oks = await Promise.all(chunk.map(async (p) => {
+        try {
+          const r = await fetch(p.imageUrl, { signal: AbortSignal.timeout(10000) });
+          return r.ok && Number(r.headers.get("content-length") ?? 99999) > 5000;
+        } catch { return false; }
+      }));
+      chunk.forEach((p, k) => oks[k] && alive.push(p));
+    }
+    gyeongjuAlive = alive;
+    console.log(`[gyeongju] 사진 살아있는 곳: ${alive.length}/${mapped.length}`);
+  }
+  return gyeongjuAlive;
+}
+
 let busanCache = null;
 async function busanPlaces(keyword) {
   if (!busanCache) {
@@ -451,7 +500,7 @@ async function photoKoreaPhoto(keyword) {
 // 순수 음식점만 (사용자 정책: 카페·제과·주점 제외) — TourAPI cat3 + 상호 정규식. 보조 소스(부산·제주·서울 DB)
 // 에도 상호 필터를 건다 (실측: 비짓제주에서 노티드·라운지 바, 서울 DB에서 카페 드 파리가 새어 들어옴).
 const AREA_BAD_CAT = /^A0502(0900|1000)/;
-const AREA_BAD_NAME = /(카페|까페|cafe|coffee|커피|로스터|베이커리|bakery|제과|빵집|디저트|dessert|케이크|도넛|노티드|와플|아이스크림|젤라또|치즈|초콜|티하우스|찻집|다방|와인바|라운지|lounge|펍|pub|호프|바(?![가-힣A-Za-z0-9])|주점|술집|포차|맥주|브런치)/i;
+const AREA_BAD_NAME = /(카페|까페|cafe|coffee|커피|로스터|베이커리|bakery|제과|과자|빵집|디저트|dessert|케이크|도넛|노티드|와플|공방|아이스크림|젤라또|치즈|초콜|티하우스|찻집|다방|와인바|라운지|lounge|펍|pub|호프|바(?![가-힣A-Za-z0-9])|주점|술집|포차|맥주|브런치)/i;
 
 async function collectAreaPlaces(theme, limit) {
   const t = theme.tour ?? {};
@@ -528,6 +577,8 @@ async function supplementNearby(theme, x, y, radius) {
       for (const p of await busanPlaces("")) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
     } else if (region.startsWith("제주")) {
       for (const p of await jejuPlaces("")) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
+    } else if (region.startsWith("경북")) {
+      for (const p of await gyeongjuPlaces()) if (p.lat && p.lng && distM(y, x, p.lat, p.lng) <= radius) out.push(p);
     } else if (region.startsWith("서울")) {
       const { seoulNearby } = await import("../lib/seoulfood.ts");
       for (const p of seoulNearby(y, x, radius)) {
@@ -623,7 +674,7 @@ async function markHundredYear(db, places) {
 async function pickFoodImage(place, food) {
   try {
     // 지자체 소스(busan-·jeju-)는 TourAPI 콘텐츠가 아니라 추가 이미지 조회가 없다 — 대표 1장만 검사
-    const items = /^(busan|jeju|seoul)-/.test(place.contentId)
+    const items = /^(busan|jeju|seoul|gyeongju)-/.test(place.contentId)
       ? []
       : await tourCall("detailImage2", {
           contentId: place.contentId, imageYN: "Y", numOfRows: "15",
@@ -899,7 +950,7 @@ async function enrichPlaces(places) {
   const clean = (v) =>
     String(v ?? "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   for (const p of places) {
-    if (/^(busan|jeju|seoul)-/.test(p.contentId)) continue; // 지자체·서울DB 항목은 TourAPI 콘텐츠가 아니라 상세조회 불가
+    if (/^(busan|jeju|seoul|gyeongju)-/.test(p.contentId)) continue; // 지자체·서울DB 항목은 TourAPI 콘텐츠가 아니라 상세조회 불가
     try {
       const it = (await tourCall("detailIntro2", { contentId: p.contentId, contentTypeId: "39" }))[0] ?? {};
       const menu = (clean(it.firstmenu) || clean(it.treatmenu))
