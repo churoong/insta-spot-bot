@@ -85,7 +85,7 @@ const keyOf = (sido: string, sgg: string) => `${sido}|${sgg}`;
  * 고성군은 강원·경남 둘 다, 나머지 구들은 광역시 여러 곳에 있다.
  */
 const AMBIGUOUS_SGG = new Set([
-  "중구", "동구", "서구", "남구", "북구", "고성군",
+  "중구", "동구", "서구", "남구", "북구", "강서구", "고성군",
 ]);
 
 /** data.go.kr 응답 어디에 있든 item 배열을 찾아낸다 (JSON/래핑 형태가 서비스마다 다르다) */
@@ -362,6 +362,23 @@ async function kakao(path: string, params: Record<string, string>): Promise<any 
   return res.json();
 }
 
+/**
+ * 카카오 결과를 테마가 이미 아는 시도와 대조한다.
+ * data/roundup-themes.json의 area 테마 68개는 전부 region("강원"·"경남"…)을 갖고 있다.
+ * 카카오가 다른 시도를 가리키면 그건 동명 지명을 잘못 잡은 것이다 — 그럴듯하게 틀린
+ * 쌍({부산, 연제구})을 만들면 시도 대조 가드가 무의미해지므로 버린다.
+ */
+function verify(r: Region | null, themeSido: string, key: string): Region | null {
+  if (!r?.sgg) return null;
+  if (!themeSido) return r;
+  if (!r.sido) return { ...r, sido: themeSido }; // 카카오가 시도를 안 준 경우만 보완
+  if (r.sido !== themeSido) {
+    console.error(`[visitors] ${key}: 카카오 ${r.sido} ${r.sgg} ≠ 테마 ${themeSido} — 동명 지명 오인으로 보고 버림`);
+    return null;
+  }
+  return r;
+}
+
 function toRegion(d: any): Region | null {
   const sido = normSido(d?.region_1depth_name);
   // 세종은 시군구가 비어 있는 단층제 — 시도명을 그대로 쓴다
@@ -378,16 +395,12 @@ async function regionOf(theme: any): Promise<Region | null> {
     if (t.mapX && t.mapY) {
       const j = await kakao("geo/coord2regioncode.json", { x: String(t.mapX), y: String(t.mapY) });
       const d = (j?.documents ?? []).find((x: any) => x.region_type === "B") ?? j?.documents?.[0];
-      const r = d ? toRegion(d) : null;
-      if (r && !r.sido && themeSido) r.sido = themeSido;
-      return r;
+      return verify(d ? toRegion(d) : null, themeSido, theme.key);
     }
     if (theme.keyword) {
       const j = await kakao("search/address.json", { query: String(theme.keyword), size: "1" });
       const d = j?.documents?.[0]?.address ?? j?.documents?.[0]?.road_address;
-      const r = d ? toRegion(d) : null;
-      if (r && !r.sido && themeSido) r.sido = themeSido;
-      return r;
+      return verify(d ? toRegion(d) : null, themeSido, theme.key);
     }
   } catch { /* 개별 실패는 null */ }
   return null;

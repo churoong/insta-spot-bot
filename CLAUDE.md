@@ -78,7 +78,9 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
   해석(`KAKAO_REST_KEY` — 이 브랜치에서 roundup/countdown/carousel.yml에 처음 추가됐다).
   **시군구는 이름만으로 식별되지 않는다**(중구·동구·서구·남구·북구·고성군은 여러 시도에 있다)
   → 시도까지 맞을 때만 값을 주고, 모호하면 포기해 기존 2.0으로 남긴다. 규칙 테스트:
-  `npx tsx scripts/test-visitors.mjs`(네트워크 없이 25건). 응답 스키마는 **아직 미확인** —
+  `npx tsx scripts/test-visitors.mjs`(네트워크 없이 28건). 카카오가 동명 지명을 잘못 잡으면
+  (거제→부산 연제구 거제동) 테마의 `region`과 대조해 버린다 — 그럴듯하게 틀린 쌍이 시도 가드를
+  우회하기 때문. 응답 스키마는 **아직 미확인** —
   실물 확인은 `report.yml`을 `probe=true`로 실행(`scripts/probe-visitors.mjs`).
   실패는 72시간 음성 캐시라 미승인 상태여도 발행이 느려지지 않는다.
 - **저녁 모음집 요일 슬롯**(사용자 우선순위 상권 > 지역 > 전국): 화·목·토 = 상권(spot_idx) / 월·금 = 지역(도시 종합 + 권역×음식, city_idx) / 수·일 = 전국 음식(roundup_idx). `SLOT_BY_DOW` in make-roundup. 큐레이션·캐러셀은 음식 테마만.
