@@ -240,16 +240,65 @@ async function themeWeights(db, all) {
   const sorted = avgs.map(([, v]) => v).sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)] || 1;
   const byKey = Object.fromEntries(avgs);
+  // 안 해본 테마의 사전 가중치 — 지역 인지도(시군구 방문자 수)로 매긴다.
+  // 없으면 전부 2.0이라 대전 유성(조회 95)과 가로수길이 같은 확률로 뽑힌다.
+  const prior = await visitorPrior(all);
   const weights = all.map((t) =>
-    byKey[t.key] === undefined ? 2.0 : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
+    byKey[t.key] === undefined
+      ? prior?.[t.key] ?? 2.0 // 실측 조회수가 없을 때만 사전 가중치
+      : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
   );
   console.log(
     "테마 가중치(조회수):",
     all
-      .map((t, i) => `${t.key} ${weights[i].toFixed(1)}${byKey[t.key] !== undefined ? `(${Math.round(byKey[t.key])}회)` : "(미시도)"}`)
+      .map((t, i) => {
+        const tag = byKey[t.key] !== undefined
+          ? `(${Math.round(byKey[t.key])}회)`
+          : prior?.[t.key] !== undefined ? "(미시도·방문자)" : "(미시도)";
+        return `${t.key} ${weights[i].toFixed(1)}${tag}`;
+      })
       .join(" · ")
   );
   return { weights, recent };
+}
+
+/**
+ * 시군구 방문자 수 → 미시도 테마의 사전 가중치.
+ * 조회수와 같은 스케일(중앙값 대비 log 배수)로 맞춰, 실측이 쌓이면 자연히 대체되게 한다.
+ * 지역편(mode:"area")에만 적용 — 전국 음식 테마는 지역이 없어 의미가 없다.
+ * 데이터·키·카카오 어느 하나라도 없으면 null → 기존 평탄한 2.0 유지.
+ */
+async function visitorPrior(all) {
+  const areas = all.filter((t) => t.mode === "area");
+  if (areas.length < 2) return null;
+  try {
+    // 키가 없으면 조용히 꺼지는 대신 이유를 남긴다 — 왜 가중치가 안 붙는지 로그로 알 수 있게.
+    if (!process.env.KAKAO_REST_KEY) {
+      console.log("[visitors] KAKAO_REST_KEY 없음 — 지역 해석 불가로 사전 가중치 생략");
+      return null;
+    }
+    const { fetchVisitorStats, resolveThemeRegions, lookupVisitors } = await import("../lib/visitors.ts");
+    const stats = await fetchVisitorStats();
+    if (!stats) return null;
+    const regions = await resolveThemeRegions(areas);
+    // 시군구는 이름만으로 식별되지 않는다(중구·동구는 여러 시에 있다) — 시도까지 맞고
+    // 후보가 하나일 때만 값을 준다. 모호하면 null이라 그 테마는 기존 2.0으로 남는다.
+    const got = areas
+      .map((t) => [t.key, regions[t.key] ? lookupVisitors(stats, regions[t.key]) : null])
+      .filter(([, v]) => typeof v === "number" && v > 0);
+    const ambiguous = areas.length - got.length;
+    if (ambiguous) console.log(`[visitors] 지역 미확정 ${ambiguous}곳 — 해당 테마는 기존 가중치 유지`);
+    if (got.length < 3) return null; // 표본이 적으면 비교가 안 된다
+    const sortedV = got.map(([, v]) => v).sort((a, b) => a - b);
+    const med = sortedV[Math.floor(sortedV.length / 2)] || 1;
+    // 실측(최대 6)보다 좁은 폭(0.8~4.0) — 사전 정보일 뿐이라 실측을 이기면 안 된다
+    return Object.fromEntries(
+      got.map(([k, v]) => [k, Math.max(0.8, Math.min(4, 1 + Math.log2(1 + v / med)))])
+    );
+  } catch (e) {
+    console.error("[visitors] 사전 가중치 실패(무시):", String(e).slice(0, 120));
+    return null;
+  }
 }
 
 /** 가중 랜덤으로 중복 없이 시도 순서를 만든다 (첫 자리는 최근에 쓴 테마 제외) */
@@ -1000,13 +1049,74 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   for (const p of places) {
     photoBufs.push(await fetchPhoto(p.imageUrl, p.name));
   }
+  // 무사진 칸 디자인 확인용 — ROUNDUP_NOPHOTO="2,5" (1-based)면 그 칸의 사진을 버린다.
+  // 시안 렌더 전용이고 실발행에서는 이 값을 주지 않는다.
+  for (const i of String(process.env.ROUNDUP_NOPHOTO || "").split(",").map((x) => Number(x.trim()) - 1)) {
+    if (i >= 0 && i < photoBufs.length) photoBufs[i] = null;
+  }
+
+  /**
+   * 사진이 없는 칸에 넣을 패널. 이 봇의 사진 출처는 공공누리 등 합법 소스뿐이라
+   * 발굴은 됐는데 사진이 없는 식당이 생긴다(Overture 등). 그때 생성 이미지를 넣으면
+   * '이 가게 음식이 이렇게 생겼다'는 없는 사실을 만드는 셈이라(lib/pexels.ts 사칭 방지
+   * 원칙과 같은 이유) 대신 실제로 가진 데이터 — 대표메뉴와 후기·조회수 — 를 보여준다.
+   * 아무 주장도 하지 않으므로 사진이 없다는 사과 문구도 넣지 않는다.
+   */
+  async function noPhotoPanel(p) {
+    // ⚠️ 아래 54px은 기존 칩(지역·후기/YT·백년가게)이 사진 위에 얹히는 자리다 — 비워 둘 것.
+    const CHIP_ZONE = 54;
+    const menu = String(p.menu || "").split(/[,·/]/)[0].trim().slice(0, 14);
+    const label = menu ? "대표메뉴" : "";
+    const raw = menu || coverName(p.name);
+    // 한 줄에 담기지 않으면 두 줄로 나눈다. 예전엔 최소 48px로 고정해서 11자만 넘어도
+    // 패널 밖으로 잘렸다(검토 실측) — 대표메뉴가 없어 상호명으로 폴백할 때 실제로 났다.
+    const MAXW = PH_W - 36;
+    const fit = (t, size) => [...t].length * size * 0.98 <= MAXW;
+    let lines = [raw], fs2 = Math.min(84, Math.floor(MAXW / Math.max(1, [...raw].length * 0.98)));
+    if (fs2 < 44) {
+      lines = wrapLines(raw, Math.ceil([...raw].length / 2), 2);
+      const longest = Math.max(...lines.map((l) => [...l].length), 1);
+      fs2 = Math.min(60, Math.floor(MAXW / (longest * 0.98)));
+    }
+    fs2 = Math.max(26, fs2); // 그래도 안 맞으면 더 줄인다 — 잘리는 것보다 낫다
+    while (lines.some((l) => !fit(l, fs2)) && fs2 > 26) fs2 -= 2;
+    const midY = (PH_H - CHIP_ZONE) / 2 - (lines.length - 1) * fs2 * 0.42;
+    const baseY = midY + fs2 * 0.36; // 첫 줄 베이스라인
+    const svg = `<svg width="${PH_W}" height="${PH_H}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="np" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${dark ? "#2a1a12" : "#fff4ec"}"/>
+          <stop offset="100%" stop-color="${dark ? "#1a0f0a" : "#ffe2d2"}"/>
+        </linearGradient>
+        <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+          <circle cx="3" cy="3" r="1.5" fill="${PAL.accent}" fill-opacity="0.14"/>
+        </pattern>
+      </defs>
+      <rect width="${PH_W}" height="${PH_H}" rx="14" fill="url(#np)"/>
+      <rect width="${PH_W}" height="${PH_H}" rx="14" fill="url(#dots)"/>
+      <rect x="1" y="1" width="${PH_W - 2}" height="${PH_H - 2}" rx="13" fill="none" stroke="${PAL.accent}" stroke-opacity="0.3" stroke-width="2"/>
+      ${label ? `<text x="${PH_W / 2}" y="${midY - fs2 * 0.58}" font-family="${FONT}" font-size="21" font-weight="700" letter-spacing="2" fill="${dark ? "#c9b8b0" : "#a3796a"}" text-anchor="middle">${label}</text>` : ""}
+      ${lines.map((ln, k) => `<text x="${PH_W / 2}" y="${baseY + k * fs2 * 1.12}" font-family="${TFONT}" font-size="${fs2}" font-weight="900" fill="${dark ? "#ffd9c9" : PAL.name}" text-anchor="middle">${esc(ln)}</text>`).join("")}
+      <rect x="${PH_W / 2 - 46}" y="${baseY + (lines.length - 1) * fs2 * 1.12 + 18}" width="92" height="5" rx="2.5" fill="${PAL.accent}" fill-opacity="0.55"/>
+    </svg>`;
+    return sharp(Buffer.from(svg)).png().toBuffer();
+  }
 
   const mask = Buffer.from(
     `<svg width="${PH_W}" height="${PH_H}"><rect x="0" y="0" width="${PH_W}" height="${PH_H}" rx="14" ry="14" fill="#fff"/></svg>`
   );
   const photoLayers = [];
   for (let i = 0; i < places.length; i++) {
-    if (!photoBufs[i]) continue; // 사진 실패 시 텍스트만
+    const { x: px, y: py } = cellPos(i);
+    if (!photoBufs[i]) {
+      // 빈칸으로 두면 카드가 깨져 보인다 — 가진 데이터로 채운다
+      try {
+        photoLayers.push({ input: await noPhotoPanel(places[i]), left: px + 8 + IN, top: py + 6 + IN });
+      } catch (e) {
+        console.error(`무사진 패널 실패(빈칸): ${places[i].name}`, String(e).slice(0, 80));
+      }
+      continue;
+    }
     try {
       const { x, y } = cellPos(i);
       const rounded = await sharp(photoBufs[i])
@@ -1753,6 +1863,14 @@ async function main() {
       .extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 })
       .toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
     fs.writeFileSync("countdown-card-preview.jpg", await composeRankCard(sharpMod, places[0], 1));
+    // 무사진 칸 시안 — 2·5번 칸을 비운 표지를 따로 렌더
+    if (process.env.NOPHOTO_DEMO === "1") {
+      const keep = process.env.ROUNDUP_NOPHOTO;
+      process.env.ROUNDUP_NOPHOTO = "2,5";
+      fs.copyFileSync(await composeReelCover(theme, places, false, null), "roundup-nophoto-preview.jpg");
+      if (keep === undefined) delete process.env.ROUNDUP_NOPHOTO; else process.env.ROUNDUP_NOPHOTO = keep;
+      console.log("오프라인 — roundup-nophoto-preview.jpg 저장 (2·5번 칸 무사진 시안)");
+    }
     // 그리드 릴스 첫 3초 훅 컷 — 실발행과 같은 렌더러로 뽑아 폰에서 그림으로 확인한다
     const hook = await buildHookCut(theme, places, null);
     if (hook) fs.copyFileSync(hook, "roundup-hook-preview.jpg");

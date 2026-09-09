@@ -12,6 +12,8 @@ local.db-*
 # 미리보기·시안 산출물
 roundup-reel-preview.jpg
 roundup-hook-preview.jpg
+roundup-nophoto-preview.jpg
+np-*.jpg
 roundup-reel-preview.mp4
 countdown-*-preview.jpg
 roundup-dry-data.json
