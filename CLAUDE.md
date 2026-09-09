@@ -41,12 +41,22 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 
 **대기 중(사용자 액션 필요)**: 구글 Places(카드 등록, 과금 0 조건) · 인스타 음악 카탈로그 한국 개방(현재 0곡, CC BGM 폴백 중).
 
+**막혀 있는 데이터 소스(재시도만 하면 되는 것 — 2026-09-09 기준)**
+| 소스 | 상태 | 다음 행동 |
+|---|---|---|
+| 광주·경남 레드테이블 | 토큰 유효(엉터리 키는 `30`, 우리 키는 `2`)·경로 정확한데 **서버 `DB_ERROR`** | 며칠 뒤 `/api/rstr?pageNo=1&serviceKey=…` 재호출. 살아나면 서울판 코드 재사용해 붙인다(토큰은 사용자 보유) |
+| 전북 권역별음식점 | 승인 반영 대기(`resultCode 30`) | `openapi.jbfood.go.kr/AreaRestaurantService/getAreaRestaurant` 재시도. `SG_APIM`·`ServiceKey` 둘 다 필요 |
+| 대전 `bigdata.daejeon.go.kr` | 키 없이 2만 곳 조회되나 **사진 없음** | 붙이지 말 것(릴스에 사진 필수). 좌표·메뉴 보강이 필요해지면 그때 |
+
+**게시물 아이디어 벤치마킹(2026-09-09 진행 중)**: 유튜브 API 실수집(제목 공식·길이·채널 유형)과 2026 릴스 포맷 트렌드를 조사 중. 기존 월간 리포트(`benchmark-reports/`)의 제안 중 **표지 타이포 컬러 포인트**만 우리 규칙과 충돌이 없어 후보로 남아 있다(미적용). 인물·역동적 컷 제안은 무출연 제약상 불가, 도발 서사형 훅은 확정 훅 규칙과 충돌이라 배제.
+
 ## 환경변수·시크릿 맵 (어디에 있어야 하는가)
 | 키 | 로컬 .env | GitHub Actions | Vercel | 쓰는 곳 |
 |---|---|---|---|---|
 | TOUR_API_KEY, GEMINI/GROQ, TURSO_*, IG_*, FB_*, YOUTUBE, JEJU, NAVER_* | ✅ | ✅ | 일부(웹훅·크론용) | 발행 파이프라인 |
 | `KAKAO_REST_KEY` | ✅ | 불필요 | ✅ (2026-09-09 등록) | `/go` 지도 링크 전용 |
 | `GITHUB_TOKEN`(PAT, Actions 쓰기) + `GITHUB_REPO` | — | — | ✅ | Vercel 크론 → workflow_dispatch |
+| (키 불필요) | — | — | — | 원주 `data/wonju-food.json`·경주는 커밋된 파일/공용 TourAPI 키라 클라우드에서도 그대로 동작 |
 
 클라우드 세션에는 시크릿이 없다 — 코드 수정·오프라인 렌더·PR·`gh workflow run`까지가 범위이고, 실발행·DB 조회는 로컬 세션이나 Actions를 거친다.
 
