@@ -14,15 +14,23 @@ import os from "node:os";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "reel-"));
 const IG = "https://graph.instagram.com/v23.0";
 const IGID = process.env.IG_USER_ID;
-const FONT = "'Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
+// 서체는 모음집·캐러셀·큐레이션과 같은 것을 쓴다. 예전엔 여기만 Noto였고 나머지는
+// Pretendard/G마켓이라 같은 계정 피드에 두 서체가 섞였다(2026-09-11 확인).
+// ⚠️ 동봉 폰트(assets/fonts)는 러너에 따로 설치해야 한다 — reels.yml 폰트 스텝에
+//    `cp assets/fonts/*.otf ~/.fonts/`가 없으면 조용히 Noto로 폴백해 의미가 없어진다.
+const FONT = "'Pretendard','Noto Sans CJK KR','NanumGothic','Malgun Gothic',sans-serif";
+const TFONT = "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
+const ACCENT = "#e02020"; // 나머지 포맷과 같은 강조색
 
 // 첫 1~2초에 노출되는 훅 문구 — 이탈 방지·끝까지 보기 유도(도달 핵심). 이모지는 SVG에서
 // 깨질 수 있어 이미지엔 넣지 않음(이모지는 캡션에서만).
 const HOOKS = [
   // 사용자 훅 규칙: 서술형 종결(~해요/~세요) 금지 — 명사·감탄·반문으로
-  "안 보면 손해인 집", "현지인만 아는 그 맛", "왜 다들 여기 줄 설까?",
+  // "현지인·줄서는·웨이팅"류는 사용자 확정 규칙으로 금지(유튜브 실측 464건 0.45x —
+  // 가장 흔하고 가장 약함). make-roundup 제목 공식에는 반영됐는데 여기만 남아 있었다.
+  "안 보면 손해인 집", "여기가 원탑?", "이게 실화?",
   "이건 무조건 저장각", "숨은 맛집 발견", "이 맛은 저장각",
-  "끝까지 보면 저장각", "아는 사람만 가는 곳",
+  "끝까지 보면 저장각", "진짜 여기야?",
 ];
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -104,16 +112,25 @@ async function withSubtitle(sharp, frameBuf, text) {
   }
   if (cur) lines.push(cur);
   const use = lines.slice(0, 2);
+  // 둥근 검정 박스를 얹으면 경계선이 보여 "레이어를 덮었다"가 드러난다(V2에서 표지·
+  // 캐러셀·카운트다운 전부 같은 이유로 걷어냈다). 아래로 흐르는 그라데이션으로 대체.
+  // 자막은 읽는 속도가 중요해 가운데 정렬을 유지한다 — 제목류와 달리 눈이 좌우로
+  // 왕복하지 않는 게 낫다.
   const fontSize = 54, lineH = 74;
   const boxH = use.length * lineH + 44;
   const boxY = RH - 430 - boxH;
   const svg = Buffer.from(
     `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
-      <rect x="40" y="${boxY}" width="${RW - 80}" height="${boxH}" rx="26" fill="#000" fill-opacity="0.55"/>
+      <defs><linearGradient id="sub" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0b0503" stop-opacity="0"/>
+        <stop offset="38%" stop-color="#0b0503" stop-opacity="0.66"/>
+        <stop offset="100%" stop-color="#0b0503" stop-opacity="0.74"/>
+      </linearGradient></defs>
+      <rect x="0" y="${boxY - 90}" width="${RW}" height="${boxH + 180}" fill="url(#sub)"/>
       ${use
         .map(
           (l, i) =>
-            `<text x="${RW / 2}" y="${boxY + 34 + (i + 1) * lineH - 18}" font-family="${FONT}" font-size="${fontSize}" font-weight="800" fill="#fff" text-anchor="middle">${esc(l)}</text>`
+            `<text x="${RW / 2}" y="${boxY + 34 + (i + 1) * lineH - 18}" font-family="${FONT}" font-size="${fontSize}" font-weight="700" fill="#ffffff" text-anchor="middle">${esc(l)}</text>`
         )
         .join("")}
     </svg>`
@@ -157,41 +174,74 @@ async function verticalFrameBuffer(sharp, imgPath) {
  * 다크 그라데이션 + 계정 공통 색으로 브랜드 일관성도 얻는다.
  */
 async function designCardBuffer(sharp, { badge, eyebrow, title, sub, note }) {
-  const titleLines = wrapText(title, 8, 2);
-  const tSize = titleLines.length >= 2 ? 116 : 132;
-  const tLineH = Math.round(tSize * 1.22);
-  const baseY = 760;
+  // V2 어휘 — 나머지 세 포맷과 같게. 가운데 정렬·빨간 원형 배지·주황 밑줄을 버리고
+  // 왼쪽 정렬 + 빨간 세로 바. 색은 흰·검정·빨강 하나.
+  const PADX = 76;
+  const AVAIL = RW - PADX - 34 - 40; // 왼쪽 여백 + 바 + 오른쪽 여유
+  // ⚠️ 예전엔 wrapText(공백 기준) + 고정 132px이라 띄어쓰기 없는 상호명이 화면 밖으로
+  //    잘리고 윗줄과 겹쳤다. 글자 단위 줄바꿈 + 가장 긴 줄 기준 크기로 고친다.
+  const titleLines = wrapHard(title, 11, 2);
+  const tSize = fitSize(titleLines, 118, AVAIL);
+  const tLineH = Math.round(tSize * 1.2);
+  // 배지도 블록 높이에 넣는다 — 안 넣으면 eyebrow 위로 겹쳐 올라간다(첫 시안에서 그랬다).
+  // 실발행 호출부는 badge를 넘기지 않지만 인자가 살아 있는 한 맞춰 둔다.
+  const badgeH = badge ? 104 : 0;
+  const blockH =
+    badgeH + (eyebrow ? 62 : 0) + titleLines.length * tLineH + (sub ? 76 : 0) + (note ? 62 : 0);
+  const top = Math.round((RH - blockH) / 2);
+  const badgeY = top + 86;
+  const eyebrowY = top + badgeH + 44;
+  const t0 = top + badgeH + (eyebrow ? 62 : 0) + Math.round(tSize * 0.82);
+  const titleTop = t0 - Math.round(tSize * 0.8);
+  const afterTitle = t0 + (titleLines.length - 1) * tLineH;
+
   const svg = Buffer.from(
     `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#17110d"/><stop offset="100%" stop-color="#3d2418"/>
+          <stop offset="0%" stop-color="#140b07"/><stop offset="100%" stop-color="#291812"/>
         </linearGradient>
       </defs>
       <rect width="${RW}" height="${RH}" fill="url(#bg)"/>
-      ${badge
-        ? `<circle cx="${RW / 2}" cy="470" r="86" fill="#e23b3b"/>
-           <text x="${RW / 2}" y="502" font-family="${FONT}" font-size="86" font-weight="900" fill="#fff" text-anchor="middle">${esc(badge)}</text>`
-        : ""}
-      ${eyebrow
-        ? `<text x="${RW / 2}" y="640" font-family="${FONT}" font-size="50" font-weight="700" fill="#ffb86b" text-anchor="middle">${esc(eyebrow)}</text>`
-        : ""}
+      ${badge ? `<text x="${PADX}" y="${badgeY}" font-family="${TFONT}" font-size="92" font-weight="900" fill="#ffffff" fill-opacity="0.9">${esc(badge)}</text>` : ""}
+      ${eyebrow ? `<text x="${PADX + 36}" y="${eyebrowY}" font-family="${FONT}" font-size="38" font-weight="700" fill="#ffffff" fill-opacity="0.6">${esc(eyebrow)}</text>` : ""}
+      <rect x="${PADX}" y="${titleTop}" width="9" height="${titleLines.length * tLineH}" fill="${ACCENT}"/>
       ${titleLines
         .map(
           (l, i) =>
-            `<text x="${RW / 2}" y="${baseY + i * tLineH}" font-family="${FONT}" font-size="${tSize}" font-weight="900" fill="#ffffff" text-anchor="middle">${esc(l)}</text>`
+            `<text x="${PADX + 34}" y="${t0 + i * tLineH}" font-family="${TFONT}" font-size="${tSize}" font-weight="900" fill="#ffffff" letter-spacing="-2">${esc(l)}</text>`
         )
         .join("")}
-      <rect x="${RW / 2 - 300}" y="${baseY + titleLines.length * tLineH - 30}" width="600" height="4" fill="#ffb86b"/>
-      ${sub
-        ? `<text x="${RW / 2}" y="${baseY + titleLines.length * tLineH + 80}" font-family="${FONT}" font-size="46" font-weight="600" fill="#e6ded8" text-anchor="middle">${esc(sub)}</text>`
-        : ""}
-      ${note
-        ? `<text x="${RW / 2}" y="${baseY + titleLines.length * tLineH + 150}" font-family="${FONT}" font-size="44" font-weight="600" fill="#b9aca4" text-anchor="middle">${esc(note)}</text>`
-        : ""}
+      ${sub ? `<text x="${PADX + 36}" y="${afterTitle + 74}" font-family="${FONT}" font-size="42" font-weight="600" fill="#ffffff" fill-opacity="0.84">${esc(sub)}</text>` : ""}
+      ${note ? `<text x="${PADX + 36}" y="${afterTitle + (sub ? 136 : 74)}" font-family="${FONT}" font-size="36" font-weight="600" fill="#ffffff" fill-opacity="0.5">${esc(note)}</text>` : ""}
     </svg>`
   );
   return sharp(svg).jpeg({ quality: 92 }).toBuffer();
+}
+
+/**
+ * 왼쪽 정렬 텍스트가 화면 밖으로 나가지 않게 가장 긴 줄 기준으로 크기를 줄인다.
+ * 고정 크기를 쓰면 긴 상호명에서 잘린다 — 디자인 카드에서 실제로 그랬다
+ * ("영동밀면&돼지국밥" 9글자 x 132px = 1188px > 1080px).
+ */
+function fitSize(lines, cap, avail) {
+  const max = Math.max(...lines.map((l) => [...l].length), 1);
+  return Math.min(cap, Math.floor(avail / max));
+}
+
+/**
+ * 공백이 없어도 줄을 나눈다.
+ * wrapText는 공백 기준이라 "영동밀면&돼지국밥"처럼 띄어쓰기 없는 상호명을 한 줄로
+ * 남긴다 — 한국 상호는 대개 그렇다. 어절로 먼저 나눠 보고, 그래도 기준보다 길면
+ * 글자 단위로 자른다.
+ */
+function wrapHard(text, per, maxLines) {
+  const byWord = wrapText(text, per, maxLines);
+  if (byWord.length && byWord.every((l) => [...l].length <= per)) return byWord;
+  const ch = [...String(text ?? "")];
+  const out = [];
+  for (let i = 0; i < ch.length && out.length < maxLines; i += per) out.push(ch.slice(i, i + per).join(""));
+  return out;
 }
 
 /** 글자수 기준 줄바꿈 */
@@ -220,52 +270,38 @@ async function composeHookCard(sharp, imgPath, hookText, subText) {
   //    → 사진은 선명하게 두고, 글씨는 상단 배너로 얹어 음식을 가리지 않게 한다.
   const bg = await verticalFrameBuffer(sharp, imgPath); // 선명한 음식 프레임(톤 프리셋 포함)
 
-  const text = String(hookText || "").trim();
-  const words = text.split(/\s+/);
-  const lines = [];
-  let cur = "";
-  for (const w of words) {
-    if ((cur + " " + w).trim().length > 13 && cur) { lines.push(cur.trim()); cur = w; }
-    else cur = (cur + " " + w).trim();
-  }
-  if (cur) lines.push(cur);
-  const use = lines.slice(0, 2);
-  const size = use.length === 2 ? 76 : 84;
-  const lineH = Math.round(size * 1.26);
+  // V2 어휘 — 가운데 정렬 + 검정 외곽선(자동 자막 기본값)을 버리고 왼쪽 정렬 + 빨간
+  // 세로 바로. 글자 자리는 여전히 상단이다: 이 계정은 "첫 화면에 음식이 안 보여 0.5초
+  // 만에 스킵당한다"는 실측으로 이미 한 번 위치를 옮겼고, 아래로 내리면 음식을 다시
+  // 가린다. 대비는 외곽선이 아니라 상단 그라데이션으로만 만든다.
+  const PADX = 76;
+  const AVAIL = W - PADX - 34 - 40;
+  const use = wrapHard(String(hookText || "").trim(), 13, 2);
+  const size = fitSize(use, use.length === 2 ? 78 : 88, AVAIL);
+  const lineH = Math.round(size * 1.22);
   const topY = 250; // 인스타 상단 UI를 피한 위치
-  const boxH = use.length * lineH + 52;
+  const t0 = topY + Math.round(size * 0.82);
+  const subY = t0 + (use.length - 1) * lineH + 66;
 
   const svg = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <!-- 글자 가독성용 그라데이션(사진을 가리지 않는 상단만) -->
       <defs><linearGradient id="sh" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000" stop-opacity="0.62"/>
-        <stop offset="100%" stop-color="#000" stop-opacity="0"/>
+        <stop offset="0%" stop-color="#0b0503" stop-opacity="0.74"/>
+        <stop offset="70%" stop-color="#0b0503" stop-opacity="0.34"/>
+        <stop offset="100%" stop-color="#0b0503" stop-opacity="0"/>
       </linearGradient></defs>
-      <rect x="0" y="0" width="${W}" height="${topY + boxH + 60}" fill="url(#sh)"/>
+      <rect x="0" y="0" width="${W}" height="${subY + 120}" fill="url(#sh)"/>
+      <rect x="${PADX}" y="${t0 - Math.round(size * 0.8)}" width="9" height="${use.length * lineH}" fill="${ACCENT}"/>
       ${use
         .map(
           (l, i) =>
-            `<text x="${W / 2}" y="${topY + (i + 1) * lineH}" font-family="${FONT}" font-size="${size}" font-weight="900" fill="#ffffff" text-anchor="middle" stroke="#000" stroke-width="7" paint-order="stroke">${esc(l)}</text>`
+            `<text x="${PADX + 34}" y="${t0 + i * lineH}" font-family="${TFONT}" font-size="${size}" font-weight="900" fill="#ffffff" letter-spacing="-2">${esc(l)}</text>`
         )
         .join("")}
-      ${subText ? `<text x="${W / 2}" y="${topY + use.length * lineH + 62}" font-family="${FONT}" font-size="42" font-weight="700" fill="#ffd9a0" text-anchor="middle" stroke="#000" stroke-width="5" paint-order="stroke">${esc(subText)}</text>` : ""}
+      ${subText ? `<text x="${PADX + 36}" y="${subY}" font-family="${FONT}" font-size="40" font-weight="600" fill="#ffffff" fill-opacity="0.8">${esc(subText)}</text>` : ""}
     </svg>`
   );
   return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
-}
-
-/** (구) 사진 위 작은 배너형 훅 — 텍스트 카드로 대체됨 */
-async function composeHook(sharp, imgPath, hook) {
-  const W = RW, H = RH;
-  const base = await verticalFrameBuffer(sharp, imgPath); // 왜곡 없는 세로 프레임 재사용
-  const svg = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <rect x="45" y="235" width="990" height="160" rx="30" fill="#000" fill-opacity="0.60"/>
-      <text x="${W / 2}" y="340" font-family="${FONT}" font-size="60" font-weight="900" fill="#fff" text-anchor="middle">${esc(hook)}</text>
-    </svg>`
-  );
-  return sharp(base).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 90 }).toBuffer();
 }
 
 function sh(cmd, args) {
