@@ -1692,7 +1692,73 @@ function coverName(raw) {
  * 저장·재열람에 강하고 배포 풀도 별개다. classic 그리드의 검증된 문법
  * (흰 카드·빨간 포인트·개조식 불릿)을 카드 한 장 규격으로 옮긴 것.
  */
+/**
+ * V2 캐러셀 카드 — 표지와 같은 어휘로 맞춘다(2026-09-11 사용자 지시).
+ *
+ * 표지만 V2로 올렸더니 1장 넘기는 순간 디자인이 바뀌었다. 캐러셀은 연속으로 스와이프하는
+ * 포맷이라 그 불일치가 릴스보다 훨씬 눈에 띈다 — 손대기 전보다 나쁜 상태였다.
+ *
+ * 옛 카드에서 걷어내는 것: 빨간 알약 순위 배지 · 빨간 상호명 · 회색 알약 지역 칩 ·
+ * 빨간 불릿 3줄 · 크림색 바탕. 색은 표지와 같이 흰·검정·빨강 하나로 줄인다.
+ *
+ * 설명은 남기되 **불릿을 떼고 2줄로 줄인다.** 표지에서 불릿을 통째로 버린 건 8초에
+ * 18줄이 한꺼번에 쏟아져서였다. 카드는 스와이프하며 한 장씩 읽는 화면이라 설명이
+ * 실제로 쓸모가 있다 — 문제는 '설명이 있다'가 아니라 '목록처럼 보인다'였다.
+ *
+ * 사진은 원본 비율을 지켜 띠로 얹는다. 카드를 1080x1350 풀블리드로 채우면 3:2 원본에서
+ * 53%만 남는데(훅 컷의 38%와 같은 문제), 옛 카드의 1080x780 띠는 92%를 남기고 있었다 —
+ * 그 점은 옛 레이아웃이 옳았으므로 가져간다.
+ */
+async function composeCarouselCardV2(sharp, place, idx) {
+  const W = 1080, H = 1350;
+  const buf = await fetchPhoto(place.imageUrl, place.name);
+  if (!buf) throw new Error("카드 사진 실패");
+  const meta = await sharp(buf).metadata();
+  // 밴드 높이: 원본 비율을 따르되 820~900 사이로 맞춘다.
+  // 3:2 원본의 자연 높이는 720인데 그대로 두면 카드 아래 360px(27%)이 남아 비어 보였다
+  // (첫 시안에서 실제로 그랬다). 820으로 올려도 원본의 88%가 살아 풀블리드(53%)와는
+  // 비교가 안 되고, 남는 여백은 210px로 줄어 '의도한 여백'으로 읽힌다.
+  const natural = Math.round(W * (meta.height ?? 2) / (meta.width ?? 3));
+  const bandH = Math.min(900, Math.max(820, natural));
+
+  // 남는 아래쪽은 '흐린 사진'이 아니라 '어두운 바탕'으로 읽혀야 한다 — 어중간하게 밝으면
+  // 뭉갠 사진이 그대로 보여 지저분하다. 색감만 이어받을 정도로 떨어뜨린다.
+  const base = await sharp(buf).resize(W, H, { fit: "cover" }).blur(55)
+    .modulate({ brightness: 0.18, saturation: 0.8 }).jpeg({ quality: 84 }).toBuffer();
+  const band = await sharp(buf).resize(W, bandH, { fit: "cover", position: "attention" })
+    .modulate({ saturation: 1.08 }).jpeg({ quality: 90 }).toBuffer();
+
+  const nm = coverName(place.name);
+  const ns = nm.length <= 8 ? 66 : nm.length <= 11 ? 55 : 45;
+  // 불릿 3줄 → 설명 2줄. 점 없이, 흐린 흰 글자로 — 목록이 아니라 설명문으로 읽히게.
+  const dl = (place.descLines?.length ? place.descLines : wrapLines(place.desc ?? "", 26, 2)).slice(0, 2);
+  const meta2 = [place.region, place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
+    .filter(Boolean).join("  ·  ");
+  const TY = bandH + 92; // 상호명 기준선
+
+  const svg = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="cn" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0b0503" stop-opacity="0.5"/>
+        <stop offset="100%" stop-color="#0b0503" stop-opacity="0"/>
+      </linearGradient></defs>
+      <rect x="0" y="0" width="${W}" height="190" fill="url(#cn)"/>
+      <text x="46" y="116" font-family="${TFONT}" font-size="86" font-weight="900" fill="#ffffff">${idx}</text>
+      <rect x="46" y="${TY - 52}" width="8" height="62" fill="#e02020"/>
+      <text x="78" y="${TY}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+      <text x="80" y="${TY + 50}" font-family="${FONT}" font-size="31" font-weight="600" fill="#ffffff" fill-opacity="0.66">${esc(meta2)}</text>
+      ${dl.map((ln, k) => `<text x="48" y="${TY + 134 + k * 54}" font-family="${FONT}" font-size="36" fill="#ffffff" fill-opacity="0.86">${esc(ln)}</text>`).join("")}
+      <text x="${W - 44}" y="${H - 34}" font-family="${FONT}" font-size="25" fill="#ffffff" fill-opacity="0.38" text-anchor="end">@${HANDLE}</text>
+    </svg>`
+  );
+  return sharp(base)
+    .composite([{ input: band, left: 0, top: 0 }, { input: svg, left: 0, top: 0 }])
+    .jpeg({ quality: 90 })
+    .toBuffer();
+}
+
 async function composeCarouselCard(sharp, place, idx) {
+  if (COVER_V2) return composeCarouselCardV2(sharp, place, idx);
   const W = 1080, H = 1350, PH_H = 780;
   const cardBuf = await fetchPhoto(place.imageUrl, place.name);
   if (!cardBuf) throw new Error("카드 사진 실패");
@@ -1791,43 +1857,6 @@ function buildPunchyTitle(theme, n) {
 // ===== 카운트다운 릴스용 카드 (한 곳씩 크게 공개 → 1위 보려고 끝까지 봄) =====
 
 const RW = 1080, RH = 1920;
-
-/**
- * 도장깨기 체크리스트 카드 (1080x1920, 콘텐츠는 4:5 안전영역 안).
- * 저장·재열람을 유도하는 마지막 카드 — "저장할 이유"를 체크박스로 시각화한다.
- * (2026 트렌드: 저장·DM공유가 도달의 핵심 신호. 리스트형 저장 문화 정착)
- */
-async function composeChecklistCard(sharp, theme, places) {
-  const W = 1080, H = 1920, CT = 285, CH = 1350;
-  const f = theme.food || theme.keyword;
-  const rowH = Math.min(150, Math.floor((CH - 420) / places.length));
-  const rows = places
-    .map((p, i) => {
-      const y = CT + 320 + i * rowH;
-      const nm = coverName(p.name);
-      return `
-      <rect x="90" y="${y}" width="64" height="64" rx="14" fill="none" stroke="#d92121" stroke-width="5"/>
-      <text x="186" y="${y + 46}" font-family="${FONT}" font-size="40" font-weight="800" fill="#2b1d18">${i + 1}. ${esc(nm)}</text>
-      <text x="${W - 90}" y="${y + 44}" font-family="${FONT}" font-size="28" font-weight="700" fill="#8a5a44" text-anchor="end">${esc(p.region)}</text>`;
-    })
-    .join("");
-  const svg = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <rect width="${W}" height="${H}" fill="#fdf8f3"/>
-      <rect x="0" y="0" width="${W}" height="${CT}" fill="#f3e8df"/>
-      <rect x="0" y="${CT + CH}" width="${W}" height="${H - CT - CH}" fill="#f3e8df"/>
-      <text x="${W / 2}" y="${CT + 120}" font-family="${TFONT}" font-size="76" font-weight="900" fill="#b81414" text-anchor="middle">📌 도장깨기 리스트</text>
-      <text x="${W / 2}" y="${CT + 190}" font-family="${FONT}" font-size="40" font-weight="700" fill="#6b5348" text-anchor="middle">${esc(f)} 편 — 다녀온 곳을 체크하세요</text>
-      <line x1="90" y1="${CT + 232}" x2="${W - 90}" y2="${CT + 232}" stroke="#e3d3c8" stroke-width="3"/>
-      ${rows}
-      <text x="${W / 2}" y="${CT + CH - 96}" font-family="${FONT}" font-size="36" font-weight="800" fill="#2b1d18" text-anchor="middle">저장해두고 하나씩 ✔ 도장 깨기</text>
-      <text x="${W / 2}" y="${CT + CH - 40}" font-family="${FONT}" font-size="26" fill="#a08a7d" text-anchor="middle">전체 주소·지도는 캡션과 댓글 '지도'에서 · @${HANDLE}</text>
-    </svg>`
-  );
-  const out = path.join(TMP, "checklist.jpg");
-  await sharp(svg).jpeg({ quality: 90 }).toFile(out);
-  return out;
-}
 
 /**
  * 페이지형 릴스 프레임: 캐러셀 카드(1080x1350)를 9:16 캔버스 가운데(y=285)에 얹고,
@@ -2246,9 +2275,6 @@ async function main() {
     for (let i = 0; i < places.length; i++) {
       fs.writeFileSync(`carousel-preview-${pad(i + 2)}-card.jpg`, await composeCarouselCard(sharpMod, places[i], i + 1));
     }
-    await sharpMod(await composeChecklistCard(sharpMod, theme, places))
-      .extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 })
-      .toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
     fs.writeFileSync("countdown-card-preview.jpg", await composeRankCard(sharpMod, places[0], 1));
     // 무사진 칸 시안 — 2·5번 칸을 비운 표지를 따로 렌더
     if (process.env.NOPHOTO_DEMO === "1") {
@@ -2270,7 +2296,7 @@ async function main() {
       );
       console.log(`오프라인 릴스 렌더 — roundup-reel-preview.mp4 (${total}초)`);
     }
-    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-hook-preview.jpg, roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 2)}.jpg, countdown-card-preview.jpg`);
+    console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-hook-preview.jpg, roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 1)}.jpg, countdown-card-preview.jpg`);
     return;
   }
 
@@ -2657,17 +2683,14 @@ async function main() {
         }
       }
       if (STYLE === "carousel") {
-        // 실발행과 동일한 전체 장 구성 미리보기 — 표지(4:5 크롭) + 식당 카드들 + 체크리스트
+        // 실발행과 동일한 전체 장 구성 미리보기 — 표지(4:5 크롭) + 식당 카드들
         const pad = (n) => String(n).padStart(2, "0");
         await sharpMod(reelCover).extract({ left: 0, top: 285, width: 1080, height: 1350 })
           .jpeg({ quality: 90 }).toFile("carousel-preview-01-cover.jpg");
         for (let i = 0; i < places.length; i++) {
           fs.writeFileSync(`carousel-preview-${pad(i + 2)}-card.jpg`, await composeCarouselCard(sharpMod, places[i], i + 1));
         }
-        const cl = await composeChecklistCard(sharpMod, theme, places);
-        await sharpMod(cl).extract({ left: 0, top: 285, width: 1080, height: 1350 })
-          .jpeg({ quality: 90 }).toFile(`carousel-preview-${pad(places.length + 2)}-checklist.jpg`);
-        console.log(`DRY — carousel-preview-01~${pad(places.length + 2)}.jpg 저장 (실발행과 동일 구성)`);
+        console.log(`DRY — carousel-preview-01~${pad(places.length + 1)}.jpg 저장 (실발행과 동일 구성)`);
       }
       // 디자인 시안을 같은 데이터로 비교하려면 수집 결과가 필요하다(재수집하면 식당이 바뀜)
       fs.writeFileSync("roundup-dry-data.json", JSON.stringify({ theme, places }, null, 1));
@@ -2730,15 +2753,9 @@ async function main() {
       }
     }
     if (imgs.length < 4) throw new Error("캐러셀 카드 부족");
-    // 마지막 장 = 도장깨기 체크리스트 (저장 유도, 4:5 크롭)
-    try {
-      const cl = await composeChecklistCard(sharpMod, theme, places);
-      const cl45 = path.join(TMP, "car_checklist.jpg");
-      await sharpMod(cl).extract({ left: 0, top: 285, width: 1080, height: 1350 }).jpeg({ quality: 90 }).toFile(cl45);
-      imgs.push(cl45);
-    } catch (e) {
-      console.error("체크리스트 장 실패(제외):", String(e).slice(0, 80));
-    }
+    // 도장깨기 체크리스트 장은 제거됨 (2026-09-11 사용자 지시 "도장깨기 리스트 그건 빼줘").
+    // 릴스에서는 2026-09-02에 이미 빠졌고("너무 이상하다"), 캐러셀 마지막 장이 마지막
+    // 거처였다. 이제 캐러셀은 표지 + 식당 카드로만 끝난다.
     const urls = [];
     for (const f of imgs) urls.push(await uploadPublic(f));
     let carCaption = caption;
@@ -2893,7 +2910,7 @@ async function main() {
     // 이탈한다. 첫 3초는 음식 풀샷으로 붙잡고, 정보(6곳 그리드)는 그 뒤에 준다.
     // 장면 전환은 1회뿐 — 줌인 등 모션 금지 규칙은 그대로다.
     // 체크리스트 2컷은 사용자 피드백("너무 이상하다", 2026-09-02)으로 제외 —
-    // 체크리스트 카드는 캐러셀 마지막 장에만 남는다.
+    // 2026-09-11에 캐러셀 마지막 장에서도 빠져 이제 어디에도 쓰지 않는다.
     const total = await renderPagesReel(
       [{ path: hookCut, sec: HOOK_SEC }, { path: reelCover, sec: 8 - HOOK_SEC }],
       bgm,
