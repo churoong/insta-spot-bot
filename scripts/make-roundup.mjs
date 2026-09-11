@@ -1976,7 +1976,116 @@ async function bgFrame(sharp, imgUrl, brightness = 0.5, blur = 0) {
 }
 
 /** 인트로 카드 — "부산 돼지국밥 TOP 8" 같은 제목을 크게 */
+/**
+ * V2 공통 배경 — 사진을 자르지 않고 띠로 얹고, 나머지는 그 사진을 뭉갠 어두운 바탕으로 채운다.
+ *
+ * 우리 사진 소스는 거의 전부 3:2 가로다. 9:16을 풀블리드로 채우면 원본의 38%만 남고,
+ * 버릴 62%를 sharp attention 크롭이 '엔트로피가 높은 쪽'으로 정하는 바람에 주제와 다른
+ * 음식이 화면을 차지한 적이 있다(9/9 국밥 편 첫 3초에 만두). 훅 컷·캐러셀 카드가 이미
+ * 같은 처리를 쓰고 있어 카운트다운까지 셋이 같아졌으므로 여기로 모은다.
+ *
+ * 바탕은 '흐린 사진'이 아니라 '어두운 바탕'으로 읽힐 만큼 떨어뜨린다 — 어중간하면
+ * 뭉갠 사진이 그대로 보여 지저분하다(캐러셀 첫 시안에서 실제로 그랬다).
+ */
+async function bandOnDark(sharp, buf, W, H, bandH, bandTop) {
+  const base = await sharp(buf).resize(W, H, { fit: "cover" }).blur(50)
+    .modulate({ brightness: 0.2, saturation: 0.82 }).jpeg({ quality: 84 }).toBuffer();
+  const band = await sharp(buf).resize(W, bandH, { fit: "cover", position: "attention" })
+    .modulate({ saturation: 1.08 }).jpeg({ quality: 92 }).toBuffer();
+  return sharp(base)
+    .composite([{ input: band, left: 0, top: Math.max(0, Math.round(bandTop)) }])
+    .jpeg({ quality: 92 }).toBuffer();
+}
+
+/** 사진의 자연 높이(폭 1080 기준)를 clamp — 밴드 높이 계산용 */
+async function bandHeight(sharp, buf, W, lo, hi) {
+  const m = await sharp(buf).metadata();
+  return Math.min(hi, Math.max(lo, Math.round(W * (m.height ?? 2) / (m.width ?? 3))));
+}
+
+/** V2 카운트다운 인트로 — 훅 컷과 같은 밴드형. 가운데 정렬·외곽선을 버리고 왼쪽 정렬로. */
+async function composeIntroCardV2(sharp, theme, places, title) {
+  const src = places.find((p) => p.foodPicked) ?? places[0];
+  const buf = await fetchPhoto(src.imageUrl, src.name);
+  if (!buf) throw new Error("인트로 배경 사진 실패");
+  const CT = 285, CH = 1350;
+  const bandH = await bandHeight(sharp, buf, RW, 720, 1000);
+
+  // ⚠️ 왼쪽 정렬은 가운데 정렬보다 가용 폭이 좁다(왼쪽 여백 110 + 오른쪽 여유 40).
+  //    크기를 고정해 두면 긴 제목이 화면 밖으로 나간다 — 첫 시안에서 실제로 잘렸다.
+  //    가장 긴 줄을 기준으로 크기를 정한다.
+  const lines = wrapLines(title, 10, 3);
+  const maxLen = Math.max(...lines.map((l) => [...l].length), 1);
+  const size = Math.min(lines.length >= 3 ? 96 : 116, Math.floor((RW - 150) / maxLen));
+  const lineH = Math.round(size * 1.2);
+  const titleH = lines.length * lineH;
+  const GAP = 74;
+  const bandTop = CT + Math.round((CH - (bandH + GAP + titleH + 56)) / 2);
+  const t0 = bandTop + bandH + GAP + Math.round(size * 0.82);
+
+  const bg = await bandOnDark(sharp, buf, RW, RH, bandH, bandTop);
+  const PADX = 76;
+  const svg = Buffer.from(
+    `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="${PADX}" y="${t0 - Math.round(size * 0.8)}" width="9" height="${titleH}" fill="#e02020"/>
+      ${lines.map((l, i) =>
+        `<text x="${PADX + 34}" y="${t0 + i * lineH}" font-family="${TFONT}" font-size="${size}" font-weight="900" fill="#ffffff" letter-spacing="-2">${esc(l)}</text>`
+      ).join("")}
+      <text x="${PADX + 36}" y="${t0 + (lines.length - 1) * lineH + 66}" font-family="${FONT}" font-size="38" font-weight="600" fill="#ffffff" fill-opacity="0.6">끝까지 보고 저장하세요</text>
+    </svg>`
+  );
+  return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
+}
+
+/** V2 카운트다운 순위 카드 — 캐러셀 카드와 같은 어휘(원형 배지·외곽선·가운데 정렬 제거). */
+async function composeRankCardV2(sharp, place, rank) {
+  const buf = await fetchPhoto(place.imageUrl, place.name);
+  if (!buf) throw new Error("순위 카드 사진 실패");
+  const CT = 285, CH = 1350;
+  const bandH = await bandHeight(sharp, buf, RW, 900, 1100);
+
+  const nm = coverName(place.name);
+  const nameLines = wrapLines(nm, 11, 2);
+  // 인트로와 같은 이유로 가장 긴 줄에 맞춰 줄인다 — 왼쪽 정렬은 폭이 좁다.
+  const nameMax = Math.max(...nameLines.map((l) => [...l].length), 1);
+  const nameSize = Math.min(nameLines.length === 2 ? 72 : 88, Math.floor((RW - 150) / nameMax));
+  const nameLH = Math.round(nameSize * 1.16);
+  const descLines = (place.descLines?.length
+    ? place.descLines.slice(0, 2)
+    : wrapLines(place.desc || "", 20, 2)).slice(0, 2);
+
+  const textH = nameLines.length * nameLH + 58 + descLines.length * 56;
+  const GAP = 66;
+  const bandTop = CT + Math.round((CH - (bandH + GAP + textH)) / 2);
+  const n0 = bandTop + bandH + GAP + Math.round(nameSize * 0.82);
+
+  const bg = await bandOnDark(sharp, buf, RW, RH, bandH, bandTop);
+  const PADX = 76;
+  const metaLine = [place.region, place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
+    .filter(Boolean).join("  ·  ");
+  const svg = Buffer.from(
+    `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="rn" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0b0503" stop-opacity="0.55"/>
+        <stop offset="100%" stop-color="#0b0503" stop-opacity="0"/>
+      </linearGradient></defs>
+      <rect x="0" y="${bandTop}" width="${RW}" height="230" fill="url(#rn)"/>
+      <text x="${PADX}" y="${bandTop + 152}" font-family="${TFONT}" font-size="150" font-weight="900" fill="#ffffff">${rank}</text>
+      <rect x="${PADX}" y="${n0 - Math.round(nameSize * 0.8)}" width="9" height="${nameLines.length * nameLH}" fill="#e02020"/>
+      ${nameLines.map((l, i) =>
+        `<text x="${PADX + 34}" y="${n0 + i * nameLH}" font-family="${TFONT}" font-size="${nameSize}" font-weight="800" fill="#ffffff">${esc(l)}</text>`
+      ).join("")}
+      <text x="${PADX + 36}" y="${n0 + (nameLines.length - 1) * nameLH + 58}" font-family="${FONT}" font-size="38" font-weight="600" fill="#ffffff" fill-opacity="0.66">${esc(metaLine)}</text>
+      ${descLines.map((l, i) =>
+        `<text x="${PADX}" y="${n0 + (nameLines.length - 1) * nameLH + 134 + i * 56}" font-family="${FONT}" font-size="42" fill="#ffffff" fill-opacity="0.86">${esc(l)}</text>`
+      ).join("")}
+    </svg>`
+  );
+  return sharp(bg).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 92 }).toBuffer();
+}
+
 async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
+  if (COVER_V2) return composeIntroCardV2(sharp, theme, places, title);
   const bg = await bgFrame(sharp, (places.find((p) => p.foodPicked) ?? places[0]).imageUrl, 0.5, 8);
   const lines = wrapLines(title, 10, 3);
   const size = lines.length >= 3 ? 100 : lines.length === 2 ? 116 : 128;
@@ -1998,6 +2107,7 @@ async function composeIntroCard(sharp, theme, places, title, rankBasis = "") {
 
 /** 순위 카드 — 큰 순위 숫자 + 상호명 + 지역 + 한줄평 */
 async function composeRankCard(sharp, place, rank) {
+  if (COVER_V2) return composeRankCardV2(sharp, place, rank);
   // 0.62였을 때 사진이 탁해 보인다는 피드백(9/3) — 사진은 살리고 가독성은 하단 박스·외곽선으로
   const bg = await bgFrame(sharp, place.imageUrl, 0.85, 0);
   const nameLines = wrapLines(place.name, 11, 2);
