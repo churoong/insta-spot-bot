@@ -45,6 +45,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg fonts-nanum fonts-noto-cjk
+          # 동봉 폰트(Pretendard·G마켓 산스) — make-reel.mjs가 나머지 포맷과 같은 서체를
+          # 쓰므로 여기도 설치해야 한다. 없으면 조용히 Noto로 폴백해 서체가 어긋난다.
+          mkdir -p ~/.fonts && cp assets/fonts/*.otf ~/.fonts/ && fc-cache -f > /dev/null
 
       - uses: actions/setup-node@v4
         if: steps.gate.outputs.go == '1'
