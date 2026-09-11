@@ -1057,7 +1057,9 @@ JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개
  * 배경만 음식 사진(어둡고 따뜻한 오버레이)으로 먹음직스럽게. 릴스 규격에 딱 맞음.
  */
 async function composeReelCover(theme, places, dark = false, bgUrl = null) {
-  if (COVER_V2) return composeReelCoverV2(theme, places, bgUrl);
+  // V2에는 다크 배색이 없다. dark는 표지 순환(COVER_STYLES)에서 빠져 있어 실발행에서는
+  // 오지 않지만, 누가 되살리면 조용히 다른 디자인이 나가는 대신 옛 렌더러로 보낸다.
+  if (COVER_V2 && !dark) return composeReelCoverV2(theme, places, bgUrl);
   // dark=true면 흰 카드 대신 반투명 다크 카드. 어느 쪽이 유입이 좋은지 비교하려고
   // 두 배색을 같은 레이아웃으로 유지한다(레이아웃 차이가 섞이면 비교가 안 된다).
   const PAL = dark
@@ -1289,7 +1291,7 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
- * V2 시안 (COVER_V2=1) — "누가 봐도 AI가 만든 것 같다"(2026-09-11 사용자)에 대한 답.
+ * V2 표지 (기본값, 2026-09-11 사용자 승인) — "누가 봐도 AI가 만든 것 같다"에 대한 답.
  *
  * 기존 표지가 그렇게 보이는 이유를 렌더 결과에서 짚으면:
  *   1) 한 화면에 텍스트 블록 40개 이상 — 6칸 × (순위·지역칩·후기칩·인증칩·상호·불릿 3줄).
@@ -1306,9 +1308,10 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
  *   - 훅 컷은 한 가지만 말한다(음식명 + 반문). 지역 나열·저장 문구·핸들은 표지에 이미 있다.
  *   - 그리드는 불릿을 버리고 사진 비중을 0.55 → 0.72로 올린다.
  *
- * 실발행 경로는 건드리지 않는다 — COVER_V2=1일 때만 이쪽으로 간다.
+ * 옛 표지(불릿·칩·모자이크 띠)는 COVER_V1=1로 되돌릴 수 있게 남겨 둔다 — 라이브 계정이라
+ * 발행 결과가 나쁘면 코드를 고치지 않고 워크플로 env 한 줄로 되돌릴 수 있어야 한다.
  * ───────────────────────────────────────────────────────────────────────── */
-const COVER_V2 = process.env.COVER_V2 === "1";
+const COVER_V2 = process.env.COVER_V1 !== "1";
 
 /** V2 훅 컷 — 사진이 주인공. 텍스트는 음식명과 반문 두 줄뿐. */
 async function composeHeroCoverV2(theme, places, bgUrl = null, outName = "reel-cover.jpg") {
@@ -1317,27 +1320,62 @@ async function composeHeroCoverV2(theme, places, bgUrl = null, outName = "reel-c
   const CT = Math.round((H - Math.round(W * 5 / 4)) / 2);
   const CH = Math.round(W * 5 / 4);
 
-  const { buf: heroBuf, place: p, width: heroW } = await pickHeroPhoto(sharp, places, bgUrl);
+  const { buf: heroBuf, width: heroW, coverage } = await pickHeroPhoto(sharp, places, bgUrl);
   if (!heroBuf) throw new Error("히어로 배경 사진 실패");
 
-  // 기존과 달리 전면 스크림(0.42)을 깔지 않는다 — 사진을 어둡게 덮으면 무슨 음식인지
-  // 안 보이고, 그게 훅 컷이 파는 유일한 물건이다. 대비는 아래쪽 그라데이션으로만 만든다.
-  let pipe = sharp(heroBuf).resize(W, H, { fit: "cover", position: "attention" })
-    .modulate({ saturation: 1.1, brightness: 1.03 });
-  if (heroW && heroW < 1000) pipe = pipe.blur(1 + (1000 - heroW) / 220);
-  const bgPhoto = await pipe.jpeg({ quality: 92 }).toBuffer();
-
+  // ── 왜 레이아웃을 둘로 가르는가 ─────────────────────────────────────────
+  // 우리 사진 소스(TourAPI·지자체)는 거의 전부 3:2 가로다. 이걸 9:16 풀블리드로
+  // 자르면 **원본의 38%만 남는다**(2026-09-11 실측: 샘플 6곳 중 5곳이 정확히 38%).
+  // 62%를 버리면서 어느 3분의 1이 남을지는 sharp의 attention 크롭이 정하는데,
+  // 그건 '엔트로피가 가장 높은 곳'이라 곁들임 접시처럼 무늬가 복잡한 쪽을 집는다 —
+  // 국밥 편 첫 3초에 만두 접시가 나온 게 그래서였다. 주제 음식이 보이는 사진을
+  // 골라도(foodPicked) 크롭이 그걸 잘라내면 소용이 없다.
+  //
+  // → 잔존율이 낮은 가로 사진은 **자르지 않는다**. 폭 1080에 맞춰 통째로 얹고,
+  //   남는 위아래는 같은 사진을 흐리게 깐 바탕으로 채운다. 요리 전체가 보이는 게
+  //   크게 보이는 것보다 먼저다. 세로·정방형 사진(잔존율 높음)은 손실이 적으니
+  //   기존대로 풀블리드로 간다 — 그쪽이 더 시원하다.
   const tp = theme.coverParts ?? {
     top: "", main: theme.food || theme.keyword, sub: `${places.length}대 ${theme.suffix || "맛집"}`,
   };
   const mainLen = Math.max(1, [...tp.main].length);
   const ms = Math.min(230, Math.floor(940 / mainLen));
+  const TITLE_H = Math.round(ms * 0.80) + 78; // 음식명 + 반문 한 줄
 
-  // 글자는 아래에 모은다. 위쪽 2/3는 사진만 — 무슨 음식인지 먼저 보여주고 말을 건다.
+  // 시안 확인용 스위치 — 세로 사진이 배경으로 뽑히는 날이 드물어(해상도 규칙상 가로가
+  // 이긴다) 풀블리드 쪽을 눈으로 보려면 강제해야 한다. 실발행에서는 주지 않는다.
+  const BAND = process.env.HOOK_FULLBLEED === "1" ? false : coverage < 0.6;
+  let bgPhoto, mainY;
+  if (BAND) {
+    const meta = await sharp(heroBuf).metadata();
+    const bandH = Math.round(W * (meta.height ?? 2) / (meta.width ?? 3));
+    // 사진 밴드 + 여백 + 제목을 통째로 4:5 안전영역 한가운데에 놓는다.
+    const GAP = 62;
+    const bandTop = CT + Math.round((CH - (bandH + GAP + TITLE_H)) / 2);
+    mainY = bandTop + bandH + GAP + Math.round(ms * 0.80);
+    // 바탕: 같은 사진을 강하게 뭉개고 어둡게 — 색만 이어받아 밴드가 떠 보이지 않게.
+    const base = await sharp(heroBuf).resize(W, H, { fit: "cover" }).blur(48)
+      .modulate({ brightness: 0.34, saturation: 0.85 }).jpeg({ quality: 84 }).toBuffer();
+    const band = await sharp(heroBuf).resize(W, bandH, { fit: "cover" })
+      .modulate({ saturation: 1.1, brightness: 1.03 }).jpeg({ quality: 92 }).toBuffer();
+    bgPhoto = await sharp(base)
+      .composite([{ input: band, left: 0, top: Math.max(0, bandTop) }])
+      .jpeg({ quality: 92 }).toBuffer();
+  } else {
+    // 전면 스크림(기존 0.42)은 깔지 않는다 — 사진을 어둡게 덮으면 무슨 음식인지
+    // 안 보이고, 그게 훅 컷이 파는 유일한 물건이다. 대비는 아래 그라데이션으로만.
+    let pipe = sharp(heroBuf).resize(W, H, { fit: "cover", position: "attention" })
+      .modulate({ saturation: 1.1, brightness: 1.03 });
+    if (heroW && heroW < 1000) pipe = pipe.blur(1 + (1000 - heroW) / 220);
+    bgPhoto = await pipe.jpeg({ quality: 92 }).toBuffer();
+    // 풀블리드에서는 글자를 아래에 모은다 — 위쪽은 사진만 보여주고 말을 건다.
+    mainY = CT + CH - 96 - 78;
+  }
+
   const PADX = 76;
-  const baseY = CT + CH - 96; // 4:5 안전영역 하단
-  const subY = baseY;
-  const mainY = subY - 78;
+  const subY = mainY + 78;
+  // 밴드형 바탕은 이미 어두워서 그라데이션이 필요 없다. 풀블리드에서만 글자 뒤를 태운다.
+  const gradTop = mainY - ms - 220;
 
   const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -1348,7 +1386,7 @@ async function composeHeroCoverV2(theme, places, bgUrl = null, outName = "reel-c
         <stop offset="100%" stop-color="#0b0503" stop-opacity="0.96"/>
       </linearGradient>
     </defs>
-    <rect x="0" y="${mainY - ms - 220}" width="${W}" height="${H - (mainY - ms - 220)}" fill="url(#v2b)"/>
+    ${BAND ? "" : `<rect x="0" y="${gradTop}" width="${W}" height="${H - gradTop}" fill="url(#v2b)"/>`}
     <rect x="${PADX}" y="${mainY - Math.round(ms * 0.80)}" width="9" height="${ms + 66}" fill="#e02020"/>
     <text x="${PADX + 34}" y="${mainY}" font-family="${TFONT}" font-size="${ms}" font-weight="900" fill="#ffffff" letter-spacing="-2">${esc(tp.main)}</text>
     <text x="${PADX + 36}" y="${subY}" font-family="${FONT}" font-size="54" font-weight="700" fill="#ffffff" fill-opacity="0.93">${esc(tp.sub)}</text>
@@ -1504,25 +1542,47 @@ async function composeReelCoverV2(theme, places, bgUrl = null) {
  * 훅·히어로 배경으로 쓸 사진 고르기 — 기존/V2가 같은 규칙을 쓰도록 떼어냈다.
  * 그리드 칸(약 500px)과 달리 1080x1920 전체로 늘리므로 저해상도가 그대로 드러난다
  * (원주 소스는 표본 12곳 중 7곳이 900px 미만). 후보 앞쪽에서 원본이 가장 큰 것을 쓴다.
+ *
+ * ⚠️ 후보를 foodPicked(비전이 "주제 음식이 실제로 보인다"고 판정한 곳)로 **제한**한다.
+ *    예전엔 foodPicked를 앞에 세우기만 하고 해상도로만 골라서, 주제 음식이 안 보이는
+ *    사진이 더 크면 그게 첫 3초를 차지할 수 있었다. 훅 컷이 파는 물건은 "이 음식"
+ *    하나뿐이라 그 판정이 해상도보다 먼저다. 하나도 없으면(지역편 등) 전체에서 고른다.
+ *
+ * coverage: 9:16으로 잘랐을 때 원본에서 살아남는 면적 비율. 호출 쪽이 이 값으로
+ *    풀블리드로 갈지 밴드로 갈지 정한다(아래 composeHeroCoverV2 주석 참고).
  */
 async function pickHeroPhoto(sharp, places, bgUrl) {
+  const AR = 1080 / 1920;
+  const cover = (m) => {
+    const ar = (m.width ?? 1) / (m.height ?? 1);
+    return ar > AR ? AR / ar : ar / AR;
+  };
   let place = places.find((x) => x.foodPicked) ?? places[0];
   let buf = bgUrl ? await fetchPhoto(bgUrl, place.name) : null;
-  if (buf) return { buf, place, width: (await sharp(buf).metadata()).width ?? 0 };
-  const cands = [...places.filter((x) => x.foodPicked), ...places].slice(0, 4);
-  let bestW = 0;
+  if (buf) {
+    const m = await sharp(buf).metadata();
+    return { buf, place, width: m.width ?? 0, coverage: cover(m) };
+  }
+  const picked = places.filter((x) => x.foodPicked && x.imageUrl);
+  const cands = (picked.length ? picked : places.filter((x) => x?.imageUrl)).slice(0, 4);
+  let bestW = 0, coverage = 1;
   for (const c of cands) {
-    if (!c?.imageUrl) continue;
     try {
       const b = await fetchPhoto(c.imageUrl, c.name);
       if (!b) continue;
-      const w = (await sharp(b).metadata()).width ?? 0;
-      if (w > bestW) { bestW = w; buf = b; place = c; }
+      const m = await sharp(b).metadata();
+      const w = m.width ?? 0;
+      if (w > bestW) { bestW = w; buf = b; place = c; coverage = cover(m); }
       if (w >= 1400) break;
     } catch { /* 다음 후보 */ }
   }
-  if (bestW) console.log(`  훅 배경: ${place.name} (${bestW}px)`);
-  return { buf, place, width: bestW };
+  if (bestW) {
+    console.log(
+      `  훅 배경: ${place.name} (${bestW}px, 9:16 크롭 잔존 ${Math.round(coverage * 100)}%` +
+        `${picked.length ? "" : ", 주제 음식 확인분 없음"})`
+    );
+  }
+  return { buf, place, width: bestW, coverage };
 }
 
 /**
