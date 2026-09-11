@@ -1,0 +1,51 @@
+name: 조회수 추세 진단
+
+# 조회 전용 워크플로 — 발행에 관여하지 않는다. 수동 실행만.
+#
+# 왜 report.yml로 부족한가: cover-report.mjs는 모음집 중 cover_style이 기록된 회차만 본다.
+# 큐레이션(cover_style NULL)과 일반 릴스(category 다름)가 통째로 빠져서 "계정 전체 조회가
+# 떨어졌다"는 질문에 답할 수 없다. 이건 발행된 전 게시물을 주차별로 놓고 본다.
+on:
+  workflow_dispatch:
+    inputs:
+      mature_hours:
+        description: "평균에 넣을 최소 경과 시간(시간). 막 나간 회차는 배포 중이라 낮게 찍힌다"
+        type: string
+        default: "72"
+
+permissions:
+  contents: read # 조회만 — 커밋하지 않는다
+
+jobs:
+  trend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 조회수 추세
+        shell: bash
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          # 최신 토큰은 DB(config.ig_token)에 있고 이건 폴백 — 둘 다 없으면 DB 저장 지표만 쓴다
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          TREND_MATURE_HOURS: ${{ inputs.mature_hours }}
+        run: |
+          # 실패해도 요약은 남긴다 — 폰에서 읽을 게 없으면 실행한 의미가 없다.
+          # (기본 셸이 -e -o pipefail이라 파이프 실패 시 즉시 종료되므로 rc를 직접 받는다)
+          set +e
+          npx tsx scripts/trend-report.mjs 2>&1 | tee trend.txt
+          rc=${PIPESTATUS[0]}
+          {
+            echo '## 조회수 추세'
+            echo '```'
+            cat trend.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"

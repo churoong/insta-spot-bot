@@ -1057,6 +1057,9 @@ JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개
  * 배경만 음식 사진(어둡고 따뜻한 오버레이)으로 먹음직스럽게. 릴스 규격에 딱 맞음.
  */
 async function composeReelCover(theme, places, dark = false, bgUrl = null) {
+  // V2에는 다크 배색이 없다. dark는 표지 순환(COVER_STYLES)에서 빠져 있어 실발행에서는
+  // 오지 않지만, 누가 되살리면 조용히 다른 디자인이 나가는 대신 옛 렌더러로 보낸다.
+  if (COVER_V2 && !dark) return composeReelCoverV2(theme, places, bgUrl);
   // dark=true면 흰 카드 대신 반투명 다크 카드. 어느 쪽이 유입이 좋은지 비교하려고
   // 두 배색을 같은 레이아웃으로 유지한다(레이아웃 차이가 섞이면 비교가 안 된다).
   const PAL = dark
@@ -1287,42 +1290,319 @@ async function composeReelCover(theme, places, dark = false, bgUrl = null) {
   return out;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * V2 표지 (기본값, 2026-09-11 사용자 승인) — "누가 봐도 AI가 만든 것 같다"에 대한 답.
+ *
+ * 기존 표지가 그렇게 보이는 이유를 렌더 결과에서 짚으면:
+ *   1) 한 화면에 텍스트 블록 40개 이상 — 6칸 × (순위·지역칩·후기칩·인증칩·상호·불릿 3줄).
+ *      사람은 카드뉴스에 이만큼 안 넣는다. 8초에 읽히지도 않는다.
+ *   2) 불릿 18줄이 전부 완성형 설명문 — LLM 출력의 겉모습 그 자체.
+ *   3) 한 화면에 6색(빨강 배지·초록 칩·노랑 소제목·흰 카드·검정 바탕·빨강 상호).
+ *   4) 흰 글자 + 두꺼운 검정 외곽선 = 자동 자막 기본값.
+ *   5) 빨간 알약 배지 = 편집 앱 기본 템플릿.
+ *   6) 상단 모자이크 띠 — 정보도 미감도 없이 자리만 차지한다.
+ *
+ * V2의 방침은 하나다: **빼기**. 사진을 크게 두고 글자를 줄인다.
+ *   - 색은 흰색·검정·빨강 하나까지. 노랑·초록 칩은 없앤다.
+ *   - 외곽선·알약 배지를 쓰지 않고 그라데이션으로 가독성을 만든다.
+ *   - 훅 컷은 한 가지만 말한다(음식명 + 반문). 지역 나열·저장 문구·핸들은 표지에 이미 있다.
+ *   - 그리드는 불릿을 버리고 사진 비중을 0.55 → 0.72로 올린다.
+ *
+ * 옛 표지(불릿·칩·모자이크 띠)는 COVER_V1=1로 되돌릴 수 있게 남겨 둔다 — 라이브 계정이라
+ * 발행 결과가 나쁘면 코드를 고치지 않고 워크플로 env 한 줄로 되돌릴 수 있어야 한다.
+ * ───────────────────────────────────────────────────────────────────────── */
+const COVER_V2 = process.env.COVER_V1 !== "1";
+
+/** V2 훅 컷 — 사진이 주인공. 텍스트는 음식명과 반문 두 줄뿐. */
+async function composeHeroCoverV2(theme, places, bgUrl = null, outName = "reel-cover.jpg") {
+  const sharp = (await import("sharp")).default;
+  const W = 1080, H = 1920;
+  const CT = Math.round((H - Math.round(W * 5 / 4)) / 2);
+  const CH = Math.round(W * 5 / 4);
+
+  const { buf: heroBuf, width: heroW, coverage } = await pickHeroPhoto(sharp, places, bgUrl);
+  if (!heroBuf) throw new Error("히어로 배경 사진 실패");
+
+  // ── 왜 레이아웃을 둘로 가르는가 ─────────────────────────────────────────
+  // 우리 사진 소스(TourAPI·지자체)는 거의 전부 3:2 가로다. 이걸 9:16 풀블리드로
+  // 자르면 **원본의 38%만 남는다**(2026-09-11 실측: 샘플 6곳 중 5곳이 정확히 38%).
+  // 62%를 버리면서 어느 3분의 1이 남을지는 sharp의 attention 크롭이 정하는데,
+  // 그건 '엔트로피가 가장 높은 곳'이라 곁들임 접시처럼 무늬가 복잡한 쪽을 집는다 —
+  // 국밥 편 첫 3초에 만두 접시가 나온 게 그래서였다. 주제 음식이 보이는 사진을
+  // 골라도(foodPicked) 크롭이 그걸 잘라내면 소용이 없다.
+  //
+  // → 잔존율이 낮은 가로 사진은 **자르지 않는다**. 폭 1080에 맞춰 통째로 얹고,
+  //   남는 위아래는 같은 사진을 흐리게 깐 바탕으로 채운다. 요리 전체가 보이는 게
+  //   크게 보이는 것보다 먼저다. 세로·정방형 사진(잔존율 높음)은 손실이 적으니
+  //   기존대로 풀블리드로 간다 — 그쪽이 더 시원하다.
+  const tp = theme.coverParts ?? {
+    top: "", main: theme.food || theme.keyword, sub: `${places.length}대 ${theme.suffix || "맛집"}`,
+  };
+  const mainLen = Math.max(1, [...tp.main].length);
+  const ms = Math.min(230, Math.floor(940 / mainLen));
+  const TITLE_H = Math.round(ms * 0.80) + 78; // 음식명 + 반문 한 줄
+
+  // 시안 확인용 스위치 — 세로 사진이 배경으로 뽑히는 날이 드물어(해상도 규칙상 가로가
+  // 이긴다) 풀블리드 쪽을 눈으로 보려면 강제해야 한다. 실발행에서는 주지 않는다.
+  const BAND = process.env.HOOK_FULLBLEED === "1" ? false : coverage < 0.6;
+  let bgPhoto, mainY;
+  if (BAND) {
+    const meta = await sharp(heroBuf).metadata();
+    const bandH = Math.round(W * (meta.height ?? 2) / (meta.width ?? 3));
+    // 사진 밴드 + 여백 + 제목을 통째로 4:5 안전영역 한가운데에 놓는다.
+    const GAP = 62;
+    const bandTop = CT + Math.round((CH - (bandH + GAP + TITLE_H)) / 2);
+    mainY = bandTop + bandH + GAP + Math.round(ms * 0.80);
+    // 바탕: 같은 사진을 강하게 뭉개고 어둡게 — 색만 이어받아 밴드가 떠 보이지 않게.
+    const base = await sharp(heroBuf).resize(W, H, { fit: "cover" }).blur(48)
+      .modulate({ brightness: 0.34, saturation: 0.85 }).jpeg({ quality: 84 }).toBuffer();
+    const band = await sharp(heroBuf).resize(W, bandH, { fit: "cover" })
+      .modulate({ saturation: 1.1, brightness: 1.03 }).jpeg({ quality: 92 }).toBuffer();
+    bgPhoto = await sharp(base)
+      .composite([{ input: band, left: 0, top: Math.max(0, bandTop) }])
+      .jpeg({ quality: 92 }).toBuffer();
+  } else {
+    // 전면 스크림(기존 0.42)은 깔지 않는다 — 사진을 어둡게 덮으면 무슨 음식인지
+    // 안 보이고, 그게 훅 컷이 파는 유일한 물건이다. 대비는 아래 그라데이션으로만.
+    let pipe = sharp(heroBuf).resize(W, H, { fit: "cover", position: "attention" })
+      .modulate({ saturation: 1.1, brightness: 1.03 });
+    if (heroW && heroW < 1000) pipe = pipe.blur(1 + (1000 - heroW) / 220);
+    bgPhoto = await pipe.jpeg({ quality: 92 }).toBuffer();
+    // 풀블리드에서는 글자를 아래에 모은다 — 위쪽은 사진만 보여주고 말을 건다.
+    mainY = CT + CH - 96 - 78;
+  }
+
+  const PADX = 76;
+  const subY = mainY + 78;
+  // 밴드형 바탕은 이미 어두워서 그라데이션이 필요 없다. 풀블리드에서만 글자 뒤를 태운다.
+  const gradTop = mainY - ms - 220;
+
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="v2b" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0b0503" stop-opacity="0"/>
+        <stop offset="38%" stop-color="#0b0503" stop-opacity="0.62"/>
+        <stop offset="70%" stop-color="#0b0503" stop-opacity="0.88"/>
+        <stop offset="100%" stop-color="#0b0503" stop-opacity="0.96"/>
+      </linearGradient>
+    </defs>
+    ${BAND ? "" : `<rect x="0" y="${gradTop}" width="${W}" height="${H - gradTop}" fill="url(#v2b)"/>`}
+    <rect x="${PADX}" y="${mainY - Math.round(ms * 0.80)}" width="9" height="${ms + 66}" fill="#e02020"/>
+    <text x="${PADX + 34}" y="${mainY}" font-family="${TFONT}" font-size="${ms}" font-weight="900" fill="#ffffff" letter-spacing="-2">${esc(tp.main)}</text>
+    <text x="${PADX + 36}" y="${subY}" font-family="${FONT}" font-size="54" font-weight="700" fill="#ffffff" fill-opacity="0.93">${esc(tp.sub)}</text>
+  </svg>`;
+
+  const out = path.join(TMP, outName);
+  await sharp(bgPhoto).composite([{ input: Buffer.from(svg), left: 0, top: 0 }])
+    .jpeg({ quality: 92 }).toFile(out);
+  return out;
+}
+
+/** V2 그리드 표지 — 불릿을 버리고 사진을 키운다. 카드 대신 사진 위 자막 바. */
+async function composeReelCoverV2(theme, places, bgUrl = null) {
+  const sharp = (await import("sharp")).default;
+  const W = 1080, H = 1920;
+  const CT = 285;
+  const HEADER_END = 600;
+  const GRID_BOT = 1880;
+  const rows = Math.ceil(places.length / 2);
+  const CELL_W = 540, CELL_H = Math.floor((GRID_BOT - HEADER_END) / rows);
+  const GAP = 8;
+  const PH_W = CELL_W - GAP * 2;
+  const PH_H = CELL_H - GAP * 2;
+
+  const bgPlace = places.find((p) => p.foodPicked) ?? places[0];
+  let bgBuf = await fetchPhoto(bgUrl ?? bgPlace.imageUrl, bgPlace.name);
+  if (!bgBuf && bgUrl) bgBuf = await fetchPhoto(bgPlace.imageUrl, bgPlace.name);
+  if (!bgBuf) throw new Error("릴스 배경 사진 실패");
+  // 상단 모자이크 띠를 없앴으니 배경이 화면 위쪽을 그대로 맡는다 — 좀 더 진하게 깐다.
+  const bgPhoto = await sharp(bgBuf).resize(W, H, { fit: "cover" }).blur(22)
+    .modulate({ saturation: 1.05, brightness: 0.72 }).jpeg({ quality: 86 }).toBuffer();
+
+  const photoBufs = [];
+  for (const p of places) photoBufs.push(await fetchPhoto(p.imageUrl, p.name));
+  for (const i of String(process.env.ROUNDUP_NOPHOTO || "").split(",").map((x) => Number(x.trim()) - 1)) {
+    if (i >= 0 && i < photoBufs.length) photoBufs[i] = null;
+  }
+
+  const cellPos = (i) => {
+    const lastOdd = places.length % 2 === 1 && i === places.length - 1;
+    const col = i % 2, row = Math.floor(i / 2);
+    return { x: lastOdd ? (W - CELL_W) / 2 : col * CELL_W, y: HEADER_END + row * CELL_H };
+  };
+
+  const mask = Buffer.from(
+    `<svg width="${PH_W}" height="${PH_H}"><rect width="${PH_W}" height="${PH_H}" rx="18" fill="#fff"/></svg>`
+  );
+  // 이름을 얹을 자리는 사진 자체를 아래로 갈수록 어둡게 태워 둔다. 반투명 검정 바를
+  // 얹으면 경계선이 생겨 "레이어를 덮었다"가 눈에 보인다 — 그게 템플릿처럼 보이는 이유다.
+  const nameScrim = Buffer.from(
+    `<svg width="${PH_W}" height="${PH_H}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+       <stop offset="${(1 - 190 / PH_H) * 100}%" stop-color="#080402" stop-opacity="0"/>
+       <stop offset="${(1 - 90 / PH_H) * 100}%" stop-color="#080402" stop-opacity="0.62"/>
+       <stop offset="100%" stop-color="#080402" stop-opacity="0.90"/>
+     </linearGradient></defs>
+     <rect width="${PH_W}" height="${PH_H}" rx="18" fill="url(#g)"/></svg>`
+  );
+  const photoLayers = [];
+  for (let i = 0; i < places.length; i++) {
+    if (!photoBufs[i]) continue;
+    const { x, y } = cellPos(i);
+    try {
+      photoLayers.push({
+        input: await sharp(photoBufs[i])
+          .resize(PH_W, PH_H, { fit: "cover", position: "attention" })
+          .ensureAlpha()
+          .composite([{ input: nameScrim }, { input: mask, blend: "dest-in" }])
+          .png().toBuffer(),
+        left: x + GAP, top: y + GAP,
+      });
+    } catch { /* skip */ }
+  }
+
+  // 제목 위 여백(0~285)은 피드 4:5에서 잘려 나가고 확대(9:16)했을 때만 보인다.
+  // 비워 두면 흐린 배경뿐이라 허전하다는 실측 피드백이 있었다(8/21 돈까스).
+  // 옛 표지는 사진 6장을 세로로 잘라 붙인 모자이크 띠로 메웠는데, 그 조각보가
+  // "자동으로 만든 티"의 큰 부분이었다 — 대표 사진 한 장을 넓게 깔아 대신한다.
+  const topBand = [];
+  if (photoBufs[0]) {
+    const BH = CT + 90;
+    try {
+      // 아래쪽 90px을 투명으로 흘려보낸다 — 안 하면 y=309에 가로 이음매가 생겨
+      // "이미지를 붙였다"가 그대로 보인다(첫 시안에서 실제로 보였다).
+      const fade = Buffer.from(
+        `<svg width="${W}" height="${BH}"><defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1">
+           <stop offset="${((BH - 90) / BH) * 100}%" stop-color="#fff" stop-opacity="1"/>
+           <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+         </linearGradient></defs><rect width="${W}" height="${BH}" fill="url(#f)"/></svg>`
+      );
+      topBand.push({
+        input: await sharp(photoBufs[0])
+          .resize(W, BH, { fit: "cover", position: "attention" })
+          .modulate({ brightness: 0.5, saturation: 0.9 })
+          .blur(3)
+          .ensureAlpha()
+          .composite([{ input: fade, blend: "dest-in" }])
+          .png().toBuffer(),
+        left: 0, top: 0,
+      });
+    } catch { /* 배경만으로 진행 */ }
+  }
+
+  // 칸 위에 얹는 것: 순위 숫자와 상호명·지역뿐. 후기/YT·인증 칩은 뺐다 —
+  // 그 정보는 캡션과 캐러셀 카드에 있고, 표지에서는 읽히지 않으면서 색만 늘린다.
+  let cells = "";
+  for (let i = 0; i < places.length; i++) {
+    const p = places[i];
+    const { x, y } = cellPos(i);
+    const L = x + GAP, T = y + GAP;
+    const B = T + PH_H;
+    const nm = coverName(p.name);
+    const ns = nm.length <= 8 ? 40 : nm.length <= 11 ? 34 : 29;
+    // 순위 숫자는 배지를 씌우지 않는다 — 사진 위 큰 흰 숫자에 옅은 그림자만.
+    // 알약 배지가 칸마다 6개 붙는 게 "템플릿에 채워 넣은" 인상의 절반이었다.
+    cells += `
+    <g>
+      <text x="${L + 22}" y="${T + 66}" font-family="${TFONT}" font-size="60" font-weight="900" fill="#ffffff" fill-opacity="0.95" stroke="#0b0503" stroke-opacity="0.28" stroke-width="6" paint-order="stroke">${i + 1}</text>
+      <text x="${L + 20}" y="${B - 60}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+      <text x="${L + 20}" y="${B - 24}" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffffff" fill-opacity="0.68">${esc(p.region)}${p.hundred ? "  ·  백년가게" : p.goodPrice ? "  ·  착한가격" : ""}</text>
+    </g>`;
+  }
+
+  const tp = theme.coverParts ?? {
+    top: "", main: theme.food || theme.keyword, sub: `${places.length}대 ${theme.suffix || "맛집"}`,
+  };
+  const mainLen = Math.max(1, [...tp.main].length);
+  const ms = Math.min(150, Math.floor(900 / mainLen));
+
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="${W}" height="${H}" fill="#0b0503" fill-opacity="0.28"/>
+    <text x="54" y="${CT + 52}" font-family="${FONT}" font-size="30" font-weight="700" fill="#ffffff" fill-opacity="0.72" letter-spacing="4">${esc(tp.top)}</text>
+    <text x="54" y="${CT + 74 + Math.round(ms * 0.84)}" font-family="${TFONT}" font-size="${ms}" font-weight="900" fill="#ffffff" letter-spacing="-2">${esc(tp.main)}</text>
+    <rect x="56" y="${HEADER_END - 62}" width="7" height="44" fill="#e02020"/>
+    <text x="80" y="${HEADER_END - 26}" font-family="${TFONT}" font-size="42" font-weight="900" fill="#ffffff">${esc(tp.sub)}</text>
+    <text x="${W - 54}" y="${HEADER_END - 26}" font-family="${FONT}" font-size="24" fill="#ffffff" fill-opacity="0.5" text-anchor="end">@${HANDLE}</text>
+  </svg>`;
+  const cellSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${cells}</svg>`;
+
+  const out = path.join(TMP, "reel-cover.jpg");
+  await sharp(bgPhoto)
+    .composite([
+      ...topBand,
+      { input: Buffer.from(svg), left: 0, top: 0 },
+      ...photoLayers,
+      { input: Buffer.from(cellSvg), left: 0, top: 0 },
+    ])
+    .jpeg({ quality: 90 })
+    .toFile(out);
+  return out;
+}
+
+/**
+ * 훅·히어로 배경으로 쓸 사진 고르기 — 기존/V2가 같은 규칙을 쓰도록 떼어냈다.
+ * 그리드 칸(약 500px)과 달리 1080x1920 전체로 늘리므로 저해상도가 그대로 드러난다
+ * (원주 소스는 표본 12곳 중 7곳이 900px 미만). 후보 앞쪽에서 원본이 가장 큰 것을 쓴다.
+ *
+ * ⚠️ 후보를 foodPicked(비전이 "주제 음식이 실제로 보인다"고 판정한 곳)로 **제한**한다.
+ *    예전엔 foodPicked를 앞에 세우기만 하고 해상도로만 골라서, 주제 음식이 안 보이는
+ *    사진이 더 크면 그게 첫 3초를 차지할 수 있었다. 훅 컷이 파는 물건은 "이 음식"
+ *    하나뿐이라 그 판정이 해상도보다 먼저다. 하나도 없으면(지역편 등) 전체에서 고른다.
+ *
+ * coverage: 9:16으로 잘랐을 때 원본에서 살아남는 면적 비율. 호출 쪽이 이 값으로
+ *    풀블리드로 갈지 밴드로 갈지 정한다(아래 composeHeroCoverV2 주석 참고).
+ */
+async function pickHeroPhoto(sharp, places, bgUrl) {
+  const AR = 1080 / 1920;
+  const cover = (m) => {
+    const ar = (m.width ?? 1) / (m.height ?? 1);
+    return ar > AR ? AR / ar : ar / AR;
+  };
+  let place = places.find((x) => x.foodPicked) ?? places[0];
+  let buf = bgUrl ? await fetchPhoto(bgUrl, place.name) : null;
+  if (buf) {
+    const m = await sharp(buf).metadata();
+    return { buf, place, width: m.width ?? 0, coverage: cover(m) };
+  }
+  const picked = places.filter((x) => x.foodPicked && x.imageUrl);
+  const cands = (picked.length ? picked : places.filter((x) => x?.imageUrl)).slice(0, 4);
+  let bestW = 0, coverage = 1;
+  for (const c of cands) {
+    try {
+      const b = await fetchPhoto(c.imageUrl, c.name);
+      if (!b) continue;
+      const m = await sharp(b).metadata();
+      const w = m.width ?? 0;
+      if (w > bestW) { bestW = w; buf = b; place = c; coverage = cover(m); }
+      if (w >= 1400) break;
+    } catch { /* 다음 후보 */ }
+  }
+  if (bestW) {
+    console.log(
+      `  훅 배경: ${place.name} (${bestW}px, 9:16 크롭 잔존 ${Math.round(coverage * 100)}%` +
+        `${picked.length ? "" : ", 주제 음식 확인분 없음"})`
+    );
+  }
+  return { buf, place, width: bestW, coverage };
+}
+
 /**
  * A안 표지 — 대표 음식 사진 한 장을 꽉 채우고 제목만 얹는다.
  * 그리드형(기존·다크)과 달리 썸네일에서 음식이 크게 보이는 대신 6곳 정보는 안 보인다.
  * 어느 쪽이 유입에 유리한지 비교하려고 나란히 돌린다.
  */
 async function composeHeroCover(theme, places, bgUrl = null, outName = "reel-cover.jpg") {
+  if (COVER_V2) return composeHeroCoverV2(theme, places, bgUrl, outName);
   const sharp = (await import("sharp")).default;
   const W = 1080, H = 1920;
   const CT = Math.round((H - Math.round(W * 5 / 4)) / 2); // 285 — 4:5로 잘려도 살아남는 위쪽 경계
   const CH = Math.round(W * 5 / 4); // 1350
 
-  // 훅 컷·히어로는 사진 한 장을 1080x1920 전체로 확대해 쓴다 — 그리드 칸(약 500px)과 달리
-  // 저해상도가 그대로 드러난다(원주 소스는 표본 12곳 중 7곳이 900px 미만). 후보 앞쪽에서
-  // 원본이 가장 큰 사진을 골라 쓴다. 배경이 지정된 경우(포토코리아)는 그대로.
-  let p = places.find((x) => x.foodPicked) ?? places[0];
-  let heroBuf = bgUrl ? await fetchPhoto(bgUrl, p.name) : null;
-  if (!heroBuf) {
-    const cands = [...places.filter((x) => x.foodPicked), ...places].slice(0, 4);
-    let bestW = 0;
-    for (const c of cands) {
-      if (!c?.imageUrl) continue;
-      try {
-        const buf = await fetchPhoto(c.imageUrl, c.name);
-        if (!buf) continue;
-        const w = (await sharp(buf).metadata()).width ?? 0;
-        if (w > bestW) { bestW = w; heroBuf = buf; p = c; }
-        if (w >= 1400) break; // 충분히 크면 더 볼 필요 없다
-      } catch { /* 다음 후보 */ }
-    }
-    if (bestW) console.log(`  훅 배경: ${p.name} (${bestW}px)`);
-  }
+  // 배경 고르기는 V2와 공통 규칙(pickHeroPhoto) — 두 시안이 같은 사진을 써야 비교가 된다.
+  const { buf: heroBuf, width: heroW } = await pickHeroPhoto(sharp, places, bgUrl);
   if (!heroBuf) throw new Error("히어로 배경 사진 실패");
   // 그리드형과 달리 사진 자체가 주인공이라 블러를 넣지 않는다.
   // 단 원본이 작으면(원주 소스 등 500~900px) 1080x1920으로 늘리면서 깨짐이 그대로 보인다 —
   // 그때만 약한 블러로 뭉갠다. 어차피 어둡게 깔고 큰 글자를 얹는 화면이라 위화감이 없다.
-  const heroW = (await sharp(heroBuf).metadata()).width ?? 0;
   let heroPipe = sharp(heroBuf)
     .resize(W, H, { fit: "cover", position: "attention" })
     .modulate({ saturation: 1.14, brightness: 1.02 });

@@ -108,7 +108,26 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
   (지역·후기/YT·백년가게) 자리라 비워 둔다. 시안: `NOPHOTO_DEMO=1` 또는 `ROUNDUP_NOPHOTO="2,5"`.
   ※ 무사진 칸 개수 상한은 아직 없다 — 3칸부터는 "사진 못 구한 편"으로 보인다(시안 판단).
 - 표지 음식명 크기 캡 116px(`ms`). 콘텐츠는 4:5 안전영역(y 285~1635) 안에.
-- 그리드 셀에 데이터 배지("🔎 후기·YT"). **캡션에 "🔎 선정 기준" 라인 없음**(2026-09-09 사용자 지시 "캡션에 선정 기준 문구 다 빼줘") — 랭킹 근거(`rankBasis`)는 카운트다운 인트로 카드에만 남는다. 도장깨기 체크리스트는 **캐러셀 마지막 장에만**.
+- **캡션에 "🔎 선정 기준" 라인 없음**(2026-09-09 사용자 지시 "캡션에 선정 기준 문구 다 빼줘") — 랭킹 근거(`rankBasis`)는 카운트다운 인트로 카드에만 남는다. 도장깨기 체크리스트는 **캐러셀 마지막 장에만**.
+- **표지 V2가 기본값**(2026-09-11 사용자 지시 "디자인이 누가 봐도 AI가 만든 것 같아" → 승인).
+  옛 표지가 그렇게 보인 이유는 대부분 **많이 넣어서**였다 — 한 화면에 텍스트 블록 40개 이상
+  (6칸 × 순위 배지·지역 칩·후기/YT 칩·인증 칩·상호명·불릿 3줄), 그 불릿 18줄이 전부
+  완성형 설명문, 한 화면에 6색, 흰 글자+두꺼운 검정 외곽선(자동 자막 기본값), 빨간 알약
+  배지(편집 앱 템플릿), 사진 6장을 세로로 자른 상단 모자이크 띠.
+  **V2 = 빼기**: 불릿·칩 전부 삭제(순위·상호명·지역만) / 흰 카드 없이 사진이 곧 카드 /
+  이름 자리는 바를 얹지 않고 사진을 아래로 태움(바는 경계선이 보여 "덮었다"가 드러남) /
+  모자이크 띠 → 대표 사진 한 장, 아래 90px 페이드로 이음매 제거 / 색은 흰·검정·빨강 하나.
+  되돌리기는 `COVER_V1=1`(코드 수정 없이 워크플로 env 한 줄). **V2에 다크 배색은 없다** —
+  `dark`가 오면 옛 렌더러로 보낸다(dark는 `COVER_STYLES`에서 빠져 있어 실발행엔 안 온다).
+  ❌ **재제안 금지**: 불릿 설명·알약 배지·모자이크 띠·글자 외곽선 되살리기.
+- **훅 컷은 사진 비율에 따라 레이아웃이 갈린다**(2026-09-11). 우리 사진 소스(TourAPI·지자체)는
+  거의 전부 **3:2 가로**라 9:16 풀블리드로 자르면 **원본의 38%만 남는다**(샘플 6곳 중 5곳 실측).
+  버릴 62%를 sharp `attention` 크롭이 '엔트로피가 높은 쪽'으로 정하는 바람에 **국밥 편 첫 3초에
+  만두 접시가 나갔다**(9/9 실발행). 주제 음식이 보이는 사진을 골라도(`foodPicked`) 크롭이
+  잘라내면 소용없다 — 그래서 **잔존율 <60%면 자르지 않고** 폭 1080에 통째로 얹고 위아래를
+  같은 사진의 블러로 채운다(`BAND`). 세로·정방형(잔존율 높음)만 풀블리드.
+  훅 배경 후보는 **`foodPicked`로 제한**한다(예전엔 앞에 세우기만 하고 해상도로만 골랐다).
+  시안: `HOOK_FULLBLEED=1`로 풀블리드 쪽을 강제해 볼 수 있다.
 - 카운트다운 인트로 "맛집 브리핑, {음식} 톱N" 페르소나. TTS Laomedeia 1.18배속.
 - 폰트 파일은 `assets/fonts/`(라이선스 LICENSE.md). 러너·클라우드는 `~/.fonts`에 설치해서 쓴다.
 
@@ -143,6 +162,8 @@ bash scripts/cloud-setup.sh
 ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs      # → roundup-hook-preview.jpg(첫 3초), roundup-reel-preview.jpg, carousel-preview-*.jpg
 OFFLINE_RENDER=1 ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs  # 위 + 8초 릴스까지 실제 렌더 → roundup-reel-preview.mp4
 COVER_TFONT="'Jalnan','Pretendard',sans-serif" ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs  # 서체 시안
+COVER_V1=1 ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs        # 옛 표지(불릿·칩·모자이크 띠)와 비교
+HOOK_FULLBLEED=1 ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs  # 훅 컷 풀블리드 쪽 강제 시안
 
 # 시크릿 있을 때 — 실제 수집 포함 DRY (발행 없음)
 ROUNDUP_THEME=gukbap ROUNDUP_DRY=1 npx tsx --env-file=.env scripts/make-roundup.mjs
