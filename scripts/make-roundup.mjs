@@ -2275,6 +2275,12 @@ async function main() {
     for (let i = 0; i < places.length; i++) {
       fs.writeFileSync(`carousel-preview-${pad(i + 2)}-card.jpg`, await composeCarouselCard(sharpMod, places[i], i + 1));
     }
+    // 카운트다운은 인트로 카드 + 순위 카드로 굴러간다 — 둘 다 뽑아야 그 포맷을 눈으로 본다.
+    // (표지 V2는 이 경로에 닿지 않는다. composeIntroCard·composeRankCard는 별개 렌더러다.)
+    fs.writeFileSync(
+      "countdown-intro-preview.jpg",
+      await composeIntroCard(sharpMod, theme, places, theme.titleResolved, "블로그 후기·유튜브 조회수")
+    );
     fs.writeFileSync("countdown-card-preview.jpg", await composeRankCard(sharpMod, places[0], 1));
     // 무사진 칸 시안 — 2·5번 칸을 비운 표지를 따로 렌더
     if (process.env.NOPHOTO_DEMO === "1") {
