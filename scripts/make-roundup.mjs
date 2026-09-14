@@ -1345,6 +1345,10 @@ async function composeHeroCoverV2(theme, places, bgUrl = null, outName = "reel-c
   // 시안 확인용 스위치 — 세로 사진이 배경으로 뽑히는 날이 드물어(해상도 규칙상 가로가
   // 이긴다) 풀블리드 쪽을 눈으로 보려면 강제해야 한다. 실발행에서는 주지 않는다.
   const BAND = process.env.HOOK_FULLBLEED === "1" ? false : coverage < 0.6;
+  // 로그는 분기 조건 바로 옆에서 찍는다 — 잔존율만 찍고 임계값을 딴 데 두면
+  // 둘이 어긋났을 때 로그로는 알 수 없다.
+  console.log(`  훅 컷 레이아웃: ${BAND ? "밴드(자르지 않음)" : "풀블리드"}` +
+    `${process.env.HOOK_FULLBLEED === "1" ? " — HOOK_FULLBLEED 강제" : ""}`);
   let bgPhoto, mainY;
   if (BAND) {
     const meta = await sharp(heroBuf).metadata();
@@ -1560,8 +1564,13 @@ async function pickHeroPhoto(sharp, places, bgUrl) {
   let place = places.find((x) => x.foodPicked) ?? places[0];
   let buf = bgUrl ? await fetchPhoto(bgUrl, place.name) : null;
   if (buf) {
+    // ⚠️ 예전엔 이 조기 반환이 아무것도 찍지 않아, 포토코리아 배경이 잡힌 회차는
+    //    훅 배경이 무엇이었는지 로그로 알 수 없었다(9/11·9/12 실발행에서 실제로 그랬다).
+    //    후보 루프에서만 찍고 있었던 것 — 두 경로 모두에서 찍는다.
     const m = await sharp(buf).metadata();
-    return { buf, place, width: m.width ?? 0, coverage: cover(m) };
+    const w = m.width ?? 0, cv = cover(m);
+    console.log(`  훅 배경: 포토코리아 (${w}px, 9:16 크롭 잔존 ${Math.round(cv * 100)}%)`);
+    return { buf, place, width: w, coverage: cv };
   }
   const picked = places.filter((x) => x.foodPicked && x.imageUrl);
   const cands = (picked.length ? picked : places.filter((x) => x?.imageUrl)).slice(0, 4);
@@ -1578,7 +1587,7 @@ async function pickHeroPhoto(sharp, places, bgUrl) {
   }
   if (bestW) {
     console.log(
-      `  훅 배경: ${place.name} (${bestW}px, 9:16 크롭 잔존 ${Math.round(coverage * 100)}%` +
+      `  훅 배경: ${place.name} (식당 사진, ${bestW}px, 9:16 크롭 잔존 ${Math.round(coverage * 100)}%` +
         `${picked.length ? "" : ", 주제 음식 확인분 없음"})`
     );
   }
