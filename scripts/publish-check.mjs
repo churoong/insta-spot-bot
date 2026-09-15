@@ -19,7 +19,8 @@ const OUT_DIR = process.env.OUT_DIR || ".";
 // 하루에 나갔어야 할 것. CLAUDE.md '현재 발행 구성'과 같이 유지할 것.
 // dow: 0=일 … 6=토. prefix는 posts.content_id 접두사.
 const EXPECTED = [
-  { key: "reel", prefix: "reel-", label: "일반 릴스", dows: [0, 1, 2, 3, 4, 5, 6], workflow: "reels.yml" },
+  // 일반 릴스는 2026-09-15부터 화·목·토만 (69건 중앙값 134·시청 2.3s·히트 0 — 주 7 → 3회)
+  { key: "reel", prefix: "reel-", label: "일반 릴스", dows: [2, 4, 6], workflow: "reels.yml" },
   { key: "roundup", prefix: "roundup-", label: "모음집", dows: [0, 1, 2, 3, 4, 5, 6], workflow: "roundup.yml" },
   { key: "countdown", prefix: "countdown-", label: "큐레이션", dows: [1, 5], workflow: "countdown.yml" },
   { key: "carousel", prefix: "carousel-", label: "캐러셀", dows: [3, 6], workflow: "carousel.yml" },
@@ -127,7 +128,7 @@ async function main() {
       "확인 후 닫아 주세요. 같은 날짜로는 다시 열리지 않습니다.",
       "",
       "판정 기준: `posts`에 그 KST 날짜로 `status='published'` 행이 있는지. 발행 창이 닫힌(KST 22시) 날만 봅니다.",
-      "요일 기대치: 릴스·모음집 매일 / 큐레이션 월·금 / 캐러셀 토 (CLAUDE.md '현재 발행 구성')"
+      "요일 기대치: 모음집 매일 / 일반 릴스 화·목·토 / 큐레이션 월·금 / 캐러셀 수·토 (CLAUDE.md '현재 발행 구성')"
     );
     fs.writeFileSync(path.join(OUT_DIR, `missing-${day}.md`), lines.join("\n"));
     wrote++;

@@ -240,12 +240,17 @@ async function themeWeights(db, all) {
   const sorted = avgs.map(([, v]) => v).sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)] || 1;
   const byKey = Object.fromEntries(avgs);
-  // 안 해본 테마의 사전 가중치 — 지역 인지도(시군구 방문자 수)로 매긴다.
-  // 없으면 전부 2.0이라 대전 유성(조회 95)과 가로수길이 같은 확률로 뽑힌다.
+  // 안 해본 테마의 사전 가중치 — 지역편은 지역 인지도(시군구 방문자 수), 음식 테마는
+  // 국물류 여부(soupPrior)로 매긴다. 없으면 전부 2.0이라 대전 유성(조회 95)과 가로수길이,
+  // 순대국과 장어가 같은 확률로 뽑힌다.
+  //
+  // ⚠️ 미시도 테마가 많을수록 실측 가중치가 묻힌다: 음식 55개 중 실측이 십수 개뿐이면
+  //    나머지 40개 × 2.0 = 80이 순대국 5.2 하나를 압도해, 9월에 장어·냉면-영남·부대찌개가
+  //    뽑힌 게 이 구조다. 그래서 사전 가중치는 "탐험을 어디로 보낼지"를 정한다.
   const prior = await visitorPrior(all);
   const weights = all.map((t) =>
     byKey[t.key] === undefined
-      ? prior?.[t.key] ?? 2.0 // 실측 조회수가 없을 때만 사전 가중치
+      ? prior?.[t.key] ?? soupPrior(t) // 실측 조회수가 없을 때만 사전 가중치
       : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
   );
   console.log(
@@ -254,12 +259,38 @@ async function themeWeights(db, all) {
       .map((t, i) => {
         const tag = byKey[t.key] !== undefined
           ? `(${Math.round(byKey[t.key])}회)`
-          : prior?.[t.key] !== undefined ? "(미시도·방문자)" : "(미시도)";
+          : prior?.[t.key] !== undefined ? "(미시도·방문자)"
+          : t.mode !== "area" ? `(미시도·${SOUP_THEMES.has(baseKey(t.key)) ? "국물" : "비국물"})`
+          : "(미시도)";
         return `${t.key} ${weights[i].toFixed(1)}${tag}`;
       })
       .join(" · ")
   );
   return { weights, recent };
+}
+
+/**
+ * 국물류 → 미시도 음식 테마의 사전 가중치 (2026-09-15).
+ *
+ * 근거: 호황기(8/20~9/2) 같은 2주 안에서 국물류 4건(순대국 4,204 · 해장국 3,240 · 냉면 1,633 ·
+ * 어탕 809, 평균 2,471) vs 비국물 4건(돈까스 294 · 초밥 245 · 김밥 397 · 게장 264, 평균 300)
+ * — 8배. 큐레이션 히트도 전부 국물(순대국 4,102 · 짬뽕 3,762 · 칼국수 1,283/1,192 · 국밥 2,012).
+ * 표본이 4+4라 확정은 아니고 "강한 경향"이다 — 그래서 비국물을 빼지 않고 확률만 낮춘다.
+ * 비국물 표본도 계속 쌓여야 이 경향이 틀렸을 때 드러난다.
+ *
+ * 폭은 방문자 사전 가중치와 같은 0.8~4.0 안 — 실측(최대 6)을 이기면 안 된다.
+ * 판정은 태그가 아니라 키 목록으로 한다(태그는 "보양식"처럼 국물·비국물이 섞여 기준이 안 된다).
+ * 권역 변형(sundae-yeongnam 등)은 베이스 키로 본다.
+ */
+const SOUP_THEMES = new Set([
+  "sundae", "dwaeji-busan", "kalguksu", "naengmyeon", "gukbap", "makguksu", "gomtang",
+  "milmyeon-busan", "chueotang", "jjamppong", "samgyetang", "haejangguk", "gamjatang",
+  "budaejjigae", "maeuntang", "eotang", "sundubu", "baeksuk", "gogiguksu-jeju",
+]);
+const baseKey = (key) => String(key).replace(/-(sudo|yeongnam|honam)$/, "");
+function soupPrior(t) {
+  if (t.mode === "area") return 2.0;
+  return SOUP_THEMES.has(baseKey(t.key)) ? 3.5 : 1.2;
 }
 
 /**
@@ -2476,12 +2507,17 @@ async function main() {
     }
   }
 
-  // 저녁 모음집 요일 슬롯 (2026-09-03 사용자 지시: 상권 > 지역 > 동일음식 전국 순으로 많이):
-  //   화·목·토 = 상권(반경 1.5km 동네 맛집) 3회 / 월·금 = 지역(도시 종합 + 권역×음식) 2회 /
-  //   수·일 = 전국 음식 테마 2회. 슬롯마다 포인터 따로. 큐레이션·캐러셀은 음식 테마만.
+  // 저녁 모음집 요일 슬롯 (2026-09-15 사용자 승인 — 데이터 기준으로 재배치):
+  //   화·목·토 = 상권(반경 1.5km 동네 맛집) 3회 / 월·수·금·일 = 전국 음식 테마 4회.
+  //   2026-09-03 구성(상권 3 / 도시 2 / 전국 2)에서 월·금 도시편을 전국 음식으로 돌렸다.
+  //   근거(9/15 분석): 1,000+ 회차는 성수동 하나를 빼면 전부 전국 음식편(순대국 4,204 ·
+  //   해장국 3,240 · 냉면 1,633 …)이고, 도시편은 춘천 255 · 유성 117 · 여수 115로 가장 약한
+  //   묶음이었다(벤치마크도 중소도시 0.30x). 도시 테마 21개는 로테이션에서만 빠지고 데이터는
+  //   그대로 둔다 — `city` 슬롯 코드도 남겨 되돌리기는 이 배열 한 줄이다.
+  //   슬롯마다 포인터 따로. 큐레이션·캐러셀은 음식 테마만.
   //   ※ 도시×단일음식(춘천 닭갈비 등)은 실측 풀 0~9곳이라 불가 — 권역 단위까지만.
   const kstDow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay(); // 0=일
-  const SLOT_BY_DOW = ["nation", "city", "spot", "nation", "spot", "city", "spot"]; // 일~토
+  const SLOT_BY_DOW = ["nation", "nation", "spot", "nation", "spot", "nation", "spot"]; // 일~토
   const slot = process.env.ROUNDUP_STYLE ? "food" : SLOT_BY_DOW[kstDow];
   const isSpot = (t) => t.mode === "area" && t.tour?.mapX;
   const isCity = (t) => (t.mode === "area" && !t.tour?.mapX) || (t.mode !== "area" && (t.areaCode || t.areaCodes));
