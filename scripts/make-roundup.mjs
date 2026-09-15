@@ -240,12 +240,17 @@ async function themeWeights(db, all) {
   const sorted = avgs.map(([, v]) => v).sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)] || 1;
   const byKey = Object.fromEntries(avgs);
-  // 안 해본 테마의 사전 가중치 — 지역 인지도(시군구 방문자 수)로 매긴다.
-  // 없으면 전부 2.0이라 대전 유성(조회 95)과 가로수길이 같은 확률로 뽑힌다.
+  // 안 해본 테마의 사전 가중치 — 지역편은 지역 인지도(시군구 방문자 수), 음식 테마는
+  // 국물류 여부(soupPrior)로 매긴다. 없으면 전부 2.0이라 대전 유성(조회 95)과 가로수길이,
+  // 순대국과 장어가 같은 확률로 뽑힌다.
+  //
+  // ⚠️ 미시도 테마가 많을수록 실측 가중치가 묻힌다: 음식 55개 중 실측이 십수 개뿐이면
+  //    나머지 40개 × 2.0 = 80이 순대국 5.2 하나를 압도해, 9월에 장어·냉면-영남·부대찌개가
+  //    뽑힌 게 이 구조다. 그래서 사전 가중치는 "탐험을 어디로 보낼지"를 정한다.
   const prior = await visitorPrior(all);
   const weights = all.map((t) =>
     byKey[t.key] === undefined
-      ? prior?.[t.key] ?? 2.0 // 실측 조회수가 없을 때만 사전 가중치
+      ? prior?.[t.key] ?? soupPrior(t) // 실측 조회수가 없을 때만 사전 가중치
       : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
   );
   console.log(
@@ -254,12 +259,38 @@ async function themeWeights(db, all) {
       .map((t, i) => {
         const tag = byKey[t.key] !== undefined
           ? `(${Math.round(byKey[t.key])}회)`
-          : prior?.[t.key] !== undefined ? "(미시도·방문자)" : "(미시도)";
+          : prior?.[t.key] !== undefined ? "(미시도·방문자)"
+          : t.mode !== "area" ? `(미시도·${SOUP_THEMES.has(baseKey(t.key)) ? "국물" : "비국물"})`
+          : "(미시도)";
         return `${t.key} ${weights[i].toFixed(1)}${tag}`;
       })
       .join(" · ")
   );
   return { weights, recent };
+}
+
+/**
+ * 국물류 → 미시도 음식 테마의 사전 가중치 (2026-09-15).
+ *
+ * 근거: 호황기(8/20~9/2) 같은 2주 안에서 국물류 4건(순대국 4,204 · 해장국 3,240 · 냉면 1,633 ·
+ * 어탕 809, 평균 2,471) vs 비국물 4건(돈까스 294 · 초밥 245 · 김밥 397 · 게장 264, 평균 300)
+ * — 8배. 큐레이션 히트도 전부 국물(순대국 4,102 · 짬뽕 3,762 · 칼국수 1,283/1,192 · 국밥 2,012).
+ * 표본이 4+4라 확정은 아니고 "강한 경향"이다 — 그래서 비국물을 빼지 않고 확률만 낮춘다.
+ * 비국물 표본도 계속 쌓여야 이 경향이 틀렸을 때 드러난다.
+ *
+ * 폭은 방문자 사전 가중치와 같은 0.8~4.0 안 — 실측(최대 6)을 이기면 안 된다.
+ * 판정은 태그가 아니라 키 목록으로 한다(태그는 "보양식"처럼 국물·비국물이 섞여 기준이 안 된다).
+ * 권역 변형(sundae-yeongnam 등)은 베이스 키로 본다.
+ */
+const SOUP_THEMES = new Set([
+  "sundae", "dwaeji-busan", "kalguksu", "naengmyeon", "gukbap", "makguksu", "gomtang",
+  "milmyeon-busan", "chueotang", "jjamppong", "samgyetang", "haejangguk", "gamjatang",
+  "budaejjigae", "maeuntang", "eotang", "sundubu", "baeksuk", "gogiguksu-jeju",
+]);
+const baseKey = (key) => String(key).replace(/-(sudo|yeongnam|honam)$/, "");
+function soupPrior(t) {
+  if (t.mode === "area") return 2.0;
+  return SOUP_THEMES.has(baseKey(t.key)) ? 3.5 : 1.2;
 }
 
 /**
@@ -2476,12 +2507,17 @@ async function main() {
     }
   }
 
-  // 저녁 모음집 요일 슬롯 (2026-09-03 사용자 지시: 상권 > 지역 > 동일음식 전국 순으로 많이):
-  //   화·목·토 = 상권(반경 1.5km 동네 맛집) 3회 / 월·금 = 지역(도시 종합 + 권역×음식) 2회 /
-  //   수·일 = 전국 음식 테마 2회. 슬롯마다 포인터 따로. 큐레이션·캐러셀은 음식 테마만.
+  // 저녁 모음집 요일 슬롯 (2026-09-15 사용자 승인 — 데이터 기준으로 재배치):
+  //   화·목·토 = 상권(반경 1.5km 동네 맛집) 3회 / 월·수·금·일 = 전국 음식 테마 4회.
+  //   2026-09-03 구성(상권 3 / 도시 2 / 전국 2)에서 월·금 도시편을 전국 음식으로 돌렸다.
+  //   근거(9/15 분석): 1,000+ 회차는 성수동 하나를 빼면 전부 전국 음식편(순대국 4,204 ·
+  //   해장국 3,240 · 냉면 1,633 …)이고, 도시편은 춘천 255 · 유성 117 · 여수 115로 가장 약한
+  //   묶음이었다(벤치마크도 중소도시 0.30x). 도시 테마 21개는 로테이션에서만 빠지고 데이터는
+  //   그대로 둔다 — `city` 슬롯 코드도 남겨 되돌리기는 이 배열 한 줄이다.
+  //   슬롯마다 포인터 따로. 큐레이션·캐러셀은 음식 테마만.
   //   ※ 도시×단일음식(춘천 닭갈비 등)은 실측 풀 0~9곳이라 불가 — 권역 단위까지만.
   const kstDow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay(); // 0=일
-  const SLOT_BY_DOW = ["nation", "city", "spot", "nation", "spot", "city", "spot"]; // 일~토
+  const SLOT_BY_DOW = ["nation", "nation", "spot", "nation", "spot", "nation", "spot"]; // 일~토
   const slot = process.env.ROUNDUP_STYLE ? "food" : SLOT_BY_DOW[kstDow];
   const isSpot = (t) => t.mode === "area" && t.tour?.mapX;
   const isCity = (t) => (t.mode === "area" && !t.tour?.mapX) || (t.mode !== "area" && (t.areaCode || t.areaCodes));
@@ -2929,7 +2965,30 @@ async function main() {
   // 첫 3초 훅 컷 — 그리드(classic·dark) 릴스에만. cdMode(카운트다운·hero)는 이미
   // 인트로 컷이 있고, pages는 표지 4초 뒤 카드가 이어져 훅이 따로 필요 없다.
   const HOOK_SEC = 3;
-  const hookApplies = !cdMode && coverStyle !== "pages";
+  const hookEligible = !cdMode && coverStyle !== "pages";
+  // 훅 컷 A/B (2026-09-15) — 회차마다 grid8 / hook3+grid5를 교대한다.
+  //
+  // 왜 되돌리지 않고 교대인가: 9/15 실측에서 grid8 12건 시청 4.8s vs hook3+grid5 5건 2.1s로
+  // 두 집단의 시청 시간이 한 건도 겹치지 않았지만(grid8 전부 3.1s 이상, hook 전부 2.8s 이하),
+  // grid8 표본은 거의 전부 8월(계정이 잘 나가던 기간)이고 hook3+grid5는 전부 9월 침체기라
+  // **기간과 완전히 교란**돼 있었다. 같은 기간의 유일한 대조군인 9/7 유성(grid8, 3.1s)이
+  // hook3+grid5 전 회차보다 높긴 했지만 1건이다. 그냥 훅을 빼면 조회수가 회복해도 훅 컷
+  // 탓인지 계정 냉각이 풀린 건지 구분할 수 없다 — 그래서 두 구성을 같은 기간에 나란히 낸다.
+  // 판정은 cover-report의 "릴스 구성별 평균" 표, **조회수가 아니라 시청 시간**으로(구성당 5건+).
+  //
+  // HOOK_CUT=1/0으로 강제할 수 있다(시안·재현용). 강제한 회차는 포인터를 움직이지 않는다.
+  const hookForced = process.env.HOOK_CUT === "1" || process.env.HOOK_CUT === "0";
+  let hookOn = true;
+  if (hookEligible) {
+    if (hookForced) {
+      hookOn = process.env.HOOK_CUT === "1";
+    } else {
+      const hi = await db.execute("SELECT value FROM config WHERE key = 'hook_idx'");
+      hookOn = (hi.rows.length ? Number(hi.rows[0].value) : 0) % 2 === 1;
+    }
+    console.log(`훅 컷 A/B: ${hookOn ? "hook3+grid5" : "grid8(훅 없음)"}${hookForced ? " — HOOK_CUT 강제" : ""}`);
+  }
+  const hookApplies = hookEligible && hookOn;
   const hookCut = hookApplies ? await buildHookCut(theme, places, pkBg?.url) : null;
   if (hookApplies && !hookCut) console.error("⚠️ 훅 컷 없이 발행합니다 — 표지 8초 단일컷(reel_format=grid8)");
   // 성과 비교용으로 '무엇이 실제로 나갔는가'를 남긴다 (cover-report가 이 값으로 표본을 가른다)
@@ -3119,6 +3178,18 @@ ${bgm.attribution}`;
     await db.execute({
       sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
       args: ["cover_idx", String(next)],
+    });
+  }
+
+  // 훅 컷 A/B 포인터 이동 — 두 구성이 같은 횟수만큼 나가야 비교가 된다.
+  // ⚠️ 훅이 애초에 적용될 수 없는 회차(pages·카운트다운·hero)는 건드리지 않는다. 움직이면
+  //    실제로 나간 적 없는 쪽이 한 칸씩 밀려 교대가 깨진다(표지 포인터와 달리 여기는
+  //    "나갈 수 있었던 회차"만 세야 한다).
+  if (hookEligible && !hookForced) {
+    const hi = await db.execute("SELECT value FROM config WHERE key = 'hook_idx'");
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+      args: ["hook_idx", String(((hi.rows.length ? Number(hi.rows[0].value) : 0) + 1) % 2)],
     });
   }
 
