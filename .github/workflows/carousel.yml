@@ -60,6 +60,8 @@ jobs:
         run: npx tsx scripts/make-roundup.mjs
         env:
           ROUNDUP_STYLE: carousel
+          # 2026-10-12 복귀 실험(사용자 결정, 판정 10/26): 옛 디자인으로 되돌린다 — CLAUDE.md "지금 진행 중인 것" 참조. 판정 전에 지우지 말 것.
+          COVER_V1: "1"
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
