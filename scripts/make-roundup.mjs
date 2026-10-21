@@ -218,13 +218,18 @@ async function themeWeights(db, all) {
   if (!rows.length) return null;
 
   const stat = {};
-  const recent = []; // 직전에 쓴 테마 (모음집·큐레이션 통합, 최근 2개)
+  // 최근 14일 안에 쓴 테마(모음집·큐레이션 통합)는 시도 순서 맨 뒤로 — 다른 테마가 다 실패할 때만 나온다.
+  // 예전엔 직전 2개만 빼서 쭈꾸미가 10/16·10/21에, 장어가 3회 다시 뽑혔다(2026-10-22 사용자 결정).
+  const COOLDOWN_DAYS = 14;
+  const cutoff = new Date(Date.now() + 9 * 3600e3 - COOLDOWN_DAYS * 86400e3).toISOString().slice(0, 10).replace(/-/g, "");
+  const recent = [];
   for (const r of rows) {
     // content_id = roundup-<테마키>-<날짜> (테마키에도 하이픈이 있어 뒤 날짜를 기준으로 자름).
     // 날짜는 20260818 형식이고, 초기 게시물에는 roundup-reel- 접두사도 있다.
     const m = String(r.content_id).match(/^(?:roundup|countdown)-(?:reel-)?(.+)-\d{4}-?\d{2}-?\d{2}$/);
     if (!m || !known.has(m[1])) continue;
-    if (recent.length < 2 && !recent.includes(m[1])) recent.push(m[1]);
+    const ymd = String(r.content_id).match(/(\d{4})-?(\d{2})-?(\d{2})$/);
+    if (ymd && ymd.slice(1).join("") >= cutoff && !recent.includes(m[1])) recent.push(m[1]);
     try {
       const res = await fetch(
         `https://graph.instagram.com/v23.0/${r.ig_media_id}/insights?metric=views&access_token=${token}`,

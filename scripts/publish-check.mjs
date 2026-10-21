@@ -22,8 +22,8 @@ const EXPECTED = [
   // 일반 릴스는 2026-09-15부터 화·목·토만 (69건 중앙값 134·시청 2.3s·히트 0 — 주 7 → 3회)
   { key: "reel", prefix: "reel-", label: "일반 릴스", dows: [2, 4, 6], workflow: "reels.yml" },
   { key: "roundup", prefix: "roundup-", label: "모음집", dows: [0, 1, 2, 3, 4, 5, 6], workflow: "roundup.yml" },
-  { key: "countdown", prefix: "countdown-", label: "큐레이션", dows: [1, 5], workflow: "countdown.yml" },
-  { key: "carousel", prefix: "carousel-", label: "캐러셀", dows: [3, 6], workflow: "carousel.yml" },
+  { key: "countdown", prefix: "countdown-", label: "큐레이션", dows: [1, 3, 5, 6], workflow: "countdown.yml" }, // 2026-10-22 수·토 캐러셀 슬롯 흡수
+  { key: "carousel", prefix: "carousel-", label: "캐러셀", dows: [], workflow: "carousel.yml" }, // 2026-10-22 예약 발행 중단(수동만)
 ];
 
 // 마지막 발행 창(모음집 17:30~22:00 KST)이 닫힌 뒤에야 그날을 판정한다.

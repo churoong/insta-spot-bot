@@ -77,6 +77,9 @@ jobs:
           ROUNDUP_DRY: ${{ inputs.dry && '1' || '' }}
           ROUNDUP_THEME: ${{ inputs.theme }}
           ROUNDUP_FORCE: ${{ inputs.force && '1' || '' }}
+          # 2026-10-22 훅 컷 A/B 종료(사용자 결정): 훅 없음 6건 시청 중앙 3.5초·조회 217 vs 훅 6건 2.2초·148
+          # → 표지 8초 단일컷(grid8) 고정. 강제 회차라 hook_idx는 움직이지 않는다. 다시 켜려면 이 줄 삭제.
+          HOOK_CUT: "0"
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
