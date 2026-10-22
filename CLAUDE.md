@@ -19,8 +19,8 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 |---|---|---|---|
 | 일반 릴스(트라이얼) | **화·목·토** 08:00 (창 08~12) — 2026-09-15 주 7 → 3회 | reels.yml | scripts/make-reel.mjs |
 | 모음집 릴스 + 표지 스토리 | 매일 17:30 (창 17:30~22:00) — 화·목·토 상권 / **월·수·금·일 전국 음식**(2026-09-15) | roundup.yml | scripts/make-roundup.mjs |
-| 큐레이션(카운트다운) | 월·금 12:30 (창 12:30~16) | countdown.yml | make-roundup (ROUNDUP_STYLE=countdown) |
-| 캐러셀(저장형) | **수·토** 12:30 (창 12:30~16) | carousel.yml | make-roundup (ROUNDUP_STYLE=carousel) |
+| 큐레이션(카운트다운) | **월·수·금·토** 12:30 (창 12:30~16) — 2026-10-22 캐러셀 슬롯 흡수 | countdown.yml | make-roundup (ROUNDUP_STYLE=countdown) |
+| 캐러셀(저장형) | **예약 발행 중단**(2026-10-22, 수동 실행만) — 7건 중앙 39, 9/19 판정선 100 미달 | carousel.yml | make-roundup (ROUNDUP_STYLE=carousel) |
 
 ⚠️ 발행 요일을 바꾸면 **네 곳을 같이 고칠 것**: ① 해당 yml의 `schedule` 크론(UTC — KST 08시는 전날 23시라 요일이 하루 밀린다) + 첫 스텝 게이트의 요일 조건 ② `vercel.json` 크론 ③ `scripts/publish-check.mjs`의 `EXPECTED[].dows`(안 고치면 새 슬롯이 조용히 빠져도 이슈가 안 열린다 — 2026-09-09 캐러셀 주2회 전환 때 실제로 토요일만 보고 있었다) ④ 이 표.
 | 월간 쇼츠 벤치마크 | 매월 1일 | benchmark.yml | scripts/benchmark-shorts.mjs |
@@ -33,6 +33,12 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - ❌ 카카오 로컬 카테고리로 카페·주점을 거르는 건 **실익 없음**(2026-09-09 실측: 발행분 28곳 전원 순수 음식점). 현행 상호명+cat3 필터로 충분 — 다시 제안하지 말 것. ❌ 카카오 PlayMCP는 카카오 계정 OAuth 기반 대화형 AI 전용이라 무인 크론 파이프라인에 붙일 수 없다.
 
 ## 지금 진행 중인 것 (2026-09-09 기준 — 세션 인계용)
+### ▶ 2026-10-22 사용자 결정 3건 (10/12~10/21 관망 10일 분석 반영)
+- **훅 컷 A/B 종료 → 끔**: `roundup.yml`에 `HOOK_CUT=0`(코드는 그대로, 줄 삭제로 복귀). 9/15 교대 이후 72h 지난 표본: 훅 없음 6건 시청 중앙 3.5초·조회 중앙 217·3.1초 이상 5/6 vs 훅 6건 2.2초·148·0/6. 훅 쪽이 음식 테마(더 강한 쪽)를 더 많이 받았는데도 졌다.
+- **캐러셀 예약 중단 → 수·토 12:30은 큐레이션**: countdown.yml 크론·게이트, vercel.json, publish-check `dows`를 함께 바꿨다. carousel.yml은 수동 실행만 남김.
+- **테마 쿨다운 14일**: `themeWeights`의 `recent`가 직전 2개 → 최근 14일 안에 쓴 테마 전부(모음집·큐레이션 통합). 시도 순서 맨 뒤로 보내므로 다른 테마가 모두 실패할 때만 다시 나온다. 계기: 쭈꾸미 10/16·10/21, 장어 3회 재등판.
+- 관망 기간 기준선(V2·훅 교대): 예정 20회 전부 발행, 릴스 17건 조회 중앙 129·최고 219, 저장 합계 1. 옛 디자인(V1) 복귀는 사용자가 보류함(PR #23 닫음) — 먼저 권하지 말 것.
+
 숫자는 스냅샷이라 낡는다. **최신 수치는 `gh workflow run report.yml` → 런 로그**(시크릿 없는 클라우드 세션도 실행·조회 가능).
 발행 누락은 `publish-check.yml`이 매일 자동 점검해 GitHub 이슈로 알린다.
 
