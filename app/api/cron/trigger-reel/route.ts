@@ -19,6 +19,11 @@ export async function GET(req: NextRequest) {
   if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  // 2026-10-22 일반 릴스 예약 발행 중단(사용자 결정). 외부 크론이 아직 이 주소를 부르더라도
+  // 발행되지 않게 여기서 막는다. 수동 발행은 GitHub에서 reels.yml을 직접 실행.
+  if (process.env.REELS_TRIGGER_ENABLED !== "1") {
+    return NextResponse.json({ ok: true, skipped: "일반 릴스 예약 발행 중단(2026-10-22)" });
+  }
 
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPO;

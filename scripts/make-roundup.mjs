@@ -660,7 +660,9 @@ async function collectPlaces(theme, limit) {
   ];
   let items = [];
   for (const c of codes) {
-    const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: "100", arrange: "R" };
+    // 가격형 테마(maxPrice)는 착한가격업소로 가격이 확인된 곳만 남기므로 넓게 받는다
+    // (2026-10-22 실측: '국수' 543곳 중 사진·가격 둘 다 있는 곳 11곳).
+    const params = { keyword: theme.keyword, contentTypeId: "39", numOfRows: theme.maxPrice ? "600" : "100", arrange: "R" };
     if (c) params.areaCode = String(c);
     try {
       items.push(...(await tourCall("searchKeyword2", params)));
@@ -671,6 +673,19 @@ async function collectPlaces(theme, limit) {
   items = items.filter(
     (it) => it.firstimage && (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3")
   );
+  if (theme.maxPrice) {
+    // 가격형: 정부 지정 착한가격업소 가격이 maxPrice 이하로 확인된 곳만. 가격을 추정하지 않는다.
+    const { markGoodPrice } = await import("../lib/goodprice.ts");
+    const tagged = items.map((it) => ({ it, name: String(it.title).replace(/\[[^\]]*\]/g, "").trim(), address: [it.addr1, it.addr2].filter(Boolean).join(" ") }));
+    markGoodPrice(tagged);
+    // 가격이 그 음식 메뉴의 가격이어야 한다 — 강화손칼국수의 착한가격 등록 메뉴는 '부추전 8,000원'이었다(10/22 DRY).
+    const food = theme.food || theme.keyword;
+    items = tagged
+      .filter((t) => t.goodPrice?.price && t.goodPrice.price <= theme.maxPrice && String(t.goodPrice.menu).includes(food))
+      .map((t) => t.it);
+    console.log(`[collect] 가격형 ${theme.maxPrice}원 이하 확인: ${items.length}곳`);
+    extra.length = 0; // 보조 소스는 가격 확인이 안 되므로 쓰지 않는다
+  }
   const seen = {};
   const picked = [];
   const names = new Set();
@@ -1478,8 +1493,8 @@ async function composeReelCoverV2(theme, places, bgUrl = null) {
   // 얹으면 경계선이 생겨 "레이어를 덮었다"가 눈에 보인다 — 그게 템플릿처럼 보이는 이유다.
   const nameScrim = Buffer.from(
     `<svg width="${PH_W}" height="${PH_H}"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
-       <stop offset="${(1 - 190 / PH_H) * 100}%" stop-color="#080402" stop-opacity="0"/>
-       <stop offset="${(1 - 90 / PH_H) * 100}%" stop-color="#080402" stop-opacity="0.62"/>
+       <stop offset="${(1 - 230 / PH_H) * 100}%" stop-color="#080402" stop-opacity="0"/>
+       <stop offset="${(1 - 120 / PH_H) * 100}%" stop-color="#080402" stop-opacity="0.66"/>
        <stop offset="100%" stop-color="#080402" stop-opacity="0.90"/>
      </linearGradient></defs>
      <rect width="${PH_W}" height="${PH_H}" rx="18" fill="url(#g)"/></svg>`
@@ -1539,12 +1554,23 @@ async function composeReelCoverV2(theme, places, bgUrl = null) {
     const B = T + PH_H;
     const nm = coverName(p.name);
     const ns = nm.length <= 8 ? 40 : nm.length <= 11 ? 34 : 29;
+    // 읽을거리 한 줄 — "대표 메뉴 · 가격"(2026-10-22 사용자 결정). 8초 정지 화면에서
+    // 시청 5초+ 회차는 전부 칸마다 읽을 게 있던 옛 표지였다. 불릿 3줄 대신 명사구 한 줄만.
+    // 가격은 착한가격업소(정부 지정)로 확인된 곳만 붙인다 — 없는 가격을 지어내지 않는다.
+    // 가격은 착한가격업소에 등록된 그 메뉴의 가격이다 — 반드시 같은 출처의 메뉴명과 짝지을 것
+    // (TourAPI 대표메뉴에 착한가격 가격을 붙이면 "평양식만두전골 · 7,000원" 같은 틀린 조합이 나왔다, 10/22 DRY).
+    const gp = p.goodPrice?.price ? p.goodPrice : null;
+    const menu1 = String((gp ? gp.menu : p.menu) || "").split(/[,·/]/)[0].trim().slice(0, 12);
+    const price = gp ? `${Number(gp.price).toLocaleString()}원` : "";
+    const info = [menu1, price].filter(Boolean).join(" · ");
+    const nameY = info ? B - 98 : B - 60;
     // 순위 숫자는 배지를 씌우지 않는다 — 사진 위 큰 흰 숫자에 옅은 그림자만.
     // 알약 배지가 칸마다 6개 붙는 게 "템플릿에 채워 넣은" 인상의 절반이었다.
     cells += `
     <g>
       <text x="${L + 22}" y="${T + 66}" font-family="${TFONT}" font-size="60" font-weight="900" fill="#ffffff" fill-opacity="0.95" stroke="#0b0503" stroke-opacity="0.28" stroke-width="6" paint-order="stroke">${i + 1}</text>
-      <text x="${L + 20}" y="${B - 60}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+      <text x="${L + 20}" y="${nameY}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
+      ${info ? `<text x="${L + 20}" y="${B - 58}" font-family="${FONT}" font-size="29" font-weight="700" fill="#ffffff" fill-opacity="0.94">${esc(info)}</text>` : ""}
       <text x="${L + 20}" y="${B - 24}" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffffff" fill-opacity="0.68">${esc(p.region)}${p.hundred ? "  ·  백년가게" : p.goodPrice ? "  ·  착한가격" : ""}</text>
     </g>`;
   }
@@ -1889,7 +1915,10 @@ function buildPunchyTitle(theme, n) {
   // ("영남 순대국"). 이때 수식어는 지역 중복을 피해 무지역형만 쓴다.
   const regional = r !== "전국";
   const pool = regional ? tops.filter((t) => !t.includes(r)) : tops;
-  const top = pool[Math.floor(Math.random() * pool.length)];
+  // 가격형 테마는 가격 조건이 곧 수식어("1만 원 이하") — 착한가격업소로 확인된 사실만 쓴다.
+  const top = theme.maxPrice
+    ? `${theme.maxPrice % 10000 === 0 ? theme.maxPrice / 10000 + "만" : theme.maxPrice.toLocaleString()} 원 이하`
+    : pool[Math.floor(Math.random() * pool.length)];
   const main = regional ? `${r} ${f}` : f;
   // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의
   // "N대 맛집"을 기본으로 하고 "TOP N"을 섞는다.
