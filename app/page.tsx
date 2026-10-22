@@ -294,8 +294,7 @@ export default async function Home() {
                 <div style={{ color: "#c8cdd8", fontSize: 13, lineHeight: 1.8 }}>
                   ① 위 태그의 최신글 15개에 좋아요 ❤️<br />
                   ② 마음에 드는 게시물 2~3곳에 진심 댓글 💬<br />
-                  ③ 결이 맞는 활발한 계정 2~3개 팔로우 🤝<br />
-                  ④ 우리 게시물의 새 댓글에 하트·답글 달기 🙌
+                  ③ 우리 게시물의 새 댓글에 하트·답글 달기 🙌
                 </div>
                 <div style={{ color: "#c9b98a", fontSize: 12.5, marginTop: 8 }}>
                   ⏰ 추천 시간대: {guide.timeSlots}

@@ -42,6 +42,20 @@
    ]
   },
   {
+   "key": "guksu-under10k",
+   "food": "국수",
+   "keyword": "국수",
+   "region": "전국",
+   "count": 6,
+   "maxPrice": 10000,
+   "emoji": "🍜",
+   "tags": [
+    "국수",
+    "가성비맛집",
+    "착한가격"
+   ]
+  },
+  {
    "key": "naengmyeon",
    "food": "냉면",
    "keyword": "냉면",
