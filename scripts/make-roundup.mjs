@@ -2424,7 +2424,14 @@ function buildCaption(theme, places, descending = false, ep = null) {
   const saveCta = [
     `📌 나중에 못 찾지 않게 지금 저장해 두세요!`,
     `📌 출장·여행 갈 때 꺼내볼 수 있게 저장해 두세요!`,
-    `📌 ${theme.keyword}에 진심인 친구에게 이 리스트를 보내주세요!`,
+  ][Math.floor(Math.random() * 2)];
+  // '지도' 댓글 안내 줄 → 공유(DM 보내기) 요청으로 교체(2026-10-22 사용자 결정).
+  // 지도 DM은 발행 233건 동안 1건만 나갔다 — 거의 안 쓰이는 줄이 공유 신호 자리를 차지하고 있었다.
+  // '지도' 댓글 자동 DM(웹훅)은 그대로 살아 있다. 공유 문구는 저장 문구와 겹치지 않게 여기로만.
+  const shareCta = [
+    `📤 같이 갈 사람에게 이 리스트를 보내주세요`,
+    `📤 ${theme.keyword} 좋아하는 친구에게 공유해 주세요`,
+    `📤 이번 주 약속 장소, 이 리스트로 정해 보세요 — 단톡방에 공유!`,
   ][Math.floor(Math.random() * 3)];
   return (
     `🔥 ${ep ? `전국맛집로드 EP.${ep} | ` : ""}${theme.titleResolved || theme.title}\n\n` +
@@ -2433,7 +2440,7 @@ function buildCaption(theme, places, descending = false, ep = null) {
     // 선정 기준 라인 제외 (2026-09-09 사용자 지시 "캡션에 선정 기준 문구 다 빼줘").
     // 랭킹 근거(rankBasis)는 카운트다운 인트로 카드에만 남는다.
     `💬 ${engagementLine(theme, places.length)}\n` +
-    `🗺 ${places.length}곳 지도 링크가 필요하면 댓글에 '지도'라고 남겨주세요\n\n` +
+    `${shareCta}\n\n` +
     `${saveCta}\n` +
     `⏰ 내일 저녁 5시 반, 다음 편으로 이어집니다\n\n` +
     tags // 사진 출처 라인 제외 (2026-09-03 사용자 지시)
