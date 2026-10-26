@@ -3176,7 +3176,19 @@ ${bgm.attribution}`;
   // 그리드 표지 구간(훅 다음 1초 지점)을 커버로 지정한다.
   const thumbMs = hookCut ? (HOOK_SEC + 1) * 1000 : 0;
   let mediaId;
-  try {
+  // 비공식 API 핸드오프(2026-10-27 사용자 결정): 영상까지 만든 뒤 사용자 PC의 에이전트
+  // (private/agent.py)에 발행을 넘긴다 — 인스타 음원·위치 태그·스토리 스티커·첫 댓글 고정은
+  // 공식 API로는 안 된다. 에이전트가 10분 안에 안 가져가면(PC 꺼짐 등) 아래 공식 경로로 그대로 발행.
+  // 켜고 끄기: GitHub 저장소 변수 PRIVATE_HANDOFF=1 (코드 수정 없이).
+  let privateDone = false;
+  if (process.env.PRIVATE_HANDOFF === "1") {
+    const viaPrivate = await handoffToPrivate({
+      db, cid, reelUrl, coverJpg: reelCover ?? cards?.[0], caption, bgmLine: bgm?.attribution ?? "",
+      musicOk: !cdMode, thumbMs, theme, places, reelFormat,
+    });
+    if (viaPrivate) { mediaId = viaPrivate; privateDone = true; }
+  }
+  if (!privateDone) try {
     mediaId = await publishReelSmart(reelUrl, finalCaption, musicOpt, { thumbOffsetMs: thumbMs });
   } catch (e) {
     // 인스타가 사유 없이 컨테이너 ERROR를 주는 경우(9/3 성수 편 실측). 같은 규격의 영상이
@@ -3198,7 +3210,8 @@ ${bgm.attribution}`;
 
   // 발행 직후 표지를 스토리로도 공유 — 팔로워 재도달 + 프로필 방문 루프.
   // (표지는 이미 9:16이라 그대로 스토리 규격. 실패해도 본 발행에는 영향 없음)
-  try {
+  // 비공식 경로로 나간 회차는 에이전트가 스티커(게시물·위치)를 붙여 스토리를 직접 올린다.
+  if (!privateDone) try {
     const coverJpg = reelCover ?? cards[0];
     if (coverJpg) {
       const { publishStory } = await import("../lib/instagram.ts");
@@ -3278,6 +3291,67 @@ function curlUpload(args) {
 }
 
 /** 공개 URL 업로드 폴백 체인 (Blob → tmpfiles → catbox) */
+/**
+ * 비공식 API 핸드오프 — posts 행을 'handoff'로 바꾸고 발행 재료(JSON)를 실어 둔 뒤,
+ * 사용자 PC의 에이전트(private/agent.py)가 발행하기를 기다린다.
+ *   handoff → (에이전트가 가져감) handoff_claimed → published | handoff_failed
+ * 반환: 에이전트가 발행했으면 공식 Graph 미디어 ID, 아니면 null(→ 호출부가 공식 API로 발행).
+ * ⚠️ 이중 발행 방지: 되찾기는 반드시 `WHERE status = 'handoff'`(아무도 안 가져간 상태)에서만.
+ *    에이전트가 가져간 뒤에는 결과가 나올 때까지 기다린다 — 그 사이 공식 발행을 하면 두 번 올라간다.
+ */
+async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, musicOk, thumbMs, theme, places, reelFormat }) {
+  let coverUrl = null;
+  try { if (coverJpg) coverUrl = await uploadPublic(coverJpg); } catch { /* 스토리만 못 올림 */ }
+  const top = places[0] ?? {};
+  const gp = top.goodPrice?.price ? top.goodPrice : null;
+  const menu = String((gp ? gp.menu : top.menu) || "").split(/[,·/]/)[0].trim();
+  const payload = {
+    v: 1,
+    reel_url: reelUrl,
+    cover_url: coverUrl,
+    caption,
+    bgm_line: bgmLine,
+    music_ok: musicOk, // 카운트다운은 나레이션이 주인공이라 음원으로 덮지 않는다
+    thumb_ms: thumbMs,
+    reel_format: reelFormat,
+    // 위치 태그: 상권편은 그 동네, 음식편은 1위 식당
+    location: theme.mode === "area"
+      ? { query: theme.keyword, lat: Number(theme.tour?.mapY) || null, lng: Number(theme.tour?.mapX) || null }
+      : { query: top.name, address: top.address ?? "", lat: top.lat ?? null, lng: top.lng ?? null },
+    first_comment: `🥇 1위 ${top.name}${top.region ? ` (${top.region})` : ""}` +
+      (menu ? ` — ${menu}${gp ? ` ${Number(gp.price).toLocaleString()}원` : ""}` : ""),
+    hashtag: (theme.tags ?? [])[0] ?? null,
+  };
+  await db.execute({ sql: "UPDATE posts SET status = 'handoff', handoff = ? WHERE content_id = ?", args: [JSON.stringify(payload), cid] });
+  console.log("[handoff] 로컬 에이전트에 발행을 넘김 — 대기");
+  const WAIT = Number(process.env.HANDOFF_WAIT_MIN || 10) * 60e3;
+  const HARD = WAIT + 15 * 60e3;
+  const t0 = Date.now();
+  while (Date.now() - t0 < HARD) {
+    await new Promise((r) => setTimeout(r, 20000));
+    const row = (await db.execute({ sql: "SELECT status, ig_media_id FROM posts WHERE content_id = ?", args: [cid] })).rows[0];
+    const st = String(row?.status ?? "");
+    if (st === "published" && row.ig_media_id) {
+      console.log("[handoff] 로컬 에이전트 발행 완료:", row.ig_media_id);
+      return String(row.ig_media_id);
+    }
+    if (st === "handoff_failed") {
+      await db.execute({ sql: "UPDATE posts SET status = 'publishing' WHERE content_id = ? AND status = 'handoff_failed'", args: [cid] });
+      console.log("[handoff] 에이전트 발행 실패 — 공식 API로 발행");
+      return null;
+    }
+    if (st === "handoff" && Date.now() - t0 >= WAIT) {
+      const u = await db.execute({ sql: "UPDATE posts SET status = 'publishing' WHERE content_id = ? AND status = 'handoff'", args: [cid] });
+      if (u.rowsAffected) {
+        console.log(`[handoff] ${WAIT / 60e3}분 동안 에이전트 응답 없음(PC 꺼짐?) — 공식 API로 발행`);
+        return null;
+      }
+    }
+  }
+  // 에이전트가 가져간 채 끝내 결과가 없다 — 공식 발행을 하면 이중 발행 위험이라 여기서 멈춘다.
+  throw new Error("핸드오프 결과 없음(에이전트가 가져간 뒤 응답 없음) — 이중 발행 방지로 공식 발행 생략");
+}
+
 async function uploadPublic(filePath, { avoidHostOf = "" } = {}) {
   // avoidHostOf: 직전에 쓴 URL — 그 호스트(tmpfiles 등)는 건너뛰고 다음 폴백으로 (재시도용)
   const avoid = (host) => avoidHostOf.includes(host);

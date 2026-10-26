@@ -25,3 +25,8 @@ reel-*-preview.jpg
 .tmp*
 pages-preview*
 countdown-card-preview.jpg
+
+# 비공식 API 에이전트 — 로그인 세션·로그·팔로잉 후보(남의 계정 정보)는 공개 저장소에 절대 올리지 않는다
+private/state/
+private/logs/
+__pycache__/

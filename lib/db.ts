@@ -103,6 +103,8 @@ export async function initDb() {
     // 실제로 나간 릴스 구성(hook3+grid5 / grid8 / pages / countdown).
     // cover_style만으로는 2026-09-07 훅 컷 도입 전후가 구분되지 않는다.
     "ALTER TABLE posts ADD COLUMN reel_format TEXT",
+    // 비공식 API 핸드오프 재료(JSON) — scripts/make-roundup.mjs handoffToPrivate → private/agent.py
+    "ALTER TABLE posts ADD COLUMN handoff TEXT",
   ];
   for (const sql of migrations) {
     try {
