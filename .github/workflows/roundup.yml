@@ -32,7 +32,7 @@ on:
 jobs:
   roundup:
     runs-on: ubuntu-latest
-    timeout-minutes: 25 # TourAPI가 느린 날 15분을 넘겨 타임아웃(9/6 실측) — 사진 판정은 8분 예산으로 별도 제한
+    timeout-minutes: 45 # 비공식 핸드오프 대기(최대 25분) 포함. 원래 25 — TourAPI가 느린 날 15분을 넘겨 타임아웃(9/6 실측) — 사진 판정은 8분 예산으로 별도 제한
     # 같은 워크플로의 런은 직렬 실행 — Vercel 트리거 런과 지연 도착한 schedule 런이 병렬로 돌면
     # 둘 다 하루 1회 가드를 통과해 이중 발행될 수 있다(가드→마커 사이 수 분). 두 번째 런은 대기 후 가드에 걸린다.
     concurrency:
@@ -81,6 +81,8 @@ jobs:
           # → 표지 8초 단일컷(grid8) 고정. 강제 회차라 hook_idx는 움직이지 않는다. 다시 켜려면 이 줄 삭제.
           HOOK_CUT: "0"
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          # 비공식 API 핸드오프 스위치(2026-10-27) — 저장소 변수 PRIVATE_HANDOFF=1이면 사용자 PC 에이전트에 발행을 넘긴다.
+          PRIVATE_HANDOFF: ${{ vars.PRIVATE_HANDOFF }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
