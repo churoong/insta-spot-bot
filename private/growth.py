@@ -94,7 +94,7 @@ def usertags_for(c, places: list) -> list:
 
 
 # ---------- 오늘의 음원 ----------
-def trending_track(c):
+def trending_track(c, skip: int = 0):
     """맛집 태그 인기 릴스들이 쓴 음원(제목·가수)만 센다 — 남의 영상은 쓰지 않는다."""
     k = f"music:{today()}"
     cached = state_get(k)
@@ -118,7 +118,7 @@ def trending_track(c):
         cached = json.dumps(top, ensure_ascii=False)
         if top:
             log.info(f"🎵 오늘 맛집 릴스 인기 음원: {top}")
-    for (title, artist), _n in json.loads(cached):
+    for (title, artist), _n in json.loads(cached)[skip:]:
         try:
             for t in c.search_music(f"{title} {artist}".strip())[:5]:
                 if _norm(title) in _norm(t.title) and not t.is_explicit and (t.uri or t.progressive_download_url):
