@@ -223,25 +223,27 @@ function renderSvg(muniWin, sidoWin, total, source) {
   }).join("");
   const borders = prov.map((f) => `<path d="${pathOf(f.geometry)}" fill="none" stroke="#28221e" stroke-width="2.2" stroke-linejoin="round"/>`).join("");
 
-  // 라벨: 시군구를 가장 많이 차지한 국밥 2개 → 그 국밥이 가장 넓게 칠한 시도 중심에 "○○ 나라"
-  const wins = {};
-  for (const [code, w] of Object.entries(muniWin)) if (w) (wins[w] ??= []).push(code);
+  // 라벨: 국밥마다 "그 국밥이 가장 많이 칠한 시도(면적 비율)"를 찾아, 비율 50% 이상인 것 중 상위 2개에 "○○ 나라".
+  // 절대 면적으로 고르면 넓은 강원도에 라벨이 가서 엉뚱한 곳을 가리켰다(2026-10-27 첫 실집계).
+  const areaOf = (f) => { const [x1, y1, x2, y2] = f._bbox ??= bbox(f.geometry); return (x2 - x1) * (y2 - y1); };
+  const sidoArea = {}, typeArea = {};
+  for (const f of muni) {
+    const sc = f.properties.code.slice(0, 2), w = muniWin[f.properties.code], a = areaOf(f);
+    sidoArea[sc] = (sidoArea[sc] || 0) + a;
+    if (w) ((typeArea[w] ??= {})[sc] = (typeArea[w][sc] || 0) + a);
+  }
+  const cands = Object.entries(typeArea).map(([k, bySido]) => {
+    const [sc, a] = Object.entries(bySido).sort((x, y) => y[1] / sidoArea[y[0]] - x[1] / sidoArea[x[0]])[0];
+    return { k, sc, frac: a / sidoArea[sc] };
+  }).filter((c) => c.frac >= 0.5).sort((a, b) => b.frac - a.frac);
   const labels = [];
-  for (const [k, codes] of Object.entries(wins).sort((a, b) => b[1].length - a[1].length).slice(0, 2)) {
-    if (codes.length < 6) continue;
-    // 시군구 개수가 아니라 면적으로 — 작은 구가 25개인 서울이 늘 이기지 않게
-    const bySido = {};
-    for (const c of codes) {
-      const [x1, y1, x2, y2] = bbox(muni.find((f) => f.properties.code === c).geometry);
-      bySido[c.slice(0, 2)] = (bySido[c.slice(0, 2)] || 0) + (x2 - x1) * (y2 - y1);
-    }
-    const sc = Object.entries(bySido).sort((a, b) => b[1] - a[1]).map(([s]) => s)
-      .find((s) => !labels.some((l) => l.sc === s));
-    const pf = prov.find((f) => f.properties.code === sc);
+  for (const c of cands) {
+    if (labels.length >= 2 || labels.some((l) => l.sc === c.sc)) continue;
+    const pf = prov.find((f) => f.properties.code === c.sc);
     if (!pf) continue;
     let [x, y] = centerOf(pf.geometry);
     if (labels.some((l) => Math.abs(l.y - y) < 70)) y += 80;
-    labels.push({ sc, x, y, text: `${k} 나라`, color: color[k] });
+    labels.push({ sc: c.sc, x, y, text: `${c.k} 나라`, color: color[c.k] });
   }
   const labelSvg = labels.map((l) => {
     const w = [...l.text].length * 33 + 40;
