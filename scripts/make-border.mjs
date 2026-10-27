@@ -304,8 +304,13 @@ async function uploadPublic(filePath, contentType) {
   }
   try {
     const out = await run("curl", ["-s", "--max-time", "120", "-F", `file=@${filePath}`, "https://tmpfiles.org/api/v1/upload"]);
-    const u = JSON.parse(out)?.data?.url;
-    if (u) return u.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    // dl/ 주소는 다운로드 페이지(HTML)라 인스타가 못 읽는다 — 페이지 안의 실제 파일 링크를 뽑는다(make-roundup과 같은 방식)
+    const pageUrl = JSON.parse(out)?.data?.url?.replace("tmpfiles.org/", "tmpfiles.org/dl/");
+    if (pageUrl) {
+      const html = await fetch(pageUrl, { signal: AbortSignal.timeout(20000) }).then((r) => r.text());
+      const m = html.match(/href="(https:\/\/tmpfiles\.org\/dl\/[^"]+\.(?:jpg|jpeg|png|mp4))"/);
+      if (m) return m[1];
+    }
   } catch (e) {
     console.error("tmpfiles 실패, 다음 폴백:", String(e).slice(0, 150));
   }
