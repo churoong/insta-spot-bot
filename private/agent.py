@@ -26,6 +26,7 @@ import requests
 
 from common import (GRAPH, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
                     graph_id_for_code, graph_token, nap, now_kst, state_get, state_set)
+import growth
 
 log = get_logger("agent")
 START_DATE = "2026-10-27"  # 이 날짜 이후 발행분만 사후 처리(과거 게시물은 건드리지 않는다)
@@ -93,6 +94,15 @@ def find_location(c, loc: dict | None):
 
 # ---------- 음원 ----------
 def pick_track(c):
+    try:
+        t = growth.trending_track(c)
+        if t:
+            log.info(f"🎵 음원(맛집 릴스 인기): {t.title} — {t.display_artist}")
+            return t
+    except Exception as e:
+        if is_block(e):
+            raise
+        log.warning(f"인기 음원 실패(목록으로): {str(e)[:120]}")
     qs = [l.strip() for l in (ROOT / "music.txt").read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
     random.shuffle(qs)
     for q in qs[:3]:
@@ -178,13 +188,22 @@ def handle_handoffs():
                         log.warning(f"음원 합치기 실패(기존 BGM으로): {str(e)[:160]}")
                 if path is video and p.get("bgm_line"):
                     caption += "\n" + p["bgm_line"]  # 저작권 무료 BGM 그대로면 출처 표기 의무
-                media = c.clip_upload(path, caption, thumbnail=cover, location=loc, extra_data=extra)
+                tags = []
+                try:
+                    tags = growth.usertags_for(c, p.get("places", []))
+                    log.info(f"🏷 식당 태그 {len(tags)}곳")
+                except Exception as e:
+                    if is_block(e):
+                        raise
+                    log.warning(f"식당 태그 실패(태그 없이): {str(e)[:120]}")
+                media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc, extra_data=extra)
+                state_set(f"mid:{cid}", str(media.id))
                 published = True
                 log.info(f"✅ 릴스 발행: https://www.instagram.com/reel/{media.code}/")
                 gid = graph_id_for_code(media.code) or f"private:{media.pk}"
                 db("UPDATE posts SET status = 'published', ig_media_id = ? WHERE content_id = ?", [gid, cid])
                 state_set(f"pp:{cid}", "handoff")
-                after_publish(c, media.id, media.pk, p.get("first_comment"), cover, loc)
+                after_publish(c, media.id, media.pk, p.get("first_comment"), cover, loc, p.get("theme"))
         except Exception as e:
             log.error(f"핸드오프 실패 {cid}: {type(e).__name__} {str(e)[:200]}")
             if not published:
@@ -193,7 +212,7 @@ def handle_handoffs():
                 pause(6, f"핸드오프 중 차단 신호({type(e).__name__})")
 
 
-def after_publish(c, media_id, media_pk, first_comment, cover, loc):
+def after_publish(c, media_id, media_pk, first_comment, cover, loc, theme=None):
     """첫 댓글 고정 → 스토리(게시물 스티커 + 위치 스티커). 실패해도 발행은 이미 끝났다."""
     from instagrapi.types import StoryLocation, StoryMedia
     if first_comment:
@@ -210,8 +229,10 @@ def after_publish(c, media_id, media_pk, first_comment, cover, loc):
             nap(30, 90)
             medias = [StoryMedia(media_pk=int(media_pk), x=0.5, y=0.80, width=0.42, height=0.27)]
             locs = [StoryLocation(location=loc, x=0.5, y=0.11, width=0.5, height=0.06)] if loc else []
-            c.photo_upload_to_story(cover, medias=medias, locations=locs)
+            story = c.photo_upload_to_story(cover, medias=medias, locations=locs)
             log.info("📣 스토리(게시물·위치 스티커) 공유")
+            nap(5, 15)
+            growth.add_to_highlight(c, story.pk, theme or {})
         except Exception as e:
             log.warning(f"스토리 실패: {str(e)[:160]}")
 
@@ -242,11 +263,20 @@ def postprocess_recent():
                 if m2:
                     loc_q = {"query": m2[1], "address": m2[2]}
                     first = first or f"🥇 1위 {m2[1]}"
+            state_set(f"mid:{cid}", str(info.id))
             loc = find_location(c, loc_q)
-            if loc and not info.location:
+            places = p.get("places") or [
+                {"name": a, "address": b} for a, b in re.findall(r"\d\.\s*(.+?)\s+—\s+(.+?)(?=\s+\d\.\s|$)", str(row["address"] or ""))]
+            tags = []
+            try:
+                tags = growth.usertags_for(c, places)
+            except Exception as e:
+                if is_block(e):
+                    raise
+            if (loc and not info.location) or tags:
                 nap(5, 15)
-                c.media_edit(info.id, info.caption_text, location=loc)
-                log.info(f"📍 위치 태그 추가 {cid}: {loc.name}")
+                c.media_edit(info.id, info.caption_text, usertags=tags, location=loc if loc else info.location)
+                log.info(f"📍 위치·식당 태그 {cid}: {loc.name if loc else '-'} / {len(tags)}곳")
             if first:
                 nap(20, 50)
                 cm = c.media_comment(info.id, first)
@@ -343,6 +373,45 @@ def unfollow_batch():
     log.info(f"👋 언팔 {n}명 (오늘 누적 {used + n})")
 
 
+def own_recent_media(days: int = 7) -> list:
+    rows = db(f"""SELECT content_id, place_name FROM posts WHERE status = 'published'
+                  AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
+                  AND created_at >= datetime('now', '-{days} days') ORDER BY id DESC""")["rows"]
+    out = []
+    for r in rows:
+        mid = state_get(f"mid:{r['content_id']}")
+        if mid:
+            out.append((mid, r["place_name"]))
+    return out
+
+
+def media_pk_of(graph_id: str):
+    try:
+        perm = requests.get(f"{GRAPH}/{graph_id}", params={"fields": "permalink", "access_token": graph_token()}, timeout=20).json().get("permalink", "")
+        m = re.search(r"/(?:reel|p)/([^/]+)/", perm)
+        return cl().media_pk_from_code(m[1]) if m else None
+    except Exception:
+        return None
+
+
+def growth_round():
+    """하루 단위 활성화 작업 — 각자 하루 1회 상한·시각이 있어 10분마다 불려도 대부분 바로 끝난다."""
+    c = cl()
+    for name, fn in (
+        ("댓글 응대", lambda: growth.reply_own_comments(c, own_recent_media())),
+        ("프로필 고정", lambda: growth.pin_hits(c, media_pk_of)),
+        ("타깃 좋아요", lambda: growth.targeted_likes(c)),
+        ("남의 게시물 댓글", lambda: growth.auto_comments(c)),
+    ):
+        try:
+            fn()
+        except Exception as e:
+            log.warning(f"{name} 실패: {type(e).__name__} {str(e)[:140]}")
+            if is_block(e):
+                pause(12, f"{name} 중 차단 신호({type(e).__name__})")
+                return
+
+
 def tick():
     if time.time() < _paused_until or not SESSION.exists():
         return
@@ -353,6 +422,7 @@ def tick():
         postprocess_recent()
         likes_daily()
         unfollow_batch()
+        growth_round()
 
 
 def main():
