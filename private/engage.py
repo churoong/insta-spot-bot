@@ -171,7 +171,9 @@ def daily_note(c, just_published: str | None = None):
         if state_get(f"note:{today()}"):
             return
         dow = (now_kst().weekday() + 1) % 7  # 일=0
-        text = f"오늘 저녁 5시 · {SLOT_LABEL[dow]} 맛집 리스트 공개 🍲"
+        # 홀수 날은 DM 봇 안내(사람들이 DM을 보내게)
+        text = (f"오늘 저녁 5시 · {SLOT_LABEL[dow]} 맛집 리스트 공개 🍲" if now_kst().day % 2 == 0
+                else "DM으로 동네나 음식 이름 보내면 맛집 리스트 보내드려요 📨")
     try:
         c.create_note(text)
         state_set(f"note:{today()}", text)
@@ -261,6 +263,13 @@ def answer_dms(c):
             continue
         g = geocode_text(msg.text)
         if not g:
+            # 지역 없이 음식만 오면("국밥", "냉면") 그 음식 편 중 조회 최고 편 링크 + 상위 5곳
+            food_only = next((f for f in FOODS_DM if f in msg.text), "")
+            body = food_reply(food_only) if food_only else ""
+            if body:
+                nap(20, 60)
+                c.direct_send(body, thread_ids=[int(th.id)])
+                log.info(f"📨 DM 음식 답장: {food_only}")
             continue
         food = next((f for f in ["국밥", "냉면", "칼국수", "곱창", "짬뽕", "삼겹살", "회", "족발", "보쌈", "돈까스", "초밥", "해장국", "순대국"] if f in msg.text), "")
         body = near_list(g[0], g[1], g[2], food)
@@ -356,6 +365,7 @@ def trigger_burst(why: str):
     for k in BURST_KEYS:
         state_set(f"{k}:{today()}", now)
     state_set("pp:last", "0")  # 다음 바퀴에 바로 growth_round
+    state_set("fastreply:until", str(time.time() + 2 * 3600))  # 발행 후 2시간은 댓글을 3분마다 확인
     log.info(f"🚀 발행 직후 집중 활동 시작({why})")
 
 
@@ -544,3 +554,132 @@ def thank_sharer(c, uid: str, item_type: str) -> bool:
         if _blocked(e):
             raise
         return False
+
+
+# ---------- "여기 어디예요?" 질문 댓글에 대신 답하기(2026-10-27) ----------
+WHERE_Q = re.compile(r"(여기|이 ?집|이 ?곳|가게).{0,6}(어디|위치|이름|상호)|어디(예요|에요|인가요|죠|야|임)\??|위치.{0,4}(알려|궁금|좀)|상호.{0,4}(알려|궁금)")
+NOT_PLACE = re.compile(r"^([가-힣]{1,4}(시|구|군|동|도|읍|면)|서울|부산|대구|인천|광주|대전|울산|제주|대한민국|한국|Korea|Seoul|Busan|South Korea)$", re.I)
+WHERE_PER_DAY = 5
+
+
+def answer_where(c):
+    if _count("where") >= WHERE_PER_DAY or not _slot_passed("where"):
+        return
+    me = str(c.user_id)
+    for tag in random.sample(["맛집", "맛집추천", "먹스타그램", "서울맛집", "부산맛집", "국밥맛집"], 3):
+        medias = c.hashtag_medias_top(tag, amount=9)
+        for m in medias:
+            if _count("where") >= WHERE_PER_DAY:
+                return
+            loc = getattr(m, "location", None)
+            name = (getattr(loc, "name", "") or "").strip()
+            if not name or len(name) < 2 or NOT_PLACE.match(name) or str(m.user.pk) == me:
+                continue
+            try:
+                comments = c.media_comments(m.id, amount=30)
+            except Exception as e:
+                if _blocked(e):
+                    raise
+                continue
+            if any(str(cm.user.pk) == str(m.user.pk) for cm in comments):
+                continue  # 작성자가 이미 답하는 게시물
+            for cm in comments:
+                uid = str(cm.user.pk)
+                if uid == me or not WHERE_Q.search(cm.text or "") or _user_recent(uid) or state_get(f"where:{cm.pk}"):
+                    continue
+                c.media_comment(m.id, f"@{cm.user.username} {name}이에요! 📍 https://map.kakao.com/link/search/{quote(name)}", replied_to_comment_id=cm.pk)
+                state_set(f"where:{cm.pk}", "1")
+                _touch(uid)
+                _bump("where")
+                log.info(f"📍 위치 질문 답글: {name}")
+                nap(90, 240)
+                break
+            nap(5, 15)
+        nap(20, 60)
+
+
+# ---------- "맛집 추천해 주세요" 게시물 응답 ----------
+REQ_TAGS = ["맛집추천해주세요", "맛집추천부탁", "맛집알려주세요", "맛집추천부탁드려요", "맛집추천좀"]
+REQ_PER_DAY = 5
+
+
+def recommend_requests(c):
+    if _count("req") >= REQ_PER_DAY or not _slot_passed("req"):
+        return
+    me = str(c.user_id)
+    rows = db("SELECT name, x, y FROM map_pins")["rows"]
+    for tag in random.sample(REQ_TAGS, 3):
+        try:
+            medias = c.hashtag_medias_recent(tag, amount=20)
+        except Exception as e:
+            if _blocked(e):
+                raise
+            continue
+        for m in medias:
+            if _count("req") >= REQ_PER_DAY:
+                return
+            uid = str(m.user.pk)
+            if uid == me or _user_recent(uid) or time.time() - m.taken_at.timestamp() > 7 * 86400:
+                continue
+            g = geocode_text(m.caption_text or "")
+            if not g:
+                continue
+            near = sorted(rows, key=lambda r: math.hypot((float(r["x"]) - g[1]) * 88.2, (float(r["y"]) - g[2]) * 111))
+            near = [r["name"] for r in near if math.hypot((float(r["x"]) - g[1]) * 88.2, (float(r["y"]) - g[2]) * 111) <= 4][:3]
+            if len(near) < 2:
+                continue
+            c.media_comment(m.id, f"{g[0]} 근처면 {', '.join(near)} 추천드려요! 다 맛있게 드셨으면 좋겠어요 😊")
+            _touch(uid)
+            _bump("req")
+            log.info(f"🙋 추천 요청 응답(#{tag} {g[0]}): {', '.join(near)}")
+            nap(120, 300)
+        nap(20, 60)
+
+
+# ---------- DM 음식 키워드 ----------
+FOODS_DM = ["돼지국밥", "순대국", "국밥", "해장국", "칼국수", "냉면", "밀면", "막국수", "짬뽕", "곱창", "감자탕", "곰탕", "설렁탕",
+            "삼계탕", "족발", "보쌈", "갈비", "장어", "게장", "초밥", "돈까스", "김밥", "떡볶이", "만두", "쭈꾸미", "물회", "흑돼지"]
+
+
+def food_reply(food: str) -> str:
+    """그 음식 편 중 조회가 가장 높았던 편의 링크 + 상위 5곳."""
+    r = db("""SELECT place_name, address, ig_media_id, views FROM posts WHERE status = 'published'
+              AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%') AND place_name LIKE ?
+              ORDER BY COALESCE(views, 0) DESC LIMIT 1""", [f"%{food}%"])["rows"]
+    if not r:
+        return ""
+    p = r[0]
+    names = [n.strip() for n, _a in re.findall(r"\d\.\s*(.+?)\s+—\s+(.+?)(?=\s+\d\.\s|$)", str(p["address"] or ""))][:5]
+    link = ""
+    try:
+        from common import GRAPH, graph_token
+        link = requests.get(f"{GRAPH}/{p['ig_media_id']}", params={"fields": "permalink", "access_token": graph_token()}, timeout=15).json().get("permalink", "")
+    except Exception:
+        pass
+    lines = "\n".join(f"{i + 1}. {n}" for i, n in enumerate(names))
+    return f"🍲 {p['place_name']}\n\n{lines}\n\n{('👉 ' + link) if link else ''}\n동네 이름도 같이 보내주시면 근처로 골라 드려요!".strip()
+
+
+# ---------- 팔로워 접속 시간(공식 API online_followers) ----------
+def refresh_online_hours():
+    """주 1회: 시간대별 접속 팔로워 수(태평양 시간 기준) → 한국 시간 가중치로 바꿔 private_log 'online_hours'.
+    common.online_slot이 이 가중치로 하루 1회 활동 시각을 고른다(노트북 온라인 시간 안에서)."""
+    if state_get(f"onlinehours:{now_kst():%G-%V}"):
+        return
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+    from common import GRAPH, graph_token
+    j = requests.get(f"{GRAPH}/me/insights", params={"metric": "online_followers", "period": "lifetime", "access_token": graph_token()}, timeout=20).json()
+    vals = next((v["value"] for v in (j.get("data") or [{}])[0].get("values", []) if v.get("value")), None)
+    if not vals:
+        return
+    pt = ZoneInfo("America/Los_Angeles")
+    base = datetime.now(pt).replace(minute=0, second=0, microsecond=0)
+    kst = {}
+    for h, n in vals.items():
+        t = base.replace(hour=int(h)).astimezone(ZoneInfo("Asia/Seoul"))
+        kst[str(t.hour)] = int(n)
+    state_set("online_hours", json.dumps(kst))
+    state_set(f"onlinehours:{now_kst():%G-%V}", "1")
+    top = sorted(kst.items(), key=lambda kv: -kv[1])[:4]
+    log.info(f"🕒 팔로워 접속 많은 시각(KST): {top}")

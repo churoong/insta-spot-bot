@@ -544,6 +544,9 @@ def growth_round():
         ("비슷한 계정 팔로워 좋아요", lambda: engage.peer_follower_likes(c)),
         ("단골 관리", lambda: engage.regulars_engage(c, own_recent_media(14))),
         ("베스트 댓글 고정", lambda: engage.best_comment_pin(c, own_recent_media(4))),
+        ("위치 질문 답글", lambda: engage.answer_where(c)),
+        ("추천 요청 응답", lambda: engage.recommend_requests(c)),
+        ("팔로워 접속 시간", lambda: engage.refresh_online_hours()),
     ):
         try:
             fn()
@@ -559,6 +562,15 @@ def tick():
         return
     handle_handoffs()
     process_trials()
+    # 발행 후 2시간은 우리 게시물 댓글을 3분마다 확인해 거의 바로 답한다(평소엔 10분 주기 growth_round)
+    if time.time() < float(state_get("fastreply:until") or 0) and time.time() - float(state_get("fastreply:last") or 0) > 180:
+        state_set("fastreply:last", str(time.time()))
+        try:
+            growth.reply_own_comments(cl(), own_recent_media(1))
+        except Exception as e:
+            log.warning(f"빠른 답글 실패: {str(e)[:100]}")
+            if is_block(e):
+                pause(6, "빠른 답글 중 차단 신호")
     last_pp = float(state_get("pp:last") or 0)
     if time.time() - last_pp > 600:
         state_set("pp:last", str(time.time()))
