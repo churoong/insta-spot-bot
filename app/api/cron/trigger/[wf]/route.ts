@@ -20,6 +20,7 @@ const WORKFLOWS: Record<string, string> = {
   reels: "reels.yml",
   countdown: "countdown.yml",
   carousel: "carousel.yml",
+  morning: "morning.yml", // 07:30 "오늘 점심 뭐 먹지?" 스토리(2026-10-27)
   // story(정답 공개)는 2026-09-02 사용자 지시로 발행 중단 — 퀴즈형 게시물 시절의
   // 잔재였다(현재 릴스는 상호명 공개형이라 "정답"이 성립하지 않음)
 };

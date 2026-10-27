@@ -252,8 +252,10 @@ def after_publish(c, media_id, media_pk, first_comment, cover, loc, theme=None):
     if first_comment:
         try:
             nap(20, 50)
-            c.media_comment(media_id, first_comment)  # 해시태그만(2026-10-27) — 고정하지 않는다
-            log.info(f"#️⃣ 첫 댓글: {first_comment}")
+            cm = c.media_comment(media_id, first_comment)  # 해시태그만(2026-10-27)
+            nap(3, 8)
+            c.comment_pin(media_id, cm.pk)  # 사용자 결정: 해시태그 댓글을 고정
+            log.info(f"#️⃣📌 첫 댓글(해시태그) 고정: {first_comment}")
         except Exception as e:
             log.warning(f"첫 댓글 실패: {str(e)[:160]}")
     if cover:
@@ -312,10 +314,14 @@ def postprocess_recent():
             nap(5, 15)
             mine = [cm for cm in c.media_comments(info.id, amount=30) if str(cm.user.pk) == str(c.user_id) and (cm.text or "").startswith("#")]
             tags = engage.comment_hashtags(p)
-            if not mine and tags:
+            cmh = mine[-1] if mine else None
+            if not cmh and tags:
                 nap(15, 40)
-                c.media_comment(info.id, " ".join("#" + t for t in tags))
-                log.info(f"#️⃣ 첫 댓글(해시태그) {cid}")
+                cmh = c.media_comment(info.id, " ".join("#" + t for t in tags))
+            if cmh:
+                nap(3, 8)
+                c.comment_pin(info.id, cmh.pk)  # 사용자 결정: 해시태그 댓글을 고정(공식 API로는 고정 불가라 여기서)
+                log.info(f"#️⃣📌 해시태그 댓글 고정 {cid}{' (공식 댓글)' if mine else ''}")
             engage.remember_hashtag_check(pk, tags)
             state_set(f"pp:{cid}", "official")
             enqueue_trials(cid, p)
