@@ -210,7 +210,15 @@ def handle_handoffs():
                 # 인터넷이 끊겼다 돌아와 늦게 올리면 같은 편이 두 번 나간다.
                 if time.time() - claimed_at > 12 * 60:
                     raise RuntimeError("가져간 지 12분 초과 — 이중 발행 방지로 업로드 중단")
-                media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc, extra_data=extra)
+                # 대체 텍스트(검색 노출) — 인스타가 거부하면 대체 텍스트만 빼고 한 번 더
+                try:
+                    media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc,
+                                          extra_data={**(extra or {}), "custom_accessibility_caption": engage.alt_text(p)})
+                except Exception as e:
+                    if is_block(e):
+                        raise
+                    log.warning(f"대체 텍스트 포함 업로드 실패 — 빼고 재시도: {str(e)[:120]}")
+                    media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc, extra_data=extra)
                 state_set(f"mid:{cid}", str(media.id))
                 published = True
                 log.info(f"✅ 릴스 발행: https://www.instagram.com/reel/{media.code}/")
@@ -460,13 +468,13 @@ def process_trials():
             if not mv and p.get("bgm_line"):
                 caption += "\n" + p["bgm_line"]
             try:
-                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data=extra or {},
+                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data={**(extra or {}), "custom_accessibility_caption": engage.alt_text(p)},
                                       trial=True, trial_graduation_strategy="ss_performance")
             except Exception as e:
                 if is_block(e):
                     raise
                 log.warning(f"자동 승격 트라이얼 거부 — 수동 승격으로 재시도: {str(e)[:120]}")
-                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data=extra or {}, trial=True)
+                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data={**(extra or {}), "custom_accessibility_caption": engage.alt_text(p)}, trial=True)
             state_set(f"trial:{cid}:{n}", json.dumps({"pk": str(media.pk), "code": media.code, "at": time.time()}))
             log.info(f"🧪 트라이얼 {n} 발행: {cid} https://www.instagram.com/reel/{media.code}/")
     except Exception as e:
@@ -553,6 +561,7 @@ def growth_round():
         ("질문 답변 DM", lambda: engage.question_answers(c)),
         ("맞교환 제안", lambda: engage.peer_proposals(c)),
         ("추천 계정 스토리", lambda: engage.peer_shoutout_story(c)),
+        ("지도 하이라이트", lambda: engage.weekly_map_highlight(c)),
     ):
         try:
             fn()

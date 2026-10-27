@@ -909,3 +909,82 @@ def peer_shoutout_story(c):
         im.save(img, quality=92)
         c.photo_upload_to_story(img, mentions=mentions)
     log.info(f"📣 추천 계정 스토리: {[u.username for u in users]}")
+
+
+# ---------- 릴스 대체 텍스트(검색 노출, 2026-10-27 사용자 결정) ----------
+def alt_text(p: dict) -> str:
+    """'부산 서면 돼지국밥 맛집 6곳 리스트 — A, B, C …' — 인스타 검색·구글 색인이 읽는 대체 텍스트.
+    비공식 업로드(핸드오프·트라이얼)에서만 붙인다. 공식 API 컨테이너에 검증 안 된 필드를 넣으면 발행이 깨질 수 있다."""
+    title = (p.get("caption") or "").split("\n")[0].split("| ")[-1].strip()
+    names = [x.get("name", "") for x in (p.get("places") or []) if x.get("name")]
+    regions = sorted({x.get("region", "").split(" ")[0] for x in (p.get("places") or []) if x.get("region")})
+    s = f"{title} 리스트 — {', '.join(names)}" + (f" ({', '.join(regions[:4])})" if regions else "")
+    return s[:300]
+
+
+# ---------- 전국 맛집 지도 하이라이트(매주) ----------
+def _map_image(path, rows, recent_names):
+    from PIL import Image, ImageDraw, ImageFont
+    from common import REPO
+    W, H = 1080, 1920
+    im = Image.new("RGB", (W, H), "#120b08")
+    d = ImageDraw.Draw(im)
+    fb = ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-ExtraBold.otf"), 84)
+    fr = ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-Bold.otf"), 40)
+    d.text((W // 2, 170), "전국 맛집 지도", font=fb, fill="#ffffff", anchor="mm")
+    d.text((W // 2, 270), f"지금까지 소개한 {len(rows):,}곳", font=fr, fill="#ffd9c9", anchor="mm")
+    # 남한 범위 → 지도 영역(위도 36도 기준 경도 축소)
+    mw = 860
+    mh = int(mw * 5.7 / (4.6 * 0.81))
+    x0, y0 = (W - mw) // 2, 360
+    def px(x, y):
+        return x0 + (x - 125.0) / 4.6 * mw, y0 + (38.7 - y) / 5.7 * mh
+    for r in rows:
+        x, y = float(r["x"]), float(r["y"])
+        if not (124.6 < x < 130 and 32.8 < y < 38.9):
+            continue
+        cx, cy = px(x, y)
+        recent = r["name"] in recent_names
+        rad = 9 if recent else 6
+        d.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill="#e02020" if recent else "#ffffff")
+    d.text((W // 2, H - 150), "빨간 점 = 이번 주 새로 소개", font=fr, fill="#c9a89a", anchor="mm")
+    d.text((W // 2, H - 90), "@tourist_710", font=ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-Bold.otf"), 34), fill="#8a7a72", anchor="mm")
+    im.save(path, quality=92)
+
+
+def weekly_map_highlight(c):
+    """월요일 하루 1회: 쌓인 지도를 스토리로 올리고 '맛집지도' 하이라이트를 그 한 장으로 교체."""
+    import tempfile
+    from pathlib import Path
+    if now_kst().weekday() != 0 or state_get(f"maphl:{today()}") or not _slot_passed("maphl"):
+        return
+    state_set(f"maphl:{today()}", "1")
+    rows = db("SELECT name, x, y, created_at FROM map_pins")["rows"]
+    if not rows:
+        return
+    # '이번 주'는 핀이 들어간 날이 아니라 그 편이 발행된 날 기준(과거분은 백필로 한꺼번에 들어갔다)
+    recent = {r["name"] for r in db("""SELECT m.name FROM map_pins m JOIN posts p ON p.content_id = m.content_id
+                                        WHERE p.created_at >= datetime('now', '-7 days')""")["rows"]}
+    with tempfile.TemporaryDirectory() as tmp:
+        img = Path(tmp) / "map.jpg"
+        _map_image(img, rows, recent)
+        story = c.photo_upload_to_story(img)
+    nap(5, 15)
+    title = "맛집지도"
+    hl = state_get(f"hl:{title}")
+    try:
+        if hl:
+            old = json.loads(state_get("maphl:stories") or "[]")
+            c.highlight_add_stories(hl, [str(story.pk)])
+            if old:
+                nap(3, 8)
+                c.highlight_remove_stories(hl, old)
+        else:
+            h = c.highlight_create(title, [str(story.pk)])
+            state_set(f"hl:{title}", str(h.pk))
+        state_set("maphl:stories", json.dumps([str(story.pk)]))
+        log.info(f"🗺 지도 하이라이트 갱신: {len(rows)}곳 (이번 주 새 {len(recent)}곳)")
+    except Exception as e:
+        log.warning(f"지도 하이라이트 실패: {str(e)[:120]}")
+        if _blocked(e):
+            raise
