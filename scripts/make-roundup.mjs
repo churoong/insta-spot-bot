@@ -1028,6 +1028,29 @@ async function enrichPlaces(places) {
   }
   console.log(`정보 보강: 메뉴 ${places.filter((p) => p.menu).length}곳 / 소개 ${places.filter((p) => p.overview).length}곳`);
   markTv(places);
+  markNopo(places);
+}
+
+/**
+ * 노포 연차 표시(2026-10-27 사용자 결정). 근거는 상호명·관광공사 소개글에 적힌 사실뿐
+ * ("70년 역사", "3대째 운영", "1984년 개업"). 실측 88곳 중 6곳(7%). 30년 미만은 표시하지 않는다.
+ */
+function markNopo(places) {
+  const year = new Date().getFullYear();
+  for (const p of places) {
+    const t = `${p.name} ${p.overview ?? ""}`;
+    let years = 0;
+    let gen = 0;
+    const m1 = t.match(/(\d{2,3})\s*년\s*(?:넘게|이상|째|간|동안)?\s*(?:전통|역사|이어|운영|대를|한자리|자리)/);
+    if (m1) years = Number(m1[1]);
+    const m2 = t.match(/(19[3-9]\d|200\d)\s*년\s*(?:에\s*)?(?:개업|창업|문을|시작|오픈)/) || t.match(/since\s*(19\d\d)/i);
+    if (m2) years = Math.max(years, year - Number(m2[1]));
+    const m3 = t.match(/(\d)\s*대\s*째/);
+    if (m3) gen = Number(m3[1]);
+    if (years >= 30 && years < 150) p.nopo = `${years}년 노포`;
+    else if (gen >= 2 && gen <= 5) p.nopo = `${gen}대째 노포`;
+  }
+  if (places.some((p) => p.nopo)) console.log(`📜 노포 확인: ${places.filter((p) => p.nopo).map((p) => `${p.name}(${p.nopo})`).join(", ")}`);
 }
 
 /**
@@ -1594,7 +1617,7 @@ async function composeReelCoverV2(theme, places, bgUrl = null) {
       <text x="${L + 22}" y="${T + 66}" font-family="${TFONT}" font-size="60" font-weight="900" fill="#ffffff" fill-opacity="0.95" stroke="#0b0503" stroke-opacity="0.28" stroke-width="6" paint-order="stroke">${i + 1}</text>
       <text x="${L + 20}" y="${nameY}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
       ${info ? `<text x="${L + 20}" y="${B - 58}" font-family="${FONT}" font-size="29" font-weight="700" fill="#ffffff" fill-opacity="0.94">${esc(info)}</text>` : ""}
-      <text x="${L + 20}" y="${B - 24}" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffffff" fill-opacity="0.68">${esc(p.region)}${p.tv ? `  ·  📺 ${esc(p.tv)}` : p.hundred ? "  ·  백년가게" : p.goodPrice ? "  ·  착한가격" : ""}</text>
+      <text x="${L + 20}" y="${B - 24}" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffffff" fill-opacity="0.68">${esc(p.region)}${p.tv ? `  ·  📺 ${esc(p.tv)}` : p.nopo ? `  ·  📜 ${esc(p.nopo)}` : p.hundred ? "  ·  백년가게" : p.goodPrice ? "  ·  착한가격" : ""}</text>
     </g>`;
   }
 
@@ -1826,7 +1849,7 @@ async function composeCarouselCardV2(sharp, place, idx) {
   const ns = nm.length <= 8 ? 66 : nm.length <= 11 ? 55 : 45;
   // 불릿 3줄 → 설명 2줄. 점 없이, 흐린 흰 글자로 — 목록이 아니라 설명문으로 읽히게.
   const dl = (place.descLines?.length ? place.descLines : wrapLines(place.desc ?? "", 26, 2)).slice(0, 2);
-  const meta2 = [place.region, place.tv ? `📺 ${place.tv}` : place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
+  const meta2 = [place.region, place.tv ? `📺 ${place.tv}` : place.nopo ? `📜 ${place.nopo}` : place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
     .filter(Boolean).join("  ·  ");
   const TY = bandH + 92; // 상호명 기준선
 
@@ -1942,6 +1965,7 @@ function buildPunchyTitle(theme, n) {
   const top = theme.maxPrice
     ? `${theme.maxPrice % 10000 === 0 ? theme.maxPrice / 10000 + "만" : theme.maxPrice.toLocaleString()} 원 이하`
     : theme.tvTop ? "방송에 나온"
+    : theme.nopoTop ? "오래된 노포"
     : pool[Math.floor(Math.random() * pool.length)];
   const main = regional ? `${r} ${f}` : f;
   // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의
@@ -2159,7 +2183,7 @@ async function composeRankCardV2(sharp, place, rank) {
 
   const bg = await bandOnDark(sharp, buf, RW, RH, bandH, bandTop);
   const PADX = 76;
-  const metaLine = [place.region, place.tv ? `📺 ${place.tv}` : place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
+  const metaLine = [place.region, place.tv ? `📺 ${place.tv}` : place.nopo ? `📜 ${place.nopo}` : place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
     .filter(Boolean).join("  ·  ");
   const svg = Buffer.from(
     `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
@@ -2438,7 +2462,10 @@ function buildCaption(theme, places, descending = false, ep = null) {
     (places.some((p) => p.tv)
       ? `📺 방송에 소개된 곳: ${places.filter((p) => p.tv).map((p) => `${p.name}(${p.tv})`).join(", ")}\n`
       : "") +
-    (hundredCount > 0 || goodShops.length > 0 || places.some((p) => p.tv) ? "\n" : "");
+    (places.some((p) => p.nopo)
+      ? `📜 대를 이어온 노포: ${places.filter((p) => p.nopo).map((p) => `${p.name}(${p.nopo.replace(" 노포", "")})`).join(", ")}\n`
+      : "") +
+    (hundredCount > 0 || goodShops.length > 0 || places.some((p) => p.tv || p.nopo) ? "\n" : "");
   // 2025-12부터 게시물당 해시태그 5개 제한 — 테마 태그(최대 3) + 큐레이션 2개만.
   // 검색 유입은 해시태그가 아니라 첫 줄의 [음식+맛집] 키워드가 담당한다.
   const tags = [...(theme.tags ?? []).slice(0, 3), "맛집추천", "맛집리스트"]
@@ -2814,6 +2841,14 @@ async function main() {
     console.log(`TOP 5로 축소 → ${theme.titleResolved}`);
   }
 
+  // 노포 연차가 확인된 집이 3곳 이상이면 "오래된 노포"(방송 수식어가 우선)
+  if (theme.mode !== "area" && !theme.maxPrice && places.filter((p) => p.nopo).length >= 3 && places.filter((p) => p.tv).length < 3) {
+    theme.nopoTop = true;
+    const tn = buildPunchyTitle(theme, places.length);
+    theme.titleResolved = tn.text;
+    theme.coverParts = tn;
+    console.log(`📜 노포 ${places.filter((p) => p.nopo).length}곳 → ${theme.titleResolved}`);
+  }
   // 방송 출연이 3곳 이상이면 제목 수식어를 "방송에 나온"으로(사실 기반, 지역편·가격형 제외)
   if (theme.mode !== "area" && !theme.maxPrice && places.filter((p) => p.tv).length >= 3) {
     theme.tvTop = true;

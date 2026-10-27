@@ -26,14 +26,15 @@ import requests
 
 from common import (GRAPH, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
                     graph_id_for_code, graph_token, nap, now_kst, state_get, state_set)
+import follows
 import growth
 
 log = get_logger("agent")
 START_DATE = "2026-10-27"  # 이 날짜 이후 발행분만 사후 처리(과거 게시물은 건드리지 않는다)
 LIKE_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", "해장국", "짬뽕맛집", "맛집추천", "전국맛집", "노포맛집", "가성비맛집"]
 LIKES_PER_DAY = (18, 26)
-UNFOLLOW_PER_DAY = 30
-UNFOLLOW_PER_RUN = 10
+UNFOLLOW_PER_DAY = 40
+UNFOLLOW_PER_RUN = 14
 
 _cl = None
 _paused_until = 0.0
@@ -341,7 +342,8 @@ def likes_daily():
 # ---------- 4) 팔로잉 정리(사용자 승인 목록만) ----------
 def unfollow_batch():
     approved = STATE / "unfollow-approved.txt"
-    if not approved.exists():
+    auto_q = STATE / "unfollow-auto.txt"  # follows.weekly_cleanup이 채우는 '맞팔 안 하는 계정' 대기열
+    if not approved.exists() and not auto_q.exists():
         return
     last = state_get("unfollow:last")
     if last and time.time() - float(last) < 3 * 3600:
@@ -352,7 +354,11 @@ def unfollow_batch():
         return
     done_f = STATE / "unfollowed.txt"
     done = set(done_f.read_text(encoding="utf-8").split()) if done_f.exists() else set()
-    todo = [l.split(",")[0].strip() for l in approved.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
+    lines = []
+    for f in (approved, auto_q):
+        if f.exists():
+            lines += f.read_text(encoding="utf-8").splitlines()
+    todo = [l.split(",")[0].strip() for l in lines if l.strip() and not l.startswith("#")]
     todo = [u for u in todo if u not in done][: min(UNFOLLOW_PER_RUN, UNFOLLOW_PER_DAY - used)]
     if not todo:
         return
@@ -494,6 +500,8 @@ def growth_round():
         ("타깃 좋아요", lambda: growth.targeted_likes(c)),
         ("남의 게시물 댓글", lambda: growth.auto_comments(c)),
         ("큰 계정 첫 댓글", lambda: growth.fast_first_comments(c)),
+        ("자동 맞팔", lambda: follows.follow_back(c)),
+        ("주간 팔로잉 정리", lambda: follows.weekly_cleanup(c)),
     ):
         try:
             fn()
