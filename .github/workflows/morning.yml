@@ -1,0 +1,54 @@
+name: 아침 스토리 (오늘 점심 뭐 먹지)
+
+on:
+  workflow_dispatch: {} # 수동 실행 (테스트용)
+  schedule:
+    # 매일 KST 07:30 목표(2026-10-27 사용자 결정). 주 경로는 Vercel 크론(30 22 * * *) → workflow_dispatch,
+    # 이 크론들은 GitHub 지연·드롭 대비 폴백. 게이트가 KST 07~11시 도착 런만 통과시키고, 하루 1회 가드는 스크립트에.
+    - cron: "30 22 * * *" # KST 07:30
+    - cron: "30 23 * * *" # KST 08:30
+    - cron: "30 0 * * *" # KST 09:30
+
+jobs:
+  morning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: ${{ github.workflow }}
+      cancel-in-progress: false
+    steps:
+      - name: 발행 창 게이트 (KST 07~11시, 수동 실행은 통과)
+        id: gate
+        run: |
+          T=$((10#$(TZ=Asia/Seoul date +%H%M)))
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$T" -ge 700 ] && [ "$T" -lt 1100 ]; }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "발행 창 밖(KST $T) — 스킵."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
+
+      - name: 폰트 설치 (Pretendard·G마켓 산스)
+        if: steps.gate.outputs.go == '1'
+        run: mkdir -p ~/.fonts && cp assets/fonts/*.otf ~/.fonts/ && fc-cache -f > /dev/null
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
+        with:
+          node-version: 22
+
+      - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
+        run: npm ci
+
+      - name: 아침 스토리 발행
+        if: steps.gate.outputs.go == '1'
+        run: npx tsx scripts/morning-story.mjs
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}

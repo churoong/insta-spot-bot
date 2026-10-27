@@ -88,24 +88,53 @@ def geocode_text(text: str):
     return None
 
 
-def near_list(name: str, x: float, y: float, food: str = "") -> str:
-    """우리가 소개한 집(map_pins) 5km 안 우선, 모자라면 카카오 음식점으로 채운다."""
+def near_places(name: str, x: float, y: float, food: str = "") -> list:
+    """우리가 소개한 집(map_pins) 5km 안 우선, 모자라면 카카오 음식점으로 채운 최대 5곳."""
     rows = db("SELECT name, address, x, y FROM map_pins")["rows"]
+
     def km(r):
         return math.hypot((float(r["x"]) - x) * 88.2, (float(r["y"]) - y) * 111)
-    ours = sorted([r for r in rows if km(r) <= 5], key=km)[:5]
-    lines = [f"{i + 1}. {r['name']} — 먹짱 소개 맛집\n   https://map.kakao.com/link/search/{quote(r['name'])}" for i, r in enumerate(ours)]
-    if len(lines) < 5:
+    out = [{"name": r["name"], "x": float(r["x"]), "y": float(r["y"]), "kind": "먹짱 소개",
+            "url": f"https://map.kakao.com/link/search/{quote(r['name'])}"} for r in sorted([r for r in rows if km(r) <= 5], key=km)[:5]]
+    if len(out) < 5:
         q = f"{name} {food or '맛집'}".strip()
         for d in (_kakao(f"/v2/local/search/keyword.json?category_group_code=FD6&query={quote(q)}&x={x}&y={y}&radius=3000&sort=accuracy").get("documents") or []):
-            if len(lines) >= 5:
+            if len(out) >= 5:
                 break
-            if any(d["place_name"] in l for l in lines):
+            if any(o["name"] == d["place_name"] for o in out):
                 continue
-            lines.append(f"{len(lines) + 1}. {d['place_name']} ({d.get('category_name', '').split('>')[-1].strip()})\n   {d.get('place_url', '')}")
-    if not lines:
+            out.append({"name": d["place_name"], "x": float(d["x"]), "y": float(d["y"]),
+                        "kind": d.get("category_name", "").split(">")[-1].strip() or "맛집", "url": d.get("place_url", "")})
+    return out
+
+
+def near_list(name: str, x: float, y: float, food: str = "", places: list | None = None) -> str:
+    places = places if places is not None else near_places(name, x, y, food)
+    if not places:
         return ""
+    lines = [f"{i + 1}. {p['name']} — {p['kind']}\n   {p['url']}" for i, p in enumerate(places)]
     return f"📍 {name} 근처 맛집이에요!\n\n" + "\n".join(lines) + "\n\n맛있는 한 끼 되세요 🍽️"
+
+
+def send_cards(c, thread_id, who: str, area: str, cx: float, cy: float, places: list):
+    """동네 지도 + 맛집 영수증 이미지(2026-10-27 사용자 결정). 실패해도 글자 답장은 이미 갔다."""
+    import tempfile
+    from pathlib import Path
+    import cards
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            m = Path(tmp) / "map.jpg"
+            r = Path(tmp) / "receipt.jpg"
+            cards.map_card(m, who, area, cx, cy, places)
+            cards.receipt_card(r, who, area, places)
+            c.direct_send_photo(m, thread_ids=[int(thread_id)])
+            nap(5, 15)
+            c.direct_send_photo(r, thread_ids=[int(thread_id)])
+        log.info(f"🗺🧾 지도·영수증 카드: {area}")
+    except Exception as e:
+        log.warning(f"카드 전송 실패: {str(e)[:120]}")
+        if _blocked(e):
+            raise
 
 
 # ---------- 1·2) 소개한 식당 장소 피드 ----------
@@ -275,11 +304,15 @@ def answer_dms(c):
                 log.info(f"📨 DM 음식 답장: {food_only}")
             continue
         food = next((f for f in ["국밥", "냉면", "칼국수", "곱창", "짬뽕", "삼겹살", "회", "족발", "보쌈", "돈까스", "초밥", "해장국", "순대국"] if f in msg.text), "")
-        body = near_list(g[0], g[1], g[2], food)
+        plist = near_places(g[0], g[1], g[2], food)
+        body = near_list(g[0], g[1], g[2], food, plist)
         if not body:
             continue
         nap(20, 60)
         c.direct_send(body, thread_ids=[int(th.id)])
+        other = next((u for u in th.users if str(u.pk) == str(msg.user_id)), th.users[0] if th.users else None)
+        who = (getattr(other, "full_name", "") or getattr(other, "username", "") or "고객").split(" ")[0][:8]
+        send_cards(c, th.id, who, g[0], g[1], g[2], plist)
         remember_followup(str(msg.user_id), f"{g[0]} 맛집")
         log.info(f"📨 DM 답장: {g[0]} {food}")
         nap(10, 30)
