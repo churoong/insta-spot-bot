@@ -397,6 +397,13 @@ export async function sendPrivateReply(commentId: string, text: string) {
   });
 }
 
+/** 내 게시물에 댓글 달기 — 발행 직후 '1위 소개 + 원픽 질문 + 지역 해시태그' 첫 댓글(2026-10-27). 고정은 공식 API로 안 돼
+ *  사용자 PC 에이전트가 나중에 찾아서 고정한다. 반환: 댓글 ID */
+export async function commentOnMedia(mediaId: string, text: string): Promise<string> {
+  const json = await graphPost(`${mediaId}/comments`, { message: text });
+  return String(json.id ?? "");
+}
+
 /** (선택) 댓글에 공개 답글 달기 — DM 보냈다는 안내용 */
 export async function replyToComment(commentId: string, text: string) {
   await graphPost(`${commentId}/replies`, { message: text });

@@ -224,10 +224,21 @@ ONLINE_WINDOWS = _windows()
 
 
 def online_slot() -> str:
+    """온라인 시간 안에서 하루 1회 활동 시각을 고른다. 팔로워 접속 시간(engage.refresh_online_hours가
+    공식 API online_followers로 매주 갱신)이 있으면 접속이 많은 시각일수록 잘 뽑히게 가중한다."""
+    import json as _j
     import random as _r
-    h1, m1, h2, m2 = _r.choice(ONLINE_WINDOWS)
-    a, b = h1 * 60 + m1, h2 * 60 + m2
-    t = _r.randint(a, b - 20)
+    try:
+        w = _j.loads(state_get("online_hours") or "{}")
+    except Exception:
+        w = {}
+    minutes = []
+    for h1, m1, h2, m2 in ONLINE_WINDOWS:
+        minutes += list(range(h1 * 60 + m1, h2 * 60 + m2 - 20, 5))
+    if not minutes:
+        return "10:00"
+    weights = [max(1, int(w.get(str(t // 60), 1))) for t in minutes]
+    t = _r.choices(minutes, weights=weights, k=1)[0]
     return f"{t // 60:02d}:{t % 60:02d}"
 
 

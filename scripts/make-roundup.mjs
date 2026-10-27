@@ -3454,6 +3454,17 @@ ${bgm.attribution}`;
     mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt, { thumbOffsetMs: 0 });
   }
   console.log("✅ 모음집 릴스 발행:", mediaId);
+  // 공식 경로로 나간 회차는 발행 직후 첫 댓글(해시태그 포함)을 바로 단다 — 노트북이 꺼져 있어도.
+  // 비공식 경로(privateDone)는 에이전트가 이미 같은 댓글을 달고 고정했다.
+  if (!privateDone && !DRY) {
+    try {
+      const { commentOnMedia } = await import("../lib/instagram.ts");
+      const cmId = await commentOnMedia(mediaId, buildFirstComment(theme, places));
+      console.log("💬 첫 댓글(해시태그 포함):", cmId);
+    } catch (e) {
+      console.error("첫 댓글 실패(무시 — 에이전트가 나중에 단다):", String(e).slice(0, 160));
+    }
+  }
   await addMapPins(db, places, cid).catch((e) => console.error("지도 핀 저장 실패(무시):", String(e).slice(0, 80)));
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published', reel_format = ? WHERE content_id = ?`,
@@ -3551,6 +3562,41 @@ function curlUpload(args) {
  * ⚠️ 이중 발행 방지: 되찾기는 반드시 `WHERE status = 'handoff'`(아무도 안 가져간 상태)에서만.
  *    에이전트가 가져간 뒤에는 결과가 나올 때까지 기다린다 — 그 사이 공식 발행을 하면 두 번 올라간다.
  */
+/**
+ * 첫 댓글 = 1위 소개 + 원픽 질문 + 지역 해시태그(2026-10-27 사용자 결정 "업로드되면 바로 댓글로 해시태그").
+ * 캡션 해시태그는 5개 제한이라 댓글에 최대 5개 더. 식당 평가는 긍정만 — "인정?"처럼 1위를 깎는 반문은 쓰지 않는다.
+ * 공식 경로는 발행 직후 GitHub가 공식 API로 달고, 비공식 경로는 에이전트가 같은 문구를 단다(둘이 겹치지 않게).
+ */
+function commentHashtags(theme, places) {
+  const food = String(theme.food || theme.keyword || "").replace(/\s/g, "");
+  const tags = [];
+  if (theme.mode === "area" && theme.keyword) {
+    const kw = String(theme.keyword).replace(/\s|·/g, "");
+    tags.push(`${kw}맛집`, `${kw}맛집추천`);
+  }
+  const sidos = [];
+  for (const p of places) {
+    const s = String(p.region ?? "").split(" ")[0];
+    if (s && !s.endsWith("역") && !sidos.includes(s)) sidos.push(s);
+  }
+  for (const s of sidos.slice(0, 3)) {
+    tags.push(`${s}맛집`);
+    if (food && theme.mode !== "area" && theme.mode !== "density") tags.push(`${s}${food}`);
+  }
+  return [...new Set(tags)].filter((t) => /^[가-힣A-Za-z0-9]+$/.test(t)).slice(0, 5);
+}
+
+function buildFirstComment(theme, places) {
+  const top = places[0] ?? {};
+  const gp = top.goodPrice?.price ? top.goodPrice : null;
+  const menu = String((gp ? gp.menu : top.menu) || "").split(/[,·/]/)[0].trim();
+  const tags = commentHashtags(theme, places);
+  return `🥇 1위 ${top.name}${top.region ? ` (${top.region})` : ""}` +
+    (menu ? ` — ${menu}${gp ? ` ${Number(gp.price).toLocaleString()}원` : ""}` : "") +
+    `\n👇 여러분이 꼽는 ${theme.mode === "area" ? theme.keyword : theme.food || theme.keyword} 원픽은 어디예요? 댓글로 알려주세요` +
+    (tags.length ? `\n${tags.map((t) => `#${t}`).join(" ")}` : "");
+}
+
 async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, musicOk, thumbMs, theme, places, reelFormat }) {
   let offline = false;
   // 에이전트 PC는 저녁·주말에 인터넷이 없다(2026-10-27 사용자). 살아 있다는 신호(45초마다 갱신)가
@@ -3567,7 +3613,6 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
   try { if (coverJpg) coverUrl = await uploadPublic(coverJpg); } catch { /* 스토리만 못 올림 */ }
   const top = places[0] ?? {};
   const gp = top.goodPrice?.price ? top.goodPrice : null;
-  const menu = String((gp ? gp.menu : top.menu) || "").split(/[,·/]/)[0].trim();
   const payload = {
     v: 1,
     reel_url: reelUrl,
@@ -3583,9 +3628,7 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
       : { query: top.name, address: top.address ?? "", lat: top.lat ?? null, lng: top.lng ?? null },
     // 1위 소개 + 댓글을 부르는 질문(2026-10-27 사용자 결정). 식당 평가는 긍정만 — "인정?"처럼
     // 1위를 깎아내리는 반문은 쓰지 않고 "여러분의 원픽"을 묻는다.
-    first_comment: `🥇 1위 ${top.name}${top.region ? ` (${top.region})` : ""}` +
-      (menu ? ` — ${menu}${gp ? ` ${Number(gp.price).toLocaleString()}원` : ""}` : "") +
-      `\n👇 여러분이 꼽는 ${theme.mode === "area" ? theme.keyword : theme.food || theme.keyword} 원픽은 어디예요? 댓글로 알려주세요`,
+    first_comment: buildFirstComment(theme, places),
     hashtag: (theme.tags ?? [])[0] ?? null,
     // 식당 계정 태그·하이라이트 분류용(2026-10-27) — 에이전트가 상호+지역으로 인스타 계정을 찾는다
     theme: { key: theme.key, mode: theme.mode ?? "food", food: theme.food || theme.keyword, keyword: theme.keyword },

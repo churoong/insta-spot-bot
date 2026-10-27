@@ -58,6 +58,7 @@ def follow_back(c):
     skip = _done_set() | _approved_ids()
     following = set(state_get("fb:following-cache") and json.loads(state_get("fb:following-cache")) or [])
     n = 0
+    followed = []
     for uid in new:
         if used + n >= FOLLOWBACK_PER_DAY:
             break
@@ -76,6 +77,7 @@ def follow_back(c):
                     continue
             c.user_follow(uid)
             state_set(f"fbat:{uid}", str(time.time()))
+            followed.append(uid)
             n += 1
             log.info(f"🤝 맞팔: @{u.username}")
         except Exception as e:
@@ -84,6 +86,11 @@ def follow_back(c):
                 raise
         nap(30, 90)
     state_set(f"fb:{today}", str(used + n))
+    # 맞팔한 새 팔로워에게 환영 DM(하루 20) — "동네 알려주시면 근처 맛집 보내드려요"
+    if followed:
+        import engage
+        engage.welcome_dm(c, followed)
+        welcome_likes(c, followed)  # 답례 좋아요(최근 게시물 2~3개)
 
 
 def weekly_cleanup(c):
@@ -118,3 +125,69 @@ def weekly_cleanup(c):
         for uid in add:
             f.write(uid + "\n")
     log.info(f"🧹 주간 팔로잉 정리: 팔로잉 {len(following)} · 팔로워 {len(followers)} · 맞팔 안 하는 계정 {len(add)}명 언팔 대기열 추가(예외 {len(keep & set(following))}명)")
+
+
+# ---------- 좋아요만 누른 사람 먼저 팔로우(2026-10-27 사용자 결정) ----------
+LIKER_FOLLOW_PER_DAY = 20
+
+
+def follow_likers(c, own_media: list):
+    """최근 우리 게시물 3개에 좋아요를 눌렀지만 팔로워가 아닌 사람을 하루 20명 팔로우.
+    fbat(맞팔 시각)을 남겨 주간 정리가 14일 유예 뒤 맞팔 안 한 사람을 알아서 언팔한다."""
+    today = f"{now_kst():%Y-%m-%d}"
+    used = int(state_get(f"likerfollow:{today}") or 0)
+    if used >= LIKER_FOLLOW_PER_DAY:
+        return
+    followers = set(json.loads(FOLLOWERS_F.read_text(encoding="utf-8"))) if FOLLOWERS_F.exists() else set()
+    following = set(json.loads(state_get("fb:following-cache") or "[]"))
+    skip = _done_set() | _approved_ids() | followers | following | {str(c.user_id)}
+    n = 0
+    for media_id, _t in own_media[:3]:
+        try:
+            likers = c.media_likers(media_id)
+        except Exception as e:
+            if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired")):
+                raise
+            continue
+        for u in likers:
+            uid = str(u.pk)
+            if used + n >= LIKER_FOLLOW_PER_DAY:
+                break
+            if uid in skip or state_get(f"fbat:{uid}") or not HANGUL.search(f"{u.full_name or ''}"):
+                continue  # 이름에 한글이 없는 계정은 정리 기준과 맞추려고 건너뛴다
+            c.user_follow(uid)
+            state_set(f"fbat:{uid}", str(time.time()))
+            skip.add(uid)
+            n += 1
+            log.info(f"💛 좋아요 누른 사람 팔로우: @{u.username}")
+            nap(40, 120)
+        nap(10, 30)
+    state_set(f"likerfollow:{today}", str(used + n))
+
+
+# ---------- 새 팔로워 답례 좋아요 ----------
+WELCOME_LIKES_PER_DAY = 30
+
+
+def welcome_likes(c, uids: list):
+    """새로 팔로우해 준 사람의 최근 게시물 2~3개에 좋아요(하루 30)."""
+    today = f"{now_kst():%Y-%m-%d}"
+    used = int(state_get(f"welcomelike:{today}") or 0)
+    for uid in uids:
+        if used >= WELCOME_LIKES_PER_DAY:
+            break
+        try:
+            for m in c.user_medias(uid, amount=3)[:3]:
+                if used >= WELCOME_LIKES_PER_DAY:
+                    break
+                if not getattr(m, "has_liked", False):
+                    c.media_like(m.id)
+                    used += 1
+                    nap(15, 45)
+        except Exception as e:
+            if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired")):
+                raise
+        nap(20, 60)
+    state_set(f"welcomelike:{today}", str(used))
+    if uids:
+        log.info(f"💕 새 팔로워 답례 좋아요 (오늘 {used})")

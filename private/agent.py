@@ -27,6 +27,7 @@ import requests
 from common import (GRAPH, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
                     graph_id_for_code, graph_token, nap, next_weekday_at, now_kst, online_slot,
                     state_get, state_set)
+import engage
 import follows
 import growth
 
@@ -209,14 +210,33 @@ def handle_handoffs():
                 # 인터넷이 끊겼다 돌아와 늦게 올리면 같은 편이 두 번 나간다.
                 if time.time() - claimed_at > 12 * 60:
                     raise RuntimeError("가져간 지 12분 초과 — 이중 발행 방지로 업로드 중단")
-                media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc, extra_data=extra)
+                # 대체 텍스트(검색 노출) — 인스타가 거부하면 대체 텍스트만 빼고 한 번 더
+                try:
+                    media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc,
+                                          extra_data={**(extra or {}), "custom_accessibility_caption": engage.alt_text(p)})
+                except Exception as e:
+                    if is_block(e):
+                        raise
+                    log.warning(f"대체 텍스트 포함 업로드 실패 — 빼고 재시도: {str(e)[:120]}")
+                    media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc, extra_data=extra)
                 state_set(f"mid:{cid}", str(media.id))
                 published = True
                 log.info(f"✅ 릴스 발행: https://www.instagram.com/reel/{media.code}/")
                 gid = graph_id_for_code(media.code) or f"private:{media.pk}"
                 db("UPDATE posts SET status = 'published', ig_media_id = ? WHERE content_id = ?", [gid, cid])
                 state_set(f"pp:{cid}", "handoff")
+                title = (p.get("caption") or "").split("\n")[0].split("| ")[-1].strip()
+                engage.trigger_burst(cid)
+                try:
+                    engage.daily_note(c, title)
+                    engage.congrats_dm(c, p.get("places", []), title)
+                except Exception as e:
+                    log.warning(f"노트·축하 DM 실패: {str(e)[:100]}")
+                    if is_block(e):
+                        raise
+                # 첫 댓글 문구(1위 소개 + 원픽 질문 + 지역 해시태그)는 make-roundup buildFirstComment가 만든다
                 after_publish(c, media.id, media.pk, p.get("first_comment"), cover, loc, p.get("theme"))
+                engage.remember_hashtag_check(media.pk, engage.comment_hashtags(p))
                 enqueue_trials(cid, p)
         except Exception as e:
             log.error(f"핸드오프 실패 {cid}: {type(e).__name__} {str(e)[:200]}")
@@ -253,7 +273,7 @@ def after_publish(c, media_id, media_pk, first_comment, cover, loc, theme=None):
 
 # ---------- 2) 공식 경로 발행분 사후 처리 ----------
 def postprocess_recent():
-    rows = db(f"""SELECT content_id, ig_media_id, address, handoff FROM posts
+    rows = db(f"""SELECT content_id, ig_media_id, address, handoff, created_at FROM posts
                   WHERE status = 'published' AND ig_media_id IS NOT NULL
                     AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
                     AND created_at >= datetime('now', '-2 days') AND created_at >= '{START_DATE}'""")["rows"]
@@ -292,13 +312,29 @@ def postprocess_recent():
                 c.media_edit(info.id, info.caption_text, usertags=tags, location=loc if loc else info.location)
                 log.info(f"📍 위치·식당 태그 {cid}: {loc.name if loc else '-'} / {len(tags)}곳")
             if first:
-                nap(20, 50)
-                cm = c.media_comment(info.id, first)
+                # 공식 경로 회차는 GitHub가 발행 직후 공식 API로 첫 댓글을 이미 달았다(2026-10-27) — 찾아서 고정만.
+                # 못 찾으면(예전 회차·공식 댓글 실패) 여기서 단다.
+                nap(5, 15)
+                mine = [cm for cm in c.media_comments(info.id, amount=30) if str(cm.user.pk) == str(c.user_id) and (cm.text or "").startswith("🥇")]
+                if mine:
+                    cm = mine[-1]
+                else:
+                    tags = engage.comment_hashtags(p)
+                    if tags and "#" not in first:
+                        first += "\n" + " ".join("#" + t for t in tags)
+                    nap(15, 40)
+                    cm = c.media_comment(info.id, first)
                 nap(3, 8)
                 c.comment_pin(info.id, cm.pk)
-                log.info(f"📌 첫 댓글 고정 {cid}")
+                engage.remember_hashtag_check(pk, engage.comment_hashtags(p))
+                log.info(f"📌 첫 댓글 고정 {cid}{' (공식 댓글)' if mine else ''}")
             state_set(f"pp:{cid}", "official")
             enqueue_trials(cid, p)
+            if row.get("created_at") and (time.time() - _utc_ts(row["created_at"])) < 3600:
+                engage.trigger_burst(cid)  # 방금 공식 경로로 올라간 편 — 집중 활동
+                title = str(p.get("caption") or "").split("\n")[0].split("| ")[-1].strip()
+                if title and p.get("places"):
+                    engage.congrats_dm(c, p.get("places", []), title)
         except Exception as e:
             log.warning(f"사후 처리 실패 {cid}: {str(e)[:160]}")
             if is_block(e):
@@ -445,13 +481,13 @@ def process_trials():
             if not mv and p.get("bgm_line"):
                 caption += "\n" + p["bgm_line"]
             try:
-                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data=extra or {},
+                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data={**(extra or {}), "custom_accessibility_caption": engage.alt_text(p)},
                                       trial=True, trial_graduation_strategy="ss_performance")
             except Exception as e:
                 if is_block(e):
                     raise
                 log.warning(f"자동 승격 트라이얼 거부 — 수동 승격으로 재시도: {str(e)[:120]}")
-                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data=extra or {}, trial=True)
+                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data={**(extra or {}), "custom_accessibility_caption": engage.alt_text(p)}, trial=True)
             state_set(f"trial:{cid}:{n}", json.dumps({"pk": str(media.pk), "code": media.code, "at": time.time()}))
             log.info(f"🧪 트라이얼 {n} 발행: {cid} https://www.instagram.com/reel/{media.code}/")
     except Exception as e:
@@ -482,6 +518,11 @@ def report_trials():
         except Exception as e:
             log.warning(f"트라이얼 결과 조회 실패: {str(e)[:100]}")
         nap(5, 15)
+
+
+def _utc_ts(s: str) -> float:
+    from datetime import datetime, timezone
+    return datetime.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
 
 
 def own_recent_media(days: int = 7) -> list:
@@ -517,6 +558,24 @@ def growth_round():
         ("자동 맞팔", lambda: follows.follow_back(c)),
         ("주간 팔로잉 정리", lambda: follows.weekly_cleanup(c)),
         ("검색 수요 수집", lambda: growth.demand_snapshot(c)),
+        ("노트", lambda: engage.daily_note(c)),
+        ("DM 답장", lambda: engage.answer_dms(c)),
+        ("소개 식당 장소 피드", lambda: engage.visited_engage(c, find_location)),
+        ("스토리 보기", lambda: engage.story_views(c)),
+        ("비슷한 계정 팔로워 좋아요", lambda: engage.peer_follower_likes(c)),
+        ("단골 관리", lambda: engage.regulars_engage(c, own_recent_media(14))),
+        ("베스트 댓글 고정", lambda: engage.best_comment_pin(c, own_recent_media(4))),
+        ("위치 질문 답글", lambda: engage.answer_where(c)),
+        ("추천 요청 응답", lambda: engage.recommend_requests(c)),
+        ("팔로워 접속 시간", lambda: engage.refresh_online_hours()),
+        ("DM 후속 대화", lambda: engage.dm_followups(c)),
+        ("좋아요 누른 사람 팔로우", lambda: follows.follow_likers(c, own_recent_media(4))),
+        ("질문 스티커 스토리", lambda: engage.question_story(c)),
+        ("질문 답변 DM", lambda: engage.question_answers(c)),
+        ("맞교환 제안", lambda: engage.peer_proposals(c)),
+        ("추천 계정 스토리", lambda: engage.peer_shoutout_story(c)),
+        ("지도 하이라이트", lambda: engage.weekly_map_highlight(c)),
+        ("댓글 해시태그 노출 확인", lambda: engage.check_hashtag_visibility(c)),
     ):
         try:
             fn()
@@ -532,6 +591,15 @@ def tick():
         return
     handle_handoffs()
     process_trials()
+    # 발행 후 2시간은 우리 게시물 댓글을 3분마다 확인해 거의 바로 답한다(평소엔 10분 주기 growth_round)
+    if time.time() < float(state_get("fastreply:until") or 0) and time.time() - float(state_get("fastreply:last") or 0) > 180:
+        state_set("fastreply:last", str(time.time()))
+        try:
+            growth.reply_own_comments(cl(), own_recent_media(1))
+        except Exception as e:
+            log.warning(f"빠른 답글 실패: {str(e)[:100]}")
+            if is_block(e):
+                pause(6, "빠른 답글 중 차단 신호")
     last_pp = float(state_get("pp:last") or 0)
     if time.time() - last_pp > 600:
         state_set("pp:last", str(time.time()))
