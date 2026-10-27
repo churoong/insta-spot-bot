@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import subprocess
@@ -24,7 +25,7 @@ from pathlib import Path
 
 import requests
 
-from common import (GRAPH, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
+from common import (GRAPH, REPO, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
                     graph_id_for_code, graph_token, nap, next_weekday_at, now_kst, online_slot,
                     state_get, state_set)
 import engage
@@ -605,11 +606,46 @@ def tick():
         report_trials()
 
 
+def _git(*args) -> str:
+    flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW — pythonw에서 콘솔 창 깜빡임 방지
+    r = subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, text=True, timeout=120, creationflags=flags)
+    if r.returncode:
+        raise RuntimeError(f"git {args[0]}: {r.stderr.strip()[:160]}")
+    return r.stdout.strip()
+
+
+def self_update():
+    """클라우드 세션에서 머지한 변경을 노트북이 켜지면 받아 온다(2026-10-27 사용자 결정 — 노트북 없이 작업).
+    main 브랜치이고 추적 파일 변경이 없을 때만 fast-forward로 당기고, private/가 바뀌었으면 스스로 재시작한다."""
+    try:
+        if _git("rev-parse", "--abbrev-ref", "HEAD") != "main":
+            return  # 작업 브랜치에서 돌리는 중 — 건드리지 않는다
+        if _git("status", "--porcelain", "--untracked-files=no"):
+            return  # 로컬 수정이 있으면 당기지 않는다
+        _git("fetch", "-q", "origin", "main")
+        old, new = _git("rev-parse", "HEAD"), _git("rev-parse", "origin/main")
+        if old == new or subprocess.run(["git", "-C", str(REPO), "merge-base", "--is-ancestor", old, new],
+                                        creationflags=0x08000000 if sys.platform == "win32" else 0).returncode:
+            return
+        _git("merge", "--ff-only", "-q", "origin/main")
+        changed = _git("diff", "--name-only", old, new).splitlines()
+        log.info(f"⬇️ main 갱신 {old[:7]}→{new[:7]} ({len(changed)}개 파일)")
+        if any(f.startswith("private/") for f in changed):
+            log.info("🔁 에이전트 코드가 바뀌어 재시작")
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+    except Exception as e:
+        log.warning(f"자동 업데이트 실패(무시): {str(e)[:160]}")
+
+
 def main():
     ensure_tables()
     once = "--once" in sys.argv
     log.info("에이전트 시작" + (" (한 바퀴)" if once else ""))
+    last_update = 0.0
     while True:
+        if not once and time.time() - last_update > 600:
+            last_update = time.time()
+            self_update()
         try:
             if not SESSION.exists():
                 log.info("세션 없음 — private/login.py로 로그인할 때까지 대기")
