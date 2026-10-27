@@ -247,7 +247,14 @@ def answer_dms(c):
         if not th.messages:
             continue
         msg = th.messages[0]  # 가장 최근
-        if str(msg.user_id) == me or state_get(f"dmdone:{msg.id}") or not msg.text:
+        if str(msg.user_id) == me or state_get(f"dmdone:{msg.id}"):
+            continue
+        # 우리 게시물을 DM으로 공유했거나 스토리에서 우리를 언급한 경우 — 감사 + 그 사람 게시물 좋아요
+        if (msg.item_type or "") in SHARE_TYPES:
+            state_set(f"dmdone:{msg.id}", "1")
+            thank_sharer(c, str(msg.user_id), msg.item_type)
+            continue
+        if not msg.text:
             continue
         state_set(f"dmdone:{msg.id}", "1")
         if time.time() - msg.timestamp.timestamp() > 3 * 86400:
@@ -467,3 +474,73 @@ def congrats_dm(c, places: list, title: str):
             if _blocked(e):
                 raise
         nap(60, 180)
+
+
+# ---------- 베스트 댓글 고정(2026-10-27 사용자 결정) ----------
+def best_comment_pin(c, own_media: list):
+    """올린 지 6시간~3일 된 우리 게시물마다 한 번: 남이 단 댓글 중 가장 정성스럽거나 재밌는 걸 LLM이 골라
+    고정하고 '베스트 댓글 🏆' 답글. 인스타는 게시물당 3개까지 고정 — '1위 소개' 고정 댓글은 그대로 둔다."""
+    me = str(c.user_id)
+    for media_id, title in own_media[:5]:
+        if state_get(f"bestpin:{media_id}"):
+            continue
+        try:
+            info = c.media_info(media_id)
+        except Exception as e:
+            if _blocked(e):
+                raise
+            continue
+        age = time.time() - info.taken_at.timestamp()
+        if age < 6 * 3600:
+            continue
+        if age > 3 * 86400:
+            state_set(f"bestpin:{media_id}", "expired")
+            continue
+        cands = [cm for cm in c.media_comments(media_id, amount=50)
+                 if str(cm.user.pk) != me and len(re.sub(r"[^\w가-힣]", "", cm.text or "")) >= 6]
+        if len(cands) < 2:
+            continue
+        menu = "\n".join(f"{i + 1}. {cm.text[:120]}" for i, cm in enumerate(cands[:20]))
+        pick = llm("아래는 인스타 맛집 게시물의 댓글들이다. 가장 정성스럽거나 재밌고 긍정적인 댓글 하나의 번호만 출력하라. "
+                   "식당을 깎아내리거나 광고·맞팔 요청인 댓글은 고르지 말 것. 숫자만 출력.\n" + menu, 10)
+        m = re.search(r"\d+", pick or "")
+        if not m or not (1 <= int(m.group()) <= min(20, len(cands))):
+            continue
+        cm = cands[int(m.group()) - 1]
+        try:
+            c.comment_pin(media_id, cm.pk)
+            nap(5, 15)
+            c.media_comment(media_id, f"@{cm.user.username} 베스트 댓글 🏆 정성 가득한 댓글 감사해요!", replied_to_comment_id=cm.pk)
+            state_set(f"bestpin:{media_id}", str(cm.pk))
+            log.info(f"🏆 베스트 댓글 고정({title}): {cm.text[:40]}")
+        except Exception as e:
+            log.warning(f"베스트 댓글 고정 실패: {str(e)[:120]}")
+            if _blocked(e):
+                raise
+        nap(30, 90)
+
+
+# ---------- 우리 게시물을 공유·언급한 사람 찾아가기 ----------
+SHARE_TYPES = {"media_share", "reel_share", "story_share", "clip", "xma_story_share", "xma_media_share", "xma_clip"}
+SHARER_PER_DAY = 10
+
+
+def thank_sharer(c, uid: str, item_type: str) -> bool:
+    """DM으로 우리 게시물을 공유했거나 스토리에서 우리를 언급한 사람: 감사 DM 1통 + 최신 게시물 좋아요(하루 10)."""
+    if _count("sharer") >= SHARER_PER_DAY or state_get(f"thanked:{uid}:{now_kst():%Y-%m}"):
+        return False
+    try:
+        c.direct_send("공유해 주셔서 감사해요 🙌 다음 편도 맛있는 곳으로 골라 올게요!", user_ids=[int(uid)])
+        nap(10, 30)
+        ms = c.user_medias(uid, amount=1)
+        if ms and not getattr(ms[0], "has_liked", False):
+            c.media_like(ms[0].id)
+        state_set(f"thanked:{uid}:{now_kst():%Y-%m}", item_type)
+        _bump("sharer")
+        log.info(f"🙏 공유·언급 감사: {uid} ({item_type})")
+        return True
+    except Exception as e:
+        log.warning(f"공유자 감사 실패: {str(e)[:100]}")
+        if _blocked(e):
+            raise
+        return False

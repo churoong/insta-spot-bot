@@ -543,6 +543,7 @@ def growth_round():
         ("스토리 보기", lambda: engage.story_views(c)),
         ("비슷한 계정 팔로워 좋아요", lambda: engage.peer_follower_likes(c)),
         ("단골 관리", lambda: engage.regulars_engage(c, own_recent_media(14))),
+        ("베스트 댓글 고정", lambda: engage.best_comment_pin(c, own_recent_media(4))),
     ):
         try:
             fn()
