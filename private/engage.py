@@ -94,7 +94,7 @@ def near_places(name: str, x: float, y: float, food: str = "") -> list:
 
     def km(r):
         return math.hypot((float(r["x"]) - x) * 88.2, (float(r["y"]) - y) * 111)
-    out = [{"name": r["name"], "x": float(r["x"]), "y": float(r["y"]), "kind": "먹짱 소개",
+    out = [{"name": r["name"], "x": float(r["x"]), "y": float(r["y"]), "kind": "맛디깅 소개",
             "url": f"https://map.kakao.com/link/search/{quote(r['name'])}"} for r in sorted([r for r in rows if km(r) <= 5], key=km)[:5]]
     if len(out) < 5:
         q = f"{name} {food or '맛집'}".strip()
@@ -513,7 +513,7 @@ def congrats_dm(c, places: list, title: str):
         acc = growth.find_restaurant_account(c, p.get("name", ""), p.get("region", ""), p.get("address", ""))
         if not acc or _user_recent(acc["pk"]):
             continue
-        msg = (f"안녕하세요! 전국 맛집 큐레이션 계정 먹짱입니다 🙌 오늘 올린 '{title}'에서 "
+        msg = (f"안녕하세요! 전국 맛집 큐레이션 계정 맛디깅입니다 🙌 오늘 올린 '{title}'에서 "
                f"{p.get('name')}을(를) {rank}위로 소개해 드렸어요. 축하드려요! 앞으로도 번창하세요 🍲")
         try:
             c.direct_send(msg, user_ids=[int(acc["pk"])])
@@ -868,7 +868,7 @@ def question_answers(c):
 
 # ---------- 비슷한 작은 계정과 스토리 맞교환(2026-10-27 사용자 결정) ----------
 # 상대 게시물을 퍼오지 않는다(리그램 금지 규칙) — 우리 카드에 그 계정을 멘션해 소개하고, 상대도 우리를 소개해 주길 부탁한다.
-PEER_PROPOSAL = ("안녕하세요! 전국 맛집 큐레이션 계정 먹짱입니다 🙌 결이 비슷한 맛집 계정이라 연락드려요. "
+PEER_PROPOSAL = ("안녕하세요! 전국 맛집 큐레이션 계정 맛디깅입니다 🙌 결이 비슷한 맛집 계정이라 연락드려요. "
                  "매주 서로를 스토리로 한 번씩 소개해 보면 어떨까요? 저희는 '이번 주 추천 맛집 계정'으로 소개해 드릴게요. 좋으시면 편하게 답장 주세요!")
 YES = re.compile(r"좋아요|좋습니다|좋네요|그래요|네\b|넵|오케이|ok|OK|콜|감사|함께|해요|하죠|좋죠")
 PEER_PROPOSALS_PER_DAY = 2

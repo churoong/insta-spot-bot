@@ -546,6 +546,7 @@ def growth_round():
     """하루 단위 활성화 작업 — 각자 하루 1회 상한·시각이 있어 10분마다 불려도 대부분 바로 끝난다."""
     c = cl()
     for name, fn in (
+        ("계정 이름 변경", lambda: growth.rename_profile(c)),
         ("댓글 응대", lambda: growth.reply_own_comments(c, own_recent_media())),
         ("프로필 고정", lambda: growth.pin_hits(c, media_pk_of)),
         ("타깃 좋아요", lambda: growth.targeted_likes(c)),

@@ -4,7 +4,7 @@
 // 식당 평가는 긍정만 — 평점·리뷰 수 같은 숫자는 만들어 넣지 않는다(없는 사실을 구조화 데이터에 넣으면 안 된다).
 import { db, initDb } from "@/lib/db";
 
-export const BRAND = "먹짱"; // 계정 이름이 바뀌면 여기 한 줄만
+export const BRAND = "맛디깅"; // 계정 이름이 바뀌면 여기 한 줄만
 /** 브랜드 + 주격 조사(받침 있으면 "이", 없으면 "가") — 이름을 바꿔도 문장이 안 깨지게 */
 export const BRAND_SUBJ = (() => {
   const c = BRAND.charCodeAt(BRAND.length - 1) - 0xac00;

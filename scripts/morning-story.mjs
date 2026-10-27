@@ -82,7 +82,7 @@ async function compose(buf, place) {
   <rect x="70" y="262" width="12" height="196" fill="${RED}"/>
   <text x="110" y="350" font-family="${TFONT}" font-weight="700" font-size="104" fill="#fff">오늘 점심</text>
   <text x="110" y="456" font-family="${TFONT}" font-weight="700" font-size="104" fill="${RED}">뭐 먹지?</text>
-  <text x="110" y="${y0 + 92}" font-family="${FONT}" font-weight="700" font-size="44" fill="#ffd9c9">먹짱 지난 편 1위</text>
+  <text x="110" y="${y0 + 92}" font-family="${FONT}" font-weight="700" font-size="44" fill="#ffd9c9">맛디깅 지난 편 1위</text>
   <text x="110" y="${y0 + 92 + Math.round(nameSize * 1.12)}" font-family="${TFONT}" font-weight="700" font-size="${nameSize}" fill="#fff">${esc(place.name)}</text>
   <text x="110" y="${y0 + 92 + Math.round(nameSize * 1.12) + 74}" font-family="${FONT}" font-weight="600" font-size="48" fill="#d8d0cc">${esc(place.region)}</text>
   <text x="110" y="${y0 + 92 + Math.round(nameSize * 1.12) + 140}" font-family="${FONT}" font-weight="600" font-size="36" fill="#9c928d">@tourist_710</text>
