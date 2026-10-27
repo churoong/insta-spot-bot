@@ -203,3 +203,38 @@ def llm(prompt: str, max_chars: int = 120) -> str | None:
         return t[:max_chars] if t else None
     except Exception:
         return None
+
+
+# ---------- 노트북이 켜져 있는 시간(2026-10-27 사용자) ----------
+# 평일 09:00~11:10, 13:10~17:40만 인터넷이 된다(11:20~13:00·저녁·주말은 없음).
+# 하루 1회 작업의 시각은 이 안에서만 고른다 — 밖에서 고르면 그날 작업이 통째로 사라진다.
+# 다른 기계(예: 집 와이파이에 둔 안드로이드 폰, 24시간)로 옮기면 .env의 AGENT_ONLINE으로 바꾼다.
+#   AGENT_ONLINE=08:30-22:30          (여러 구간은 쉼표: 09:00-11:10,13:10-17:40)
+def _windows():
+    spec = ENV.get("AGENT_ONLINE", "")
+    out = []
+    for part in [s for s in spec.split(",") if "-" in s]:
+        a, b = part.strip().split("-")
+        (h1, m1), (h2, m2) = map(int, a.split(":")), map(int, b.split(":"))
+        out.append((h1, m1, h2, m2))
+    return out or [(9, 0, 11, 10), (13, 10, 17, 40)]
+
+
+ONLINE_WINDOWS = _windows()
+
+
+def online_slot() -> str:
+    import random as _r
+    h1, m1, h2, m2 = _r.choice(ONLINE_WINDOWS)
+    a, b = h1 * 60 + m1, h2 * 60 + m2
+    t = _r.randint(a, b - 20)
+    return f"{t // 60:02d}:{t % 60:02d}"
+
+
+def next_weekday_at(hour: int, minute: int) -> float:
+    """다음 평일 hh:mm(KST)의 타임스탬프. 오늘이 평일이고 아직 그 시각 전이면 오늘."""
+    t = now_kst().replace(hour=hour, minute=minute, second=0, microsecond=0)
+    while t <= now_kst() or t.weekday() >= 5:
+        t += timedelta(days=1)
+        t = t.replace(hour=hour, minute=minute)
+    return t.timestamp()

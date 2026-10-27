@@ -305,6 +305,7 @@ const SOUP_THEMES = new Set([
 const baseKey = (key) => String(key).replace(/-(sudo|yeongnam|honam)$/, "");
 function soupPrior(t) {
   if (t.mode === "area") return 2.0;
+  if (t.mode === "route" || t.mode === "density") return 3.0; // 특별 시리즈는 자주 나오게(2026-10-27)
   return SOUP_THEMES.has(baseKey(t.key)) ? 3.5 : 1.2;
 }
 
@@ -658,7 +659,53 @@ async function supplementNearby(theme, x, y, radius) {
   return out;
 }
 
+/**
+ * KTX 노선 순례(2026-10-27 사용자 결정) — 역마다 반경 5km 안 '그 음식' 식당 후보를 모은다.
+ * 6칸에 노선 전체가 보이도록 역을 고르게 뽑고(첫 역·끝 역 포함), 나머지 역 후보는 비전 탈락 대비로 뒤에 붙인다.
+ * 칸 순서는 노선 순서(랭킹으로 섞지 않는다).
+ */
+async function collectRoutePlaces(theme) {
+  const re = new RegExp(theme.foodRe);
+  const stops = theme.stops;
+  const want = Math.min(6, stops.length);
+  const pick = new Set(Array.from({ length: want }, (_, i) => Math.round((i * (stops.length - 1)) / Math.max(1, want - 1))));
+  const first = [], rest = [];
+  for (let i = 0; i < stops.length; i++) {
+    const s = stops[i];
+    let items = [];
+    try {
+      items = await tourCall("locationBasedList2", { contentTypeId: "39", numOfRows: "300", mapX: String(s.x), mapY: String(s.y), radius: "5000", arrange: "E" });
+    } catch (e) { console.error(`[route] ${s.name} 조회 실패:`, String(e).slice(0, 80)); }
+    const near = items.filter((it) => it.firstimage && (it.cpyrhtDivCd === "Type1" || it.cpyrhtDivCd === "Type3") && re.test(it.title ?? "")).slice(0, 3);
+    near.forEach((it, k) => {
+      const p = {
+        contentId: String(it.contentid), name: String(it.title).replace(/\[[^\]]*\]/g, "").trim(),
+        address: [it.addr1, it.addr2].filter(Boolean).join(" "), region: s.name, imageUrl: toHttps(it.firstimage),
+        stop: s.name, stopIdx: i,
+      };
+      (pick.has(i) && k === 0 ? first : rest).push(p);
+    });
+  }
+  console.log(`[route] ${theme.routeLabel}: 역 ${stops.length}곳 중 후보 ${first.length + rest.length}곳`);
+  return [...first, ...rest];
+}
+
+/**
+ * 골목 밀집도 서열(2026-10-27 사용자 결정) — scripts/build-series.mjs가 카카오 로컬로 센
+ * '반경 500m 안 그 음식 가게 수' 상위 동네들. 칸 하나 = 동네 하나, 사진은 그 반경 안 관광공사 식당.
+ * 가게 수는 사실 수치이고 식당 평가가 아니다(긍정 원칙과 무관하게 안전).
+ */
+function collectDensityPlaces(theme) {
+  return theme.areas.map((a) => ({
+    contentId: a.cands[0].contentId, name: `${a.name} 일대`, address: a.cands[0].addr ?? "",
+    region: a.region, imageUrl: a.cands[0].imageUrl, extraImages: a.cands.slice(1).map((c) => c.imageUrl),
+    menu: `${theme.food}집 ${a.n}곳`, densityN: a.n,
+  }));
+}
+
 async function collectPlaces(theme, limit) {
+  if (theme.mode === "route") return collectRoutePlaces(theme);
+  if (theme.mode === "density") return collectDensityPlaces(theme);
   if (theme.mode === "area") return collectAreaPlaces(theme, limit);
   // 지역 시리즈(2026-09): areaCodes 배열로 여러 시도를 묶는다 (영남=부산·대구·울산·경북·경남 등).
   // TourAPI는 areaCode를 하나만 받아 코드별로 호출해 합친다.
@@ -1024,6 +1071,7 @@ async function enrichPlaces(places) {
   const clean = (v) =>
     String(v ?? "").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   for (const p of places) {
+    if (p.densityN) continue; // 골목 밀집도 칸은 동네 — 대표 사진의 식당 정보로 덮어쓰지 않는다
     if (/^(busan|jeju|seoul|gyeongju|wonju)-/.test(p.contentId)) continue; // 지자체·서울DB 항목은 TourAPI 콘텐츠가 아니라 상세조회 불가
     try {
       const it = (await tourCall("detailIntro2", { contentId: p.contentId, contentTypeId: "39" }))[0] ?? {};
@@ -1066,6 +1114,7 @@ async function kakaoGeo(p) {
 }
 
 async function prepareMap(db, places) {
+  places = places.filter((p) => !p.densityN);
   for (const p of places) if (!p.geo) p.geo = await kakaoGeo(p);
   const rows = (await db.execute("SELECT name, x, y FROM map_pins")).rows;
   const have = new Set(rows.map((r) => String(r.name)));
@@ -1078,6 +1127,7 @@ async function prepareMap(db, places) {
 }
 
 async function addMapPins(db, places, cid) {
+  places = places.filter((p) => !p.densityN);
   let n = 0;
   for (const p of places) {
     if (!p.geo) p.geo = await kakaoGeo(p);
@@ -2024,6 +2074,17 @@ function buildHookTitle(theme, n) {
 }
 
 function buildPunchyTitle(theme, n) {
+  if (theme.mode === "route") {
+    const top = `${theme.routeLabel} 역마다`;
+    const sub = `${n}대 맛집`;
+    return { text: `${top} ${theme.food} ${sub}`, top, main: theme.food, sub };
+  }
+  if (theme.mode === "density") {
+    const max = Math.max(...(theme.areas ?? []).map((a) => a.n), 0);
+    const top = `반경 500m에 ${theme.food}집 ${max}곳`;
+    const sub = `${n}대 골목`;
+    return { text: `${top} · ${theme.food} 골목 ${n}대 서열`, top, main: `${theme.food} 골목`, sub };
+  }
   if (theme.mode === "area") {
     // 지역편: 대형 타이포 = 동네 이름 ("성수동" / "강릉"), 수식어는 무지역형만.
     // 2026-09-09 유튜브 실측(국내 식당 464건, 중앙 7.1만 기준):
@@ -2589,7 +2650,7 @@ function buildCaption(theme, places, descending = false, ep = null) {
     `💬 ${engagementLine(theme, places.length)}\n` +
     `${shareCta}\n\n` +
     `${saveCta}\n` +
-    `⏰ 내일 저녁 5시 반, 다음 편으로 이어집니다\n\n` +
+    `⏰ 내일 저녁 5시, 다음 편으로 이어집니다\n\n` +
     tags // 사진 출처 라인 제외 (2026-09-03 사용자 지시)
   );
 }
@@ -2717,7 +2778,7 @@ async function main() {
     : slot === "spot" ? isSpot(t)
     : slot === "city" ? isCity(t)
     : slot === "nation" ? t.mode !== "area" && !t.areaCode && !t.areaCodes
-    : t.mode !== "area"; // food: 큐레이션·캐러셀 (전국+권역 음식)
+    : t.mode !== "area" && t.mode !== "route" && t.mode !== "density"; // food: 큐레이션·캐러셀 (전국+권역 음식)
   // 테마 선택: 단순 로테이션 (포인터 순서대로, 수집 부족 시 다음 테마)
   // 모음집(grid)과 큐레이션(countdown)은 포인터를 따로 둬 같은 테마가 겹치지 않게 함
   const IDX_KEY =
@@ -2786,6 +2847,7 @@ async function main() {
     const ok = [];
     for (const p of dedupeBrand(cands)) {
       if (ok.length >= NEED) break;
+      if (th.mode === "route" && ok.some((o) => o.stopIdx === p.stopIdx)) continue; // 역마다 1곳
       if (Date.now() > photoDeadline) {
         console.log(`사진 판정 시간 예산(8분) 초과 — 확보한 ${ok.length}곳으로 진행`);
         break;
@@ -2821,6 +2883,8 @@ async function main() {
     return;
   }
   places = passed.slice(0, useCount);
+  if (theme.mode === "route") places.sort((a, b) => a.stopIdx - b.stopIdx);
+  if (theme.mode === "density") places.sort((a, b) => b.densityN - a.densityN);
   console.log(`음식 사진 확보: ${places.length}곳 (${theme.key})`);
 
   // 자극형 제목 랜덤 생성
@@ -2895,7 +2959,7 @@ async function main() {
   // 임의 순서가 아닌 근거 있는 랭킹이 된다. (데이터랩은 신규 등록이 막혀 사용 불가)
   // 키가 없거나 실패하면 수집 순서를 그대로 쓴다.
   let rankBasis = "";
-  {
+  if (theme.mode !== "route" && theme.mode !== "density") {
     // "데이터 검증" 콘셉트(2026-09 트렌드 반영): 랭킹을 카운트다운뿐 아니라 grid·
     // 캐러셀에도 적용 — 카드에 근거 수치(블로그·유튜브)를 배지로 노출하고 셀 순서도
     // 인기순이 된다. 우리만 가진 4축 실데이터가 콘셉트 차별화의 핵심.
@@ -3488,6 +3552,7 @@ function curlUpload(args) {
  *    에이전트가 가져간 뒤에는 결과가 나올 때까지 기다린다 — 그 사이 공식 발행을 하면 두 번 올라간다.
  */
 async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, musicOk, thumbMs, theme, places, reelFormat }) {
+  let offline = false;
   // 에이전트 PC는 저녁·주말에 인터넷이 없다(2026-10-27 사용자). 살아 있다는 신호(45초마다 갱신)가
   // 5분 넘게 끊겼으면 기다리지 않고 바로 공식 API로 — 예전엔 매번 10분을 헛되이 기다렸다.
   try {
@@ -3495,9 +3560,9 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
     const ageMin = hb ? (Date.now() - new Date(String(hb.updated_at).replace(" ", "T") + "Z").getTime()) / 60e3 : Infinity;
     if (!(ageMin < 5)) {
       console.log(`[handoff] 에이전트 오프라인(마지막 신호 ${Number.isFinite(ageMin) ? Math.round(ageMin) + "분 전" : "없음"}) — 공식 API로 바로 발행`);
-      return null;
+      offline = true;
     }
-  } catch { return null; }
+  } catch { offline = true; }
   let coverUrl = null;
   try { if (coverJpg) coverUrl = await uploadPublic(coverJpg); } catch { /* 스토리만 못 올림 */ }
   const top = places[0] ?? {};
@@ -3526,6 +3591,11 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
     theme: { key: theme.key, mode: theme.mode ?? "food", food: theme.food || theme.keyword, keyword: theme.keyword },
     places: places.slice(0, 6).map((pl) => ({ name: pl.name, region: pl.region ?? "", address: pl.address ?? "" })),
   };
+  if (offline) {
+    // 에이전트가 꺼져 있어도 재료는 남긴다 — 다시 켜지면 위치·식당 태그·첫 댓글·트라이얼에 쓴다
+    await db.execute({ sql: "UPDATE posts SET handoff = ? WHERE content_id = ?", args: [JSON.stringify(payload), cid] });
+    return null;
+  }
   await db.execute({ sql: "UPDATE posts SET status = 'handoff', handoff = ? WHERE content_id = ?", args: [JSON.stringify(payload), cid] });
   console.log("[handoff] 로컬 에이전트에 발행을 넘김 — 대기");
   const WAIT = Number(process.env.HANDOFF_WAIT_MIN || 10) * 60e3;

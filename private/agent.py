@@ -25,7 +25,8 @@ from pathlib import Path
 import requests
 
 from common import (GRAPH, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
-                    graph_id_for_code, graph_token, nap, now_kst, state_get, state_set)
+                    graph_id_for_code, graph_token, nap, next_weekday_at, now_kst, online_slot,
+                    state_get, state_set)
 import follows
 import growth
 
@@ -121,6 +122,11 @@ def pick_track(c, skip: int = 0):
 
 
 def ffmpeg() -> str:
+    """시스템 ffmpeg 우선(안드로이드 Termux는 pkg install ffmpeg) — imageio_ffmpeg 동봉 바이너리는 윈도우·x86 전용."""
+    import shutil
+    sysff = shutil.which("ffmpeg")
+    if sysff:
+        return sysff
     import imageio_ffmpeg
     return imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -292,6 +298,7 @@ def postprocess_recent():
                 c.comment_pin(info.id, cm.pk)
                 log.info(f"📌 첫 댓글 고정 {cid}")
             state_set(f"pp:{cid}", "official")
+            enqueue_trials(cid, p)
         except Exception as e:
             log.warning(f"사후 처리 실패 {cid}: {str(e)[:160]}")
             if is_block(e):
@@ -307,7 +314,7 @@ def likes_daily():
         return
     slot = state_get(f"likes-at:{today}")
     if not slot:
-        slot = f"{random.randint(11, 20):02d}:{random.randint(0, 59):02d}"
+        slot = online_slot()
         state_set(f"likes-at:{today}", slot)
     if f"{now_kst():%H:%M}" < slot:
         return
@@ -393,10 +400,12 @@ TRIALS_PER_POST = 2
 def enqueue_trials(cid: str, p: dict):
     """저녁 모음집(음원 붙는 회차)마다 같은 영상을 다른 음원·다른 첫 줄로 트라이얼 릴스 2개 더 올린다.
     트라이얼은 비팔로워에게만 보여 팔로워 피드를 도배하지 않는다. 본편 직후가 아니라 2~4시간 간격."""
-    if not p.get("music_ok") or not p.get("reel_url"):
+    if not p.get("music_ok") or not p.get("reel_url") or state_get(f"trialq-done:{cid}"):
         return
+    state_set(f"trialq-done:{cid}", "1")
     q = json.loads(state_get("trialq") or "[]")
-    q.append({"cid": cid, "n": 1, "at": time.time() + random.randint(2, 4) * 3600, "p": p})
+    # 노트북은 평일 09:00~11:10에만 확실히 켜져 있다 — 다음 평일 오전 10:15 전후에 1개, 25분 뒤 1개
+    q.append({"cid": cid, "n": 1, "at": next_weekday_at(10, 15) + random.randint(0, 600), "p": p})
     state_set("trialq", json.dumps(q, ensure_ascii=False))
     log.info(f"🧪 트라이얼 {TRIALS_PER_POST}개 예약: {cid}")
 
@@ -450,7 +459,7 @@ def process_trials():
         if is_block(e):
             pause(12, "트라이얼 중 차단 신호")
     if n < TRIALS_PER_POST:
-        q.insert(0, {**job, "n": n + 1, "at": time.time() + random.randint(2, 4) * 3600})
+        q.insert(0, {**job, "n": n + 1, "at": time.time() + random.randint(20, 30) * 60})
     state_set("trialq", json.dumps(q, ensure_ascii=False))
 
 

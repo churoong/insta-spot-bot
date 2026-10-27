@@ -1,0 +1,47 @@
+name: 특별 시리즈 테마 빌드 (KTX 노선·골목 밀집도)
+
+# 2026-10-27: 관광공사 API는 발행과 같은 하루 한도를 쓴다 — 낮에 빌드했다가 한도를 다 써서
+# 그날 발행 품질이 떨어졌다. 그래서 한도가 막 풀린 새벽(KST 01:30)에만 돈다.
+# 스크립트가 7일 안에 빌드했으면 바로 끝나므로 사실상 주 1회. 강제: 수동 실행에서 force 체크.
+on:
+  schedule:
+    - cron: "30 16 * * *" # UTC 16:30 = KST 01:30
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "7일 안에 빌드했어도 다시 빌드"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # 테마 파일 커밋용
+
+concurrency:
+  group: series-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        run: npm ci
+      - name: 시리즈 빌드
+        env:
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          FORCE: ${{ inputs.force && '1' || '' }}
+        run: npx tsx scripts/build-series.mjs
+      - name: 테마 커밋
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/roundup-themes.json data/series-built.json 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "특별 시리즈 테마 갱신 ($(date +%Y-%m-%d))"
+          git push
