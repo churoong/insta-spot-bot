@@ -39,11 +39,11 @@ jobs:
       group: ${{ github.workflow }}
       cancel-in-progress: false
     steps:
-      - name: 발행 창 게이트 (KST 17:30~22:00, 수동 실행은 통과)
+      - name: 발행 창 게이트 (KST 16:30~22:00, 수동 실행은 통과 — 2026-10-27 저녁 5시 발행으로 앞당김)
         id: gate
         run: |
           T=$((10#$(TZ=Asia/Seoul date +%H%M)))
-          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$T" -ge 1730 ] && [ "$T" -lt 2200 ]; }; then
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$T" -ge 1630 ] && [ "$T" -lt 2200 ]; }; then
             echo "go=1" >> "$GITHUB_OUTPUT"
           else
             echo "발행 창 밖(KST $T) — 스킵. 창 안에 도착하는 다른 슬롯이 발행 담당."

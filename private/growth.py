@@ -18,7 +18,7 @@ import random
 import re
 from collections import Counter
 
-from common import ROOT, db, get_logger, llm, nap, now_kst, state_get, state_set
+from common import ROOT, db, get_logger, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
 
@@ -264,7 +264,7 @@ def targeted_likes(c):
         return
     slot = state_get(f"tlikes-at:{today()}")
     if not slot:
-        slot = f"{random.randint(12, 21):02d}:{random.randint(0, 59):02d}"
+        slot = online_slot()
         state_set(f"tlikes-at:{today()}", slot)
     if f"{now_kst():%H:%M}" < slot:
         return
@@ -355,7 +355,7 @@ def auto_comments(c):
         return
     slot = state_get(f"acom-at:{today()}")
     if not slot:
-        slot = f"{random.randint(11, 20):02d}:{random.randint(0, 59):02d}"
+        slot = online_slot()
         state_set(f"acom-at:{today()}", slot)
     if f"{now_kst():%H:%M}" < slot:
         return
@@ -408,7 +408,7 @@ def demand_snapshot(c):
       - 자동완성 중 '지역·역·맛집·추천' 같은 찾아가려는 검색어가 많을수록 +
       - 해시태그 게시물 수가 지난주보다 빨리 늘수록 +(7일치 쌓인 뒤부터)"""
     h = now_kst().hour
-    if h < 6 or h >= 10 or state_get(f"demand:{today()}"):
+    if h < 6 or now_kst().strftime("%H:%M") >= "11:10" or state_get(f"demand:{today()}"):
         return
     state_set(f"demand:{today()}", "running")
     themes = json.loads((ROOT.parent / "data" / "roundup-themes.json").read_text(encoding="utf-8"))["themes"]

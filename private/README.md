@@ -31,3 +31,13 @@ GitHub 러너가 아니라 **사용자 PC에서만** 돈다(데이터센터 IP�
 
 음원 검색어는 `music.txt`(인스타는 '유행 음원 목록'을 주지 않는다 — 요즘 곡을 직접 적어 두기).
 차단 신호(보안 확인·활동 제한)가 오면 6~24시간 비공식 호출을 전부 멈춘다. 로그: `private/logs/agent.log`.
+
+## 안드로이드 폰으로 옮기기(24시간 상시 운영, 2026-10-27)
+노트북은 저녁·주말·점심에 인터넷이 없다. 집 와이파이에 꽂아 둔 폰은 가정용 회선이라 비공식 로그인 탐지 위험도 낮다.
+1. 폰에 F-Droid에서 **Termux**와 **Termux:Boot** 설치(플레이스토어판 Termux는 오래돼서 안 됨). Termux:Boot를 한 번 열어 둘 것.
+2. 폰 설정 → 앱 → Termux → 배터리 → **제한 없음**(절전에 죽지 않게).
+3. Termux에서: `pkg install -y curl && curl -sL https://raw.githubusercontent.com/churoong/insta-spot-bot/main/private/termux-setup.sh | bash` (10~20분)
+4. 노트북에서: `powershell -ExecutionPolicy Bypass -File private\export-for-phone.ps1` → 바탕화면 `insta-agent-transfer.zip`(로그인 세션·.env 포함 — 비밀)을 USB로 폰 '다운로드' 폴더에
+5. Termux에서: `bash ~/insta-spot-bot/private/termux-setup.sh import` → 폰 재부팅(또는 `bash ~/.termux/boot/insta-agent.sh`)
+6. **노트북 에이전트 끄기**(둘이 동시에 돌면 같은 작업을 두 번 한다): `schtasks /Change /TN insta-private-agent /Disable` 후 `schtasks /End /TN insta-private-agent`
+폰의 `.env`에 `AGENT_ONLINE=08:30-22:30`이 들어가 활동 시간대가 넓어진다. 코드는 폰이 하루 한 번 `git pull`로 받는다.
