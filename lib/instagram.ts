@@ -183,6 +183,19 @@ async function verifyRecentPublish(caption: string): Promise<string | null> {
   }
 }
 
+/** 최근 게시물 중 캡션이 prefix로 시작하고 maxAgeMs 안에 올라온 것의 id (재실행 시 이중 발행 방지용) */
+export async function findRecentByCaption(prefix: string, maxAgeMs: number): Promise<string | null> {
+  const res = await fetch(
+    `${GRAPH}/${igUserId()}/media?fields=id,caption,timestamp&limit=10&access_token=${encodeURIComponent(await getToken())}`,
+    { signal: AbortSignal.timeout(15000) }
+  );
+  const json = await res.json();
+  for (const m of json?.data ?? []) {
+    if (Date.now() - new Date(m.timestamp).getTime() < maxAgeMs && String(m.caption ?? "").startsWith(prefix)) return String(m.id);
+  }
+  return null;
+}
+
 /** 이미지 게시: 컨테이너 생성 → 발행. 발행된 media id 반환 */
 export async function publishImage(imageUrl: string, caption: string): Promise<string> {
   const container = await graphPost(`${igUserId()}/media`, {
