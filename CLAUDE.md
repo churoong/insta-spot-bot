@@ -60,6 +60,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **2026-10-27 첫 댓글 해시태그**: `buildFirstComment`(make-roundup) = 1위 소개 + 원픽 질문 + 지역 해시태그 최대 5개(`commentHashtags` — 캡션 5개 제한 보완). 공식 경로 회차는 **GitHub가 발행 직후 공식 API(`commentOnMedia`, lib/instagram.ts)로 바로 단다**(노트북과 무관), 비공식 경로는 에이전트가 같은 문구를 달고 고정. 에이전트 사후 처리는 '🥇'로 시작하는 우리 댓글을 찾아 고정만(없으면 단다). 댓글 해시태그가 검색에 잡히는지는 `check_hashtag_visibility`가 2시간 뒤 해시태그 최근 게시물에서 확인해 `private_log` `htcheck:<pk>`에 남긴다.
 - **2026-10-27 첫 댓글은 해시태그만**(사용자: "댓글 형식은 그냥 해시태그로만 구성해") — 1위 소개·원픽 질문 문구 없음, 공식 경로는 GitHub가 발행 직후, 비공식 경로는 에이전트가 단다. → 같은 날 **고정으로 변경**(사용자: "해시태그 댓글을 고정해줘"): 공식 API엔 댓글 고정이 없어 에이전트가 고정한다 — 비공식 발행은 달자마자, 공식 경로 회차는 사후 처리에서 '#'로 시작하는 우리 댓글을 찾아(없으면 달고) 고정. 노트북이 꺼져 있던 회차는 다음에 켜질 때 고정된다.
 - **2026-10-27 DM 카드**: DM으로 동네를 물으면 글자 목록 뒤에 이미지 2장 — `private/cards.py` `map_card`(OpenStreetMap 타일 + 번호 핀, 출처 표기·User-Agent 필수, DM 답장 분량만) · `receipt_card`("먹짱 맛집 영수증"). 받는 사람 이름이 들어가 캡처·공유되라고 만든 것. 목록은 `engage.near_places`(우리 소개 집 5km 우선, 모자라면 카카오). Pretendard엔 이모지 글리프가 없다 — 카드에 이모지 쓰지 말 것.
+- **2026-10-27 스레드 동시 발행**: 모음집·큐레이션이 인스타에 나가면 `crossPostThreads`(make-roundup)가 같은 영상(실패하면 표지 이미지)을 공식 Threads API(`lib/threads.ts`)로 올린다 — 노트북 무관, 공식·비공식 경로 모두. 글 = 제목 + 상호(지역) 목록 + 긍정형 질문 + "영상·지도는 인스타 @tourist_710", 토픽 태그 1개(`<음식>맛집`). 글 ID는 `posts.threads_id`. 연결: 메타 앱(Threads 사용 사례) → 리디렉션 URI `https://insta-spot-bot.vercel.app/api/threads/callback` → Threads 테스터 초대 수락 → `/api/threads/connect` 열기. 장기 토큰 60일 — 쓸 때 + metrics 크론이 7일마다 갱신. 연결 전이면 조용히 건너뛴다.
 - 차단 신호(Challenge·PleaseWait·Feedback 등)를 받으면 6~24시간 비공식 호출을 전부 멈춘다. 상태는 DB `private_log` 테이블(`agent:alive`, `agent:paused`, `pp:<content_id>`, `likes:<날짜>`).
 
 ### ▶ 2026-10-22 사용자 결정 2차 4건
@@ -112,6 +113,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 | 키 | 로컬 .env | GitHub Actions | Vercel | 쓰는 곳 |
 |---|---|---|---|---|
 | TOUR_API_KEY, GEMINI/GROQ, TURSO_*, IG_*, FB_*, YOUTUBE, JEJU, NAVER_* | ✅ | ✅ | 일부(웹훅·크론용) | 발행 파이프라인 |
+| `THREADS_APP_ID`, `THREADS_APP_SECRET` | — | 불필요 | ✅ (사용자가 등록) | `/api/threads/connect`·`callback` 1회 연결. 발행 토큰은 DB `config.threads_token`(GitHub 시크릿 불필요) |
 | `KAKAO_REST_KEY` | ✅ | 불필요 | ✅ (2026-09-09 등록) | `/go` 지도 링크 전용 |
 | `GITHUB_TOKEN`(PAT, Actions 쓰기) + `GITHUB_REPO` | — | — | ✅ | Vercel 크론 → workflow_dispatch |
 | (키 불필요) | — | — | — | 원주 `data/wonju-food.json`·경주는 커밋된 파일/공용 TourAPI 키라 클라우드에서도 그대로 동작 |

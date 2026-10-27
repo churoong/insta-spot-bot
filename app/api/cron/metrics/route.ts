@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
 import { fetchInsights } from "@/lib/instagram";
+import { refreshThreadsToken } from "@/lib/threads";
 
 export const maxDuration = 60;
 
@@ -44,5 +45,7 @@ export async function GET(req: NextRequest) {
       })
     );
   }
-  return NextResponse.json({ checked: rows.length, updated: ok, failed: fail });
+  // 스레드 장기 토큰(60일) 유지 — 모음집이 멈춰도 여기서 7일마다 갱신된다
+  const threads = await refreshThreadsToken().catch((e) => String(e).slice(0, 120));
+  return NextResponse.json({ checked: rows.length, updated: ok, failed: fail, threads });
 }
