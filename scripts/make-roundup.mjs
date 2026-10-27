@@ -3774,6 +3774,8 @@ main()
   .then(() => process.exit(0))
   .catch(async (e) => {
     console.error("모음집 실패:", e);
+    // 로그 원문을 못 받는 환경(클라우드 세션)에서도 check-runs annotations API로 사유를 읽게
+    console.log(`::error title=make-roundup::${String(e?.stack || e).replace(/\r?\n/g, " | ").slice(0, 900)}`);
     if (pending) {
       try {
         await pending.db.execute({

@@ -181,5 +181,6 @@ async function main() {
 
 main().then(() => process.exit(0)).catch((e) => {
   console.error("아침 스토리 실패:", e);
+  console.log(`::error title=morning-story::${String(e?.stack || e).replace(/\r?\n/g, " | ").slice(0, 900)}`);
   process.exit(1);
 });
