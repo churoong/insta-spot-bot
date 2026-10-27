@@ -5,6 +5,7 @@ name: 특별 시리즈 테마 빌드 (KTX 노선·골목 밀집도)
 # 스크립트가 7일 안에 빌드했으면 바로 끝나므로 사실상 주 1회. 강제: 수동 실행에서 force 체크.
 on:
   schedule:
+    - cron: "5 15 * * *" # UTC 15:05 = KST 00:05 — 한도 리셋 직후. 지연돼도 05시 전에 도착할 확률을 높인다
     - cron: "30 16 * * *" # UTC 16:30 = KST 01:30
   workflow_dispatch:
     inputs:
@@ -25,13 +26,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # 2026-10-28: 01:30 예약이 05:50에 도착해(GitHub 크론 지연) 낮 발행과 같은 관광공사 한도를 썼다.
+      # 예약 실행은 KST 00~05시에 도착했을 때만 빌드 — 늦으면 그날은 건너뛴다(다음 날 새벽에 다시). 수동 실행은 통과.
+      - name: 새벽 창 게이트 (KST 00:00~05:00, 수동 실행은 통과)
+        id: gate
+        run: |
+          H=$((10#$(TZ=Asia/Seoul date +%H)))
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$H" -lt 5 ]; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "새벽 창 밖(KST ${H}시) — 오늘 빌드 건너뜀. 발행용 관광공사 한도를 지킨다."
+          fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
         with:
           node-version: 22
       - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
         run: npm ci
       - name: 시리즈 빌드
+        if: steps.gate.outputs.go == '1'
         env:
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
           TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
@@ -39,6 +55,7 @@ jobs:
           FORCE: ${{ inputs.force && '1' || '' }}
         run: npx tsx scripts/build-series.mjs
       - name: 테마 커밋
+        if: steps.gate.outputs.go == '1'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
