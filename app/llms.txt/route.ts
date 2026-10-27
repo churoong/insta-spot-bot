@@ -1,10 +1,11 @@
-import { BRAND, BRAND_SUBJ, IG_URL, SITE, allEditions, allPins, foodOf, regionOf } from "@/lib/publicmap";
+import { BRAND, SITE, igHandle, igUrl, allEditions, allPins, foodOf, regionOf } from "@/lib/publicmap";
 
 export const revalidate = 3600;
 
 // llms.txt — AI가 이 사이트를 한 번에 파악하도록 요약 + 링크 목록(마크다운).
 export async function GET() {
   const [pins, eds] = await Promise.all([allPins().catch(() => []), allEditions().catch(() => [])]);
+  const IG_URL = igUrl(await igHandle());
   const lines = [
     `# ${BRAND} 전국 맛집 지도`,
     "",

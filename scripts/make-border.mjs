@@ -43,6 +43,7 @@ const SIDO_SHORT = {
 
 const muni = JSON.parse(fs.readFileSync("data/geo/sigungu-2013.json", "utf8")).features;
 const prov = JSON.parse(fs.readFileSync("data/geo/sido-2013.json", "utf8")).features;
+let HANDLE = process.env.IG_HANDLE || "tourist_710"; // 발행 시 config.ig_handle로 덮는다
 const kstDate = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -271,7 +272,7 @@ ${fills}${borders}${labelSvg}
 <text x="84" y="415" font-family="${FONT}" font-weight="700" font-size="44" fill="#222">우리 동네는 무슨 국밥파?</text>
 ${legend}
 <text x="80" y="1790" font-family="${FONT}" font-size="26" fill="#777">${esc(note)}</text>
-<text x="80" y="1834" font-family="${FONT}" font-weight="600" font-size="28" fill="#999">@tourist_710</text>
+<text x="80" y="1834" font-family="${FONT}" font-weight="600" font-size="28" fill="#999">@${HANDLE}</text>
 </svg>`;
 }
 
@@ -347,6 +348,13 @@ async function main() {
   console.log("전국:", national, "합계", total);
   console.log("시도 1위:", Object.entries(sidoWin).map(([s, w]) => `${SIDO_SHORT[s]}=${w}`).join(" "));
 
+  if (!OFFLINE && process.env.TURSO_DATABASE_URL) {
+    try {
+      const { createClient } = await import("@libsql/client");
+      const c = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+      HANDLE = String((await c.execute("SELECT value FROM config WHERE key = 'ig_handle'")).rows[0]?.value || HANDLE);
+    } catch { /* 기본값 */ }
+  }
   const svg = renderSvg(muniWin, sidoWin, total, data.source);
   const jpg = "border-preview.jpg";
   await sharp(Buffer.from(svg)).jpeg({ quality: 92 }).toFile(jpg);
@@ -401,7 +409,7 @@ async function main() {
     }
     try {
       const { publishThreads } = await import("../lib/threads.ts");
-      const text = `대한민국 국밥 국경선\n\n${Object.entries(SIDO_SHORT).filter(([c]) => sidoWin[c]).map(([c, s]) => `${s} · ${sidoWin[c]}`).join("\n")}\n\n여러분 동네는 어느 국밥 쪽이에요?\n지도는 인스타 @tourist_710`;
+      const text = `대한민국 국밥 국경선\n\n${Object.entries(SIDO_SHORT).filter(([c]) => sidoWin[c]).map(([c, s]) => `${s} · ${sidoWin[c]}`).join("\n")}\n\n여러분 동네는 어느 국밥 쪽이에요?\n지도는 인스타 @${HANDLE}`;
       const id = await publishThreads({ text, videoUrl, topicTag: "국밥맛집" });
       if (id) {
         await db.execute({ sql: "UPDATE posts SET threads_id = ? WHERE content_id = ?", args: [id, cid] });

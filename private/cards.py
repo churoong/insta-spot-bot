@@ -1,7 +1,7 @@
 """DM 답장용 공유 카드(2026-10-27 사용자 결정 — "내 동네 맛집 지도"·"맛집 영수증").
 
 DM으로 동네를 물으면 글자 목록과 함께 이미지 두 장을 보낸다. 받은 사람만을 위한 이미지라 캡처·공유되고,
-구석의 @tourist_710이 같이 퍼진다.
+구석의 우리 아이디(@…)가 같이 퍼진다.
   map_card     OpenStreetMap 타일 위에 번호 핀 — 타일 이용 정책상 User-Agent·출처 표기 필수, 소량만 쓴다
   receipt_card 영수증 디자인 리스트
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from common import REPO
+from common import REPO, ig_handle
 
 FONT_B = str(REPO / "assets" / "fonts" / "Pretendard-ExtraBold.otf")
 FONT_M = str(REPO / "assets" / "fonts" / "Pretendard-Bold.otf")
@@ -82,7 +82,7 @@ def map_card(path: Path, who: str, area: str, cx: float, cy: float, places: list
     names = "  ".join(f"{i}. {p['name']}" for i, p in enumerate(places[:5], start=1))
     d.text((48, 1282), names[:60], font=_font(FONT_M, 26), fill=(255, 255, 255))
     d.text((48, 1320), "© OpenStreetMap contributors", font=_font(FONT_R, 20), fill=(150, 140, 135))
-    d.text((W - 48, 1320), "@tourist_710", font=_font(FONT_M, 24), fill=(200, 190, 185), anchor="ra")
+    d.text((W - 48, 1320), "@" + ig_handle(), font=_font(FONT_M, 24), fill=(200, 190, 185), anchor="ra")
     img.save(path, quality=92)
 
 
@@ -118,7 +118,7 @@ def receipt_card(path: Path, who: str, area: str, places: list):
         w = 3 if (i // 12) % 3 else 6
         d.rectangle([40 + i, y, 40 + i + w, y + 110], fill=(20, 20, 20))
     # Pretendard에 이모지 글리프가 없어 글자만 쓴다
-    d.text((380, y + 160), "@tourist_710  ·  감사합니다", font=_font(FONT_M, 28), fill=(90, 90, 90), anchor="mm")
+    d.text((380, y + 160), f"@{ig_handle()}  ·  감사합니다", font=_font(FONT_M, 28), fill=(90, 90, 90), anchor="mm")
     # 아래 톱니
     for x in range(0, 760, 40):
         d.polygon([(x, 1150), (x + 20, 1130), (x + 40, 1150)], fill=(34, 22, 18))

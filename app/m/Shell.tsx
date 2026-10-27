@@ -1,15 +1,16 @@
 import type { ReactNode } from "react";
-import { BRAND, IG_HANDLE, IG_URL } from "@/lib/publicmap";
+import { BRAND, igHandle, igUrl } from "@/lib/publicmap";
 
 // 공개 페이지 공통 틀 — 루트 레이아웃(관리 대시보드)은 어두운 배경이라 여기서 밝게 덮는다.
-export default function Shell({ children }: { children: ReactNode }) {
+export default async function Shell({ children }: { children: ReactNode }) {
+  const h = await igHandle();
   return (
     <div style={{ background: "#f6f1e7", color: "#1d1a17", minHeight: "100vh" }}>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "28px 16px 64px", lineHeight: 1.65 }}>
         <nav style={{ fontSize: 14, marginBottom: 20 }}>
           <a href="/m" style={{ color: "#e02020", fontWeight: 700, textDecoration: "none" }}>{BRAND} 전국 맛집 지도</a>
           <span style={{ color: "#999" }}> · </span>
-          <a href={IG_URL} style={{ color: "#555" }}>인스타 @{IG_HANDLE}</a>
+          <a href={igUrl(h)} style={{ color: "#555" }}>인스타 @{h}</a>
         </nav>
         {children}
       </main>
