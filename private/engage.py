@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 import requests
 
-from common import ENV, db, get_logger, llm, nap, now_kst, online_slot, state_get, state_set
+from common import ENV, db, get_logger, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
 VISITED_LIKES, VISITED_COMMENTS = 15, 5
@@ -168,8 +168,10 @@ def visited_engage(c, find_location):
             uid = str(m.user.pk)
             if uid == me or (time.time() - m.taken_at.timestamp()) > 14 * 86400:
                 continue
-            if _count("visited-like") < VISITED_LIKES and not getattr(m, "has_liked", False):
+            liked = bool(getattr(m, "has_liked", False))
+            if _count("visited-like") < VISITED_LIKES and not liked:
                 c.media_like(m.id)
+                liked = True
                 _bump("visited-like")
                 nap(25, 70)
             cap = (m.caption_text or "").strip()
@@ -180,6 +182,7 @@ def visited_engage(c, find_location):
                     "존댓말 40자 안팎, 이모지 최대 1개. 식당·음식은 긍정만. 금지: 링크, 해시태그, 팔로우·맞팔 요청. 댓글만 출력.\n게시물: " + cap[:300], 90)
                 if text and not re.search(r"팔로우|맞팔|선팔|http|#", text):
                     c.media_comment(m.id, text)
+                    like_too(c, m.id, liked)
                     _touch(uid)
                     _bump("visited-cmt")
                     log.info(f"🍽 소개 식당 방문자 댓글({r['name']}): {text}")
@@ -667,6 +670,7 @@ def recommend_requests(c):
             if len(near) < 2:
                 continue
             c.media_comment(m.id, f"{g[0]} 근처면 {', '.join(near)} 추천드려요! 다 맛있게 드셨으면 좋겠어요 😊")
+            like_too(c, m.id, getattr(m, "has_liked", False))
             _touch(uid)
             _bump("req")
             log.info(f"🙋 추천 요청 응답(#{tag} {g[0]}): {', '.join(near)}")

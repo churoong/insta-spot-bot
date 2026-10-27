@@ -1,0 +1,70 @@
+name: 국밥 국경선 지도 릴스
+
+# 2026-10-27 사용자 결정: 시군구별 국밥 종류(카카오 로컬 집계)로 칠한 "대한민국 국밥 국경선" 지도 릴스.
+# 수동 실행 전용 — 정기 슬롯에 넣지 않았다(발행 요일을 바꾸면 CLAUDE.md의 네 곳을 같이 고쳐야 한다).
+# 기본은 dry(발행 없이 집계 + 지도 렌더 → 아티팩트). 실제 발행은 dry 체크를 끄고 실행.
+# 카카오 로컬만 쓰고 관광공사 API는 안 쓰므로 발행과 한도를 나누지 않는다.
+on:
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "발행 없이 집계·지도만 (아티팩트 border-preview)"
+        type: boolean
+        default: true
+      rebuild:
+        description: "30일 캐시가 있어도 다시 집계"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # 집계 캐시(data/border-gukbap.json) 커밋용
+
+concurrency:
+  group: border
+  cancel-in-progress: false
+
+jobs:
+  border:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: 폰트·ffmpeg 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk ffmpeg
+          mkdir -p ~/.fonts && cp assets/fonts/*.otf ~/.fonts/ && fc-cache -f > /dev/null
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        run: npm ci
+      - name: 집계·렌더·발행
+        run: npx tsx scripts/make-border.mjs
+        env:
+          BORDER_DRY: ${{ inputs.dry && '1' || '' }}
+          BORDER_REBUILD: ${{ inputs.rebuild && '1' || '' }}
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          FB_ACCESS_TOKEN: ${{ secrets.FB_ACCESS_TOKEN }}
+          FB_IG_USER_ID: ${{ secrets.FB_IG_USER_ID }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+      - name: 집계 캐시 커밋
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/border-gukbap.json 2>/dev/null || true
+          git diff --cached --quiet || { git commit -m "국밥 국경선 집계 갱신 ($(date +%Y-%m-%d))" && git pull --rebase -q && git push; }
+      - name: 미리보기 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: border-preview
+          if-no-files-found: ignore
+          path: |
+            border-preview.jpg
+            border-caption.txt

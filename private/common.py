@@ -71,6 +71,22 @@ def nap(lo: float, hi: float) -> None:
     time.sleep(random.uniform(lo, hi))
 
 
+BLOCK_SIGNALS = ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")
+
+
+def like_too(c, media_id, already: bool = False) -> None:
+    """남의 게시물에 댓글을 달면 좋아요도 누른다(2026-10-27 사용자 결정) — 댓글만 있고 하트가 없으면 어색하다.
+    댓글은 이미 달렸으니 좋아요 실패는 넘긴다. 차단 신호만 올려 호출부가 멈추게 한다."""
+    if already:
+        return
+    try:
+        nap(4, 15)
+        c.media_like(media_id)
+    except Exception as e:
+        if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
+            raise
+
+
 # ---------- Turso (libSQL HTTP) ----------
 def _turso_url() -> str:
     u = ENV.get("TURSO_DATABASE_URL", "")

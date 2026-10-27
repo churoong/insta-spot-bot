@@ -5,7 +5,7 @@
   reply_own_comments       우리 게시물 댓글에 하트 + 짧은 답글
   pin_hits / add_to_highlight  조회 1,000+ 게시물 프로필 고정, 스토리를 음식별 하이라이트로
   targeted_likes           큰 맛집 계정 최근 게시물에 댓글 단 사람들의 게시물에 좋아요
-  auto_comments            남의 맛집 게시물에 그 게시물 내용을 짚는 댓글(하루 8~12개)
+  auto_comments            남의 맛집 인기 게시물(좋아요 100+ 또는 재생 5천+, 3일 이내)에 내용을 짚는 댓글 + 좋아요(하루 8~12개)
 
 공통 원칙: 하루 상한 + 무작위 간격, 차단 신호가 오면 호출부(agent.pause)가 전부 멈춘다.
 댓글은 LLM이 그 게시물·댓글 내용을 보고 쓴다. 생성에 실패하면 '안 단다' — 아무 데나 붙는
@@ -18,7 +18,7 @@ import random
 import re
 from collections import Counter
 
-from common import ROOT, db, get_logger, llm, nap, now_kst, online_slot, state_get, state_set
+from common import ROOT, db, get_logger, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
 
@@ -27,6 +27,11 @@ COMMENT_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", 
 REPLIES_PER_DAY = 30
 TARGET_LIKES_PER_DAY = (12, 18)
 COMMENTS_PER_DAY = (8, 12)
+# 남의 게시물 댓글 대상 = 노출이 큰 게시물(2026-10-27 사용자: "너무 비주류 계정 위주") — 최근 게시물 탭은
+# 방금 올라온 작은 계정 글이라 우리 댓글을 볼 사람이 거의 없다. 인기 게시물 탭 + 반응 하한 + 3일 이내.
+COMMENT_MIN_LIKES = 100
+COMMENT_MIN_PLAYS = 5000
+COMMENT_MAX_AGE_DAYS = 3
 
 
 def _norm(s: str) -> str:
@@ -357,6 +362,7 @@ def fast_first_comments(c):
         state_set(f"fast-m:{m.get('id')}", "1")
         nap(30, 120)  # 올라오자마자 0초 댓글은 봇 티가 난다
         c.media_comment(str(m.get("id")), text)
+        like_too(c, str(m.get("id")), bool(m.get("has_liked")))
         state_set(f"fast-u:{uid}:{today()}", "1")
         state_set(f"fast:{today()}", str(used + 1))
         log.info(f"⚡ 큰 계정 새 게시물 첫 댓글(@{(m.get('user') or {}).get('username')}): {text}")
@@ -365,6 +371,32 @@ def fast_first_comments(c):
 
 
 # ---------- 남의 게시물 자동 댓글 ----------
+def _plays(m) -> int:
+    return int(getattr(m, "play_count", 0) or getattr(m, "view_count", 0) or 0)
+
+
+def popular_medias(c, tag: str) -> list:
+    """해시태그 인기 게시물 중 반응 하한을 넘고 3일 안 된 것, 반응 큰 순.
+    인기 탭이 비거나 다 걸러지면 최근 게시물에서 같은 하한으로 보충한다(하한은 낮추지 않는다 — 못 찾으면 그 태그는 건너뜀)."""
+    import time as _t
+    out, seen = [], set()
+    for fetch in (lambda: c.hashtag_medias_top(tag, amount=9), lambda: c.hashtag_medias_recent(tag, amount=30)):
+        if len(out) >= 4:
+            break
+        for m in fetch():
+            if m.id in seen:
+                continue
+            seen.add(m.id)
+            age = _t.time() - m.taken_at.timestamp()
+            if age > COMMENT_MAX_AGE_DAYS * 86400:
+                continue
+            if (m.like_count or 0) >= COMMENT_MIN_LIKES or _plays(m) >= COMMENT_MIN_PLAYS:
+                out.append(m)
+        nap(3, 8)
+    out.sort(key=lambda m: (m.like_count or 0) * 50 + _plays(m), reverse=True)
+    return out
+
+
 def auto_comments(c):
     if state_get(f"acom:{today()}"):
         return
@@ -380,8 +412,8 @@ def auto_comments(c):
         for tag in random.sample(COMMENT_TAGS, 3):
             if done >= goal:
                 break
-            medias = c.hashtag_medias_recent(tag, amount=20)
-            for m in random.sample(medias, min(len(medias), 8)):
+            medias = popular_medias(c, tag)
+            for m in medias[:8]:
                 if done >= goal:
                     break
                 uid = str(m.user.pk)
@@ -399,9 +431,10 @@ def auto_comments(c):
                     continue
                 try:
                     c.media_comment(m.id, text)
+                    like_too(c, m.id, getattr(m, "has_liked", False))
                     done += 1
                     db("INSERT OR REPLACE INTO private_log (key, value, updated_at) VALUES (?, ?, datetime('now', '+30 days'))", [f"acom-u:{uid}", "1"])
-                    log.info(f"🗨 댓글(#{tag}): {text}")
+                    log.info(f"🗨 댓글(#{tag} ❤{m.like_count} ▶{_plays(m)}): {text}")
                 except Exception as e:
                     log.warning(f"댓글 실패: {str(e)[:100]}")
                     raise
