@@ -395,3 +395,51 @@ def auto_comments(c):
     finally:
         state_set(f"acom:{today()}", str(done))
         log.info(f"🗨 오늘 남의 게시물 댓글 {done}개")
+
+
+# ---------- 검색 수요로 주제 고르기(2026-10-27 사용자 결정) ----------
+DEMAND_REGION = re.compile(r"(서울|부산|대구|인천|광주|대전|울산|제주|수원|전주|강릉|경주|여수|춘천|창원|포항|\S+역|\S+동|맛집|근처|추천)")
+
+
+def demand_snapshot(c):
+    """하루 1회(06~10시): 음식 테마마다 ① 인스타 검색 자동완성(지금 사람들이 치는 말) ② '<음식>맛집' 해시태그
+    게시물 수를 기록하고, 이를 합쳐 테마 가중치 배수(1.0~2.0)를 DB config 'trend_boost'에 쓴다.
+    make-roundup의 themeWeights가 이 배수를 곱한다(3일 넘은 값은 무시).
+      - 자동완성 중 '지역·역·맛집·추천' 같은 찾아가려는 검색어가 많을수록 +
+      - 해시태그 게시물 수가 지난주보다 빨리 늘수록 +(7일치 쌓인 뒤부터)"""
+    h = now_kst().hour
+    if h < 6 or h >= 10 or state_get(f"demand:{today()}"):
+        return
+    state_set(f"demand:{today()}", "running")
+    themes = json.loads((ROOT.parent / "data" / "roundup-themes.json").read_text(encoding="utf-8"))["themes"]
+    foods = sorted({t.get("food") or t.get("keyword") for t in themes if t.get("mode") != "area" and not t.get("maxPrice")})
+    intent, growth, top = {}, {}, {}
+    for f in foods:
+        try:
+            r = c.fbsearch_keyword_typeahead(f)
+            names = [x.get("keyword", {}).get("name", "") for x in (r.get("list") or [])][:15]
+            top[f] = names[:5]
+            intent[f] = sum(1 for n in names if f in n and DEMAND_REGION.search(n))
+            nap(4, 10)
+            info = c.hashtag_info(f"{f}맛집")
+            state_set(f"tagcnt:{f}:{today()}", str(info.media_count))
+            week_ago = state_get(f"tagcnt:{f}:{(now_kst() - __import__('datetime').timedelta(days=7)):%Y-%m-%d}")
+            if week_ago and int(week_ago) > 0:
+                growth[f] = (info.media_count - int(week_ago)) / int(week_ago)
+        except Exception as e:
+            log.warning(f"수요 수집 실패({f}): {str(e)[:100]}")
+            if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired")):
+                raise
+        nap(8, 20)
+
+    def pct(d: dict) -> dict:
+        vals = sorted(d.values())
+        return {k: (vals.index(v) / max(1, len(vals) - 1)) for k, v in d.items()} if vals else {}
+
+    pi, pg = pct(intent), pct(growth)
+    boost = {f: round(1.0 + 0.5 * pi.get(f, 0) + 0.5 * pg.get(f, 0), 2) for f in foods}
+    boost["_at"] = today()
+    db("INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('trend_boost', ?, datetime('now'))", [json.dumps(boost, ensure_ascii=False)])
+    state_set(f"demand:{today()}", json.dumps({"top": top}, ensure_ascii=False)[:4000])
+    best = sorted(((v, k) for k, v in boost.items() if k != "_at"), reverse=True)[:5]
+    log.info(f"🔎 오늘 검색 수요 상위: {best} (성장률 표본 {len(growth)}개)")

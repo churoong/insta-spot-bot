@@ -69,6 +69,17 @@ export async function initDb() {
         count INTEGER,
         created_at TEXT DEFAULT (datetime('now'))
       )`,
+      // 전국 맛집 지도 프로젝트 — 소개한 식당 좌표(카카오 지오코딩). 표지 미니맵·누적 카운터.
+      `CREATE TABLE IF NOT EXISTS map_pins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        address TEXT,
+        x REAL,
+        y REAL,
+        content_id TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(name, address)
+      )`,
       `CREATE TABLE IF NOT EXISTS comment_suggestions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         comment_id TEXT UNIQUE,

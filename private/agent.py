@@ -502,6 +502,7 @@ def growth_round():
         ("큰 계정 첫 댓글", lambda: growth.fast_first_comments(c)),
         ("자동 맞팔", lambda: follows.follow_back(c)),
         ("주간 팔로잉 정리", lambda: follows.weekly_cleanup(c)),
+        ("검색 수요 수집", lambda: growth.demand_snapshot(c)),
     ):
         try:
             fn()
