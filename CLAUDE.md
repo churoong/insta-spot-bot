@@ -64,6 +64,13 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **2026-10-27 남의 게시물 댓글 = 좋아요 동반 + 인기 게시물 대상**(사용자: "댓글 단 게시글 좋아요도 눌러줘야지", "너무 비주류 계정 위주"): 남의 게시물에 댓글을 다는 모든 경로(`auto_comments`·큰 계정 첫 댓글·소개 식당 방문자·추천 요청 응답)가 댓글 직후 `common.like_too`로 좋아요. `auto_comments` 대상은 해시태그 **인기 게시물 탭**(모자라면 최근 탭) 중 좋아요 100+ 또는 재생 5천+, 3일 이내만, 반응 큰 순 — 못 찾으면 하한을 낮추지 않고 그 태그를 건너뛴다.
 - 차단 신호(Challenge·PleaseWait·Feedback 등)를 받으면 6~24시간 비공식 호출을 전부 멈춘다. 상태는 DB `private_log` 테이블(`agent:alive`, `agent:paused`, `pp:<content_id>`, `likes:<날짜>`).
 
+### ▶ 2026-10-27 AI 검색 노출용 공개 맛집 페이지 (GEO)
+- 목적: ChatGPT·퍼플렉시티·구글 AI 요약이 "○○ 국밥 맛집" 답변에 우리를 인용하게. 인스타 알고리즘과 무관한 유입.
+- `/m`(시도별 전체) · `/m/[map_pins.id]`(식당: 어느 편 몇 위, 주소, 카카오맵 링크, 근처 소개 맛집, JSON-LD Restaurant) · `/e/[content_id]`(편: JSON-LD ItemList) · `/sitemap.xml` · `/robots.txt` · `/llms.txt`. 데이터는 `map_pins` JOIN `posts`(published)뿐 — `lib/publicmap.ts`.
+- **평점·리뷰 수를 구조화 데이터에 넣지 말 것**(없는 사실). 문구는 "○○ 편 N위로 소개한 집"까지.
+- 브랜드명은 `BRAND` 상수 한 곳(조사 이/가는 `BRAND_SUBJ`가 자동). 관리 대시보드(`/`)는 noindex.
+- 발행 직후 `make-roundup`이 IndexNow(`lib/indexnow.ts`, 키 파일 `public/<key>.txt` — 공개용)로 새 페이지를 Bing 등에 알린다(ChatGPT 검색 = Bing 색인). 구글은 사이트맵으로 — 서치 콘솔 등록은 사용자 몫(선택).
+
 ### ▶ 2026-10-27 국밥 국경선 지도 릴스 (`scripts/make-border.mjs`, `border.yml` 수동 실행)
 - 시군구(통계청 2013 경계 `data/geo/`)마다 돼지국밥·순대국·해장국·콩나물국밥·소머리국밥 가게 수를 카카오 로컬로 세서(경계 상자 키워드 검색 → 경계 안 비율 × total_count) **특화 지수**(전국 비율 대비, 평활 K=6) 1위로 칠한다. 가게 8곳 미만 시군구는 시도 1위를 옅게. 단순 개수 1위로 칠하면 해장국이 전국을 덮어 경계가 안 생긴다.
 - 8초 단일컷 + CC BGM, 캡션 = 시도별 1위 목록 + 긍정형 질문, 첫 댓글 해시태그, 표지 스토리, 스레드. `posts.content_id = border-gukbap-<날짜>`, `reel_format = map8`.

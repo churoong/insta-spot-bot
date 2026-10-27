@@ -3469,6 +3469,14 @@ ${bgm.attribution}`;
     }
   }
   await addMapPins(db, places, cid).catch((e) => console.error("지도 핀 저장 실패(무시):", String(e).slice(0, 80)));
+  // 공개 맛집 페이지(/m/{핀}, /e/{편}) 색인 요청 — AI 검색 노출용(2026-10-27)
+  try {
+    const { pingIndexNow } = await import("../lib/indexnow.ts");
+    const ids = (await db.execute({ sql: "SELECT id FROM map_pins WHERE content_id = ?", args: [cid] })).rows.map((r) => `/m/${r.id}`);
+    if (ids.length) console.log("🔎 IndexNow:", await pingIndexNow([...ids, `/e/${encodeURIComponent(cid)}`, "/m"]), `${ids.length + 2}개`);
+  } catch (e) {
+    console.error("IndexNow 실패(무시):", String(e).slice(0, 100));
+  }
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published', reel_format = ? WHERE content_id = ?`,
     args: [mediaId, reelFormat, cid],
