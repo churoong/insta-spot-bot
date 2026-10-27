@@ -264,7 +264,7 @@ def postprocess_recent():
                 m2 = re.match(r"\s*1\.\s*(.+?)\s+—\s+(.+?)(?:\s+2\.|$)", str(row["address"] or ""))
                 if m2:
                     loc_q = {"query": m2[1], "address": m2[2]}
-                    first = first or f"🥇 1위 {m2[1]}"
+                    first = first or f"🥇 1위 {m2[1]}\n👇 여러분의 원픽은 어디예요? 댓글로 알려주세요"
             state_set(f"mid:{cid}", str(info.id))
             loc = find_location(c, loc_q)
             places = p.get("places") or [
@@ -394,7 +394,7 @@ def alt_first_line(p: dict) -> str | None:
     from common import llm
     title = (p.get("caption") or "").split("\n")[0]
     t = llm("인스타 맛집 릴스 캡션 첫 줄을 같은 뜻의 다른 제목으로 한 줄 써라. 규칙: 'N대 맛집' 형식 유지, "
-            "'TOP N'·'N선'·'줄서는'·'웨이팅'·'현지인' 금지, 지역명은 뒤쪽에, 과장·거짓 금지, 이모지 1개로 시작. 제목만 출력.\n원래 제목: " + title, 80)
+            "'TOP N'·'N선'·'줄서는'·'웨이팅'·'현지인' 금지, 지역명은 뒤쪽에, 과장·거짓 금지, 이모지 1개로 시작. 식당·음식은 언제나 긍정적으로만 말할 것(단점·아쉬움·비교 우열·호불호 금지). 제목만 출력.\n원래 제목: " + title, 80)
     if not t or "대 맛집" not in t or re.search(r"TOP|\d선|줄서|웨이팅|현지인", t):
         return None
     # 원래 제목에 없던 지역을 지어내면 버린다("전국 국밥 6대 맛집 서울" 실측)
@@ -493,6 +493,7 @@ def growth_round():
         ("프로필 고정", lambda: growth.pin_hits(c, media_pk_of)),
         ("타깃 좋아요", lambda: growth.targeted_likes(c)),
         ("남의 게시물 댓글", lambda: growth.auto_comments(c)),
+        ("큰 계정 첫 댓글", lambda: growth.fast_first_comments(c)),
     ):
         try:
             fn()

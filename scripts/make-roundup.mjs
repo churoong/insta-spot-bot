@@ -1027,6 +1027,28 @@ async function enrichPlaces(places) {
     } catch { /* 소개 없어도 진행 */ }
   }
   console.log(`정보 보강: 메뉴 ${places.filter((p) => p.menu).length}곳 / 소개 ${places.filter((p) => p.overview).length}곳`);
+  markTv(places);
+}
+
+/**
+ * 방송 출연 표시(2026-10-27 사용자 결정 "방송·유명인 편승"). 근거는 관광공사 소개글(overview)에
+ * 적힌 사실뿐 — 블로그·검색으로 추정하지 않는다. 실측 150곳 중 12곳(8%)에 기록이 있다.
+ * 방송 화면·출연자 사진은 쓰지 않고 프로그램 이름만 표기한다.
+ */
+const TV_SHOWS = [
+  [/생활의\s?달인/, "생활의 달인"], [/수요미식회/, "수요미식회"], [/백반기행/, "백반기행"],
+  [/3대\s?천왕/, "3대 천왕"], [/맛있는\s?녀석들/, "맛있는 녀석들"], [/줄\s?서는\s?식당/, "줄 서는 식당"],
+  [/흑백요리사/, "흑백요리사"], [/백종원/, "백종원 픽"], [/먹을텐데|성시경/, "먹을텐데"],
+  [/미쉐린|미슐랭/, "미쉐린 가이드"], [/블루리본/, "블루리본"], [/6시\s?내고향/, "6시 내고향"], [/생생정보/, "생생정보"],
+];
+function markTv(places) {
+  for (const p of places) {
+    const ov = String(p.overview ?? "");
+    const hit = TV_SHOWS.find(([re]) => re.test(ov));
+    if (hit) p.tv = hit[1];
+    else if (/(TV|방송|프로그램)[^.]{0,20}(소개|출연|방영)/.test(ov)) p.tv = "방송 출연";
+  }
+  if (places.some((p) => p.tv)) console.log(`📺 방송 출연 확인: ${places.filter((p) => p.tv).map((p) => `${p.name}(${p.tv})`).join(", ")}`);
 }
 
 /** 한줄평(표지용) + 상세 설명(슬라이드용) 생성 — 모든 AI 실패 시 null(모음집 발행 스킵) */
@@ -1058,6 +1080,7 @@ ${places
 금지(어느 집에나 붙는 말): "고양시의 깊은 진국 순대국", "현지에서 오래 사랑받는 맛집", "정성이 담긴 한 그릇"
 
 규칙: 상호명 반복 금지, 없는 사실 지어내기 금지(정보가 부족하면 그 음식 자체의 특징으로), 식당마다 서로 다른 표현 사용.
+식당 평가는 언제나 긍정만(사용자 확정 규칙): 단점·아쉬움·비교 우열·"호불호" 같은 말 금지.
 JSON 배열만 출력: [{"s":["...","..."],"d":"..."}, ...] (${places.length}개)`;
   const text = await llmGenerate(prompt, 3600);
   if (!text) return null;
@@ -1571,7 +1594,7 @@ async function composeReelCoverV2(theme, places, bgUrl = null) {
       <text x="${L + 22}" y="${T + 66}" font-family="${TFONT}" font-size="60" font-weight="900" fill="#ffffff" fill-opacity="0.95" stroke="#0b0503" stroke-opacity="0.28" stroke-width="6" paint-order="stroke">${i + 1}</text>
       <text x="${L + 20}" y="${nameY}" font-family="${TFONT}" font-size="${ns}" font-weight="800" fill="#ffffff">${esc(nm)}</text>
       ${info ? `<text x="${L + 20}" y="${B - 58}" font-family="${FONT}" font-size="29" font-weight="700" fill="#ffffff" fill-opacity="0.94">${esc(info)}</text>` : ""}
-      <text x="${L + 20}" y="${B - 24}" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffffff" fill-opacity="0.68">${esc(p.region)}${p.hundred ? "  ·  백년가게" : p.goodPrice ? "  ·  착한가격" : ""}</text>
+      <text x="${L + 20}" y="${B - 24}" font-family="${FONT}" font-size="25" font-weight="600" fill="#ffffff" fill-opacity="0.68">${esc(p.region)}${p.tv ? `  ·  📺 ${esc(p.tv)}` : p.hundred ? "  ·  백년가게" : p.goodPrice ? "  ·  착한가격" : ""}</text>
     </g>`;
   }
 
@@ -1803,7 +1826,7 @@ async function composeCarouselCardV2(sharp, place, idx) {
   const ns = nm.length <= 8 ? 66 : nm.length <= 11 ? 55 : 45;
   // 불릿 3줄 → 설명 2줄. 점 없이, 흐린 흰 글자로 — 목록이 아니라 설명문으로 읽히게.
   const dl = (place.descLines?.length ? place.descLines : wrapLines(place.desc ?? "", 26, 2)).slice(0, 2);
-  const meta2 = [place.region, place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
+  const meta2 = [place.region, place.tv ? `📺 ${place.tv}` : place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
     .filter(Boolean).join("  ·  ");
   const TY = bandH + 92; // 상호명 기준선
 
@@ -1918,6 +1941,7 @@ function buildPunchyTitle(theme, n) {
   // 가격형 테마는 가격 조건이 곧 수식어("1만 원 이하") — 착한가격업소로 확인된 사실만 쓴다.
   const top = theme.maxPrice
     ? `${theme.maxPrice % 10000 === 0 ? theme.maxPrice / 10000 + "만" : theme.maxPrice.toLocaleString()} 원 이하`
+    : theme.tvTop ? "방송에 나온"
     : pool[Math.floor(Math.random() * pool.length)];
   const main = regional ? `${r} ${f}` : f;
   // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의
@@ -2135,7 +2159,7 @@ async function composeRankCardV2(sharp, place, rank) {
 
   const bg = await bandOnDark(sharp, buf, RW, RH, bandH, bandTop);
   const PADX = 76;
-  const metaLine = [place.region, place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
+  const metaLine = [place.region, place.tv ? `📺 ${place.tv}` : place.hundred ? "백년가게" : place.goodPrice ? "착한가격" : ""]
     .filter(Boolean).join("  ·  ");
   const svg = Buffer.from(
     `<svg width="${RW}" height="${RH}" xmlns="http://www.w3.org/2000/svg">
@@ -2411,7 +2435,10 @@ function buildCaption(theme, places, descending = false, ep = null) {
     (goodShops.length > 0
       ? `💰 ${goodShops.map((p) => p.name).join(", ")}: 정부 지정 '착한가격업소'예요!\n`
       : "") +
-    (hundredCount > 0 || goodShops.length > 0 ? "\n" : "");
+    (places.some((p) => p.tv)
+      ? `📺 방송에 소개된 곳: ${places.filter((p) => p.tv).map((p) => `${p.name}(${p.tv})`).join(", ")}\n`
+      : "") +
+    (hundredCount > 0 || goodShops.length > 0 || places.some((p) => p.tv) ? "\n" : "");
   // 2025-12부터 게시물당 해시태그 5개 제한 — 테마 태그(최대 3) + 큐레이션 2개만.
   // 검색 유입은 해시태그가 아니라 첫 줄의 [음식+맛집] 키워드가 담당한다.
   const tags = [...(theme.tags ?? []).slice(0, 3), "맛집추천", "맛집리스트"]
@@ -2772,11 +2799,28 @@ async function main() {
   // 카운트다운은 릴스 완주율을 위해 상위 5곳만 쓴다(8곳이면 45초+로 길어져 이탈).
   // 8곳을 수집한 뒤 후기순 상위 5곳을 고르는 것이라 오히려 품질은 올라간다.
   if (STYLE === "countdown" && places.length > 5) {
-    places = places.slice(0, 5);
+    // 방송 출연 확인된 집은 5위 밖이어도 남긴다(순위는 그대로, 빠지는 쪽만 바뀜)
+    const keep = places.slice(0, 5);
+    for (const p of places.slice(5).filter((x) => x.tv)) {
+      const out = [...keep].reverse().findIndex((x) => !x.tv);
+      if (out < 0) break;
+      keep.splice(keep.length - 1 - out, 1);
+      keep.push(p);
+    }
+    places = places.filter((p) => keep.includes(p));
     const tt5 = buildPunchyTitle(theme, places.length);
     theme.titleResolved = tt5.text;
     theme.coverParts = tt5;
     console.log(`TOP 5로 축소 → ${theme.titleResolved}`);
+  }
+
+  // 방송 출연이 3곳 이상이면 제목 수식어를 "방송에 나온"으로(사실 기반, 지역편·가격형 제외)
+  if (theme.mode !== "area" && !theme.maxPrice && places.filter((p) => p.tv).length >= 3) {
+    theme.tvTop = true;
+    const ttv = buildPunchyTitle(theme, places.length);
+    theme.titleResolved = ttv.text;
+    theme.coverParts = ttv;
+    console.log(`📺 방송 출연 ${places.filter((p) => p.tv).length}곳 → ${theme.titleResolved}`);
   }
 
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
@@ -3318,8 +3362,11 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
     location: theme.mode === "area"
       ? { query: theme.keyword, lat: Number(theme.tour?.mapY) || null, lng: Number(theme.tour?.mapX) || null }
       : { query: top.name, address: top.address ?? "", lat: top.lat ?? null, lng: top.lng ?? null },
+    // 1위 소개 + 댓글을 부르는 질문(2026-10-27 사용자 결정). 식당 평가는 긍정만 — "인정?"처럼
+    // 1위를 깎아내리는 반문은 쓰지 않고 "여러분의 원픽"을 묻는다.
     first_comment: `🥇 1위 ${top.name}${top.region ? ` (${top.region})` : ""}` +
-      (menu ? ` — ${menu}${gp ? ` ${Number(gp.price).toLocaleString()}원` : ""}` : ""),
+      (menu ? ` — ${menu}${gp ? ` ${Number(gp.price).toLocaleString()}원` : ""}` : "") +
+      `\n👇 여러분이 꼽는 ${theme.mode === "area" ? theme.keyword : theme.food || theme.keyword} 원픽은 어디예요? 댓글로 알려주세요`,
     hashtag: (theme.tags ?? [])[0] ?? null,
     // 식당 계정 태그·하이라이트 분류용(2026-10-27) — 에이전트가 상호+지역으로 인스타 계정을 찾는다
     theme: { key: theme.key, mode: theme.mode ?? "food", food: theme.food || theme.keyword, keyword: theme.keyword },

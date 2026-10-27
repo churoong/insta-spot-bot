@@ -216,7 +216,7 @@ def reply_own_comments(c, own_media: list):
                 continue
             reply = llm(
                 "인스타 맛집 큐레이션 계정 운영자로서 아래 댓글에 답글 한 문장을 써라. "
-                "존댓말, 25자 안팎, 이모지 최대 1개, 링크·해시태그·홍보·팔로우 요청 금지. 답글만 출력.\n"
+                "존댓말, 25자 안팎, 이모지 최대 1개, 링크·해시태그·홍보·팔로우 요청 금지. 식당·음식은 언제나 긍정적으로만 말할 것(단점·아쉬움·비교 우열·호불호 금지). 부정적인 댓글에도 반박 없이 감사·공감으로. 답글만 출력.\n"
                 f"게시물: {title}\n댓글: {text}", 60)
             if not reply:
                 continue
@@ -297,6 +297,58 @@ def targeted_likes(c):
         log.info(f"🎯 타깃 좋아요 {done}개")
 
 
+# ---------- 큰 맛집 계정 새 게시물에 빠른 첫 댓글(2026-10-27 사용자 결정) ----------
+FAST_PER_DAY = 5
+FAST_WINDOW_MIN = 20
+
+
+def fast_first_comments(c):
+    """팔로워 5만+ 맛집 계정이 올린 지 20분 안 된 게시물에 내용 있는 댓글을 단다(상위 댓글 노출).
+    새 게시물 감지는 홈 피드 한 번으로 한다 — 계정마다 조회하면 호출이 수십 배다. 그래서 큰 계정은 팔로우해 둔다.
+    하루 5개, 한 계정에 하루 1개, 09~23시만."""
+    import time as _t
+    h = now_kst().hour
+    if h < 9 or h >= 23:
+        return
+    used = int(state_get(f"fast:{today()}") or 0)
+    if used >= FAST_PER_DAY:
+        return
+    big = big_food_accounts(c)
+    if not big:
+        return
+    for uid in big[:12]:
+        if not state_get(f"followbig:{uid}"):
+            c.user_follow(uid)
+            state_set(f"followbig:{uid}", "1")
+            log.info(f"➕ 큰 맛집 계정 팔로우: {uid}")
+            return  # 한 바퀴에 한 계정만 — 몰아서 팔로우하지 않는다
+    feed = c.get_timeline_feed()
+    bigset = set(big)
+    for it in feed.get("feed_items", []):
+        m = it.get("media_or_ad") or {}
+        uid = str((m.get("user") or {}).get("pk") or "")
+        if uid not in bigset or _t.time() - int(m.get("taken_at") or 0) > FAST_WINDOW_MIN * 60:
+            continue
+        if state_get(f"fast-u:{uid}:{today()}") or state_get(f"fast-m:{m.get('id')}"):
+            continue
+        cap = str((m.get("caption") or {}).get("text") or "")
+        if len(cap) < 15:
+            continue
+        text = llm(
+            "아래 인스타 맛집 게시물에 진짜 사람이 다는 듯한 댓글 한 문장을 써라. 게시물의 음식·가게를 구체적으로 짚을 것. "
+            "존댓말, 30자 안팎, 이모지 최대 1개. 식당·음식은 언제나 긍정적으로만 말할 것(단점·아쉬움·비교 우열·호불호 금지). 금지: 링크, 해시태그, 계정 홍보, 맞팔·팔로우 요청, 뻔한 말. 댓글만 출력.\n게시물: " + cap[:400], 70)
+        if not text or re.search(r"팔로우|맞팔|선팔|http|#", text):
+            continue
+        state_set(f"fast-m:{m.get('id')}", "1")
+        nap(30, 120)  # 올라오자마자 0초 댓글은 봇 티가 난다
+        c.media_comment(str(m.get("id")), text)
+        state_set(f"fast-u:{uid}:{today()}", "1")
+        state_set(f"fast:{today()}", str(used + 1))
+        log.info(f"⚡ 큰 계정 새 게시물 첫 댓글(@{(m.get('user') or {}).get('username')}): {text}")
+        return
+
+
+
 # ---------- 남의 게시물 자동 댓글 ----------
 def auto_comments(c):
     if state_get(f"acom:{today()}"):
@@ -327,7 +379,7 @@ def auto_comments(c):
                 text = llm(
                     "아래 인스타 맛집 게시물에 진짜 사람이 다는 듯한 댓글 한 문장을 써라. 게시물에 나온 음식이나 가게를 "
                     "구체적으로 짚을 것. 존댓말, 30자 안팎, 이모지 최대 1개. 금지: 링크, 해시태그, 계정 홍보, 맞팔·선팔·팔로우 요청, "
-                    "'좋은 정보 감사합니다' 같은 뻔한 말. 댓글만 출력.\n게시물: " + cap[:400], 70)
+                    "'좋은 정보 감사합니다' 같은 뻔한 말. 식당·음식은 언제나 긍정적으로만 말할 것(단점·아쉬움·비교 우열·호불호 금지). 댓글만 출력.\n게시물: " + cap[:400], 70)
                 if not text or re.search(r"팔로우|맞팔|선팔|http|#", text):
                     continue
                 try:
