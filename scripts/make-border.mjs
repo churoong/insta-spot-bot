@@ -32,7 +32,7 @@ const TFONT = "'Gmarket Sans','Pretendard','Noto Sans CJK KR',sans-serif";
 const TYPES = [
   { key: "돼지국밥", queries: ["돼지국밥"], re: /돼지\s?(수육)?국밥/, color: "#e02020" },
   { key: "순대국", queries: ["순대국", "순댓국"], re: /순대\s?국|순댓국/, color: "#2f5da8" },
-  { key: "해장국", queries: ["해장국"], re: /해장국|선지/, color: "#e9a23b" },
+  { key: "해장국", queries: ["해장국"], re: /해장국/, color: "#e9a23b" },
   { key: "콩나물국밥", queries: ["콩나물국밥"], re: /콩나물/, color: "#4e9a5a" },
   { key: "소머리국밥", queries: ["소머리국밥"], re: /소머리/, color: "#7a4e3a" },
 ];
@@ -86,28 +86,46 @@ async function kakaoKeyword(params) {
   throw new Error("카카오 검색 실패: " + qs.get("query"));
 }
 
-/** 시군구 하나 × 국밥 하나의 가게 수 추정. 상자에 걸린 이웃 시군구 가게는 경계 판정으로 뺀다. */
+/**
+ * 시군구 하나 × 국밥 하나의 가게 수. 카카오 키워드 검색은 느슨하게 맞춰("순대국" → 국밥집 전반)
+ * total_count가 실제 가게 수가 아니다(2026-10-27 첫 집계에서 부산 돼지국밥 22% < 순대국 43%로 나와 폐기).
+ * 그래서 상호명·카테고리에 그 국밥 이름이 실제로 들어간 가게만 세고, 검색 상한(45개)에 걸리면
+ * 상자를 4등분해 다시 센다. 결과는 정확도순이라 마지막 페이지에 맞는 가게가 하나도 없으면 더 쪼개지 않는다.
+ */
 async function countIn(f, t) {
-  const [x1, y1, x2, y2] = f._bbox ??= bbox(f.geometry);
-  let est = 0;
-  for (const q of t.queries) {
-    const seen = new Set();
-    let inside = 0, fetched = 0, total = 0, end = false;
-    for (let page = 1; page <= 3 && !end; page++) {
-      const j = await kakaoKeyword({ query: q, rect: `${x1},${y1},${x2},${y2}`, page: String(page) });
-      total = j.meta?.total_count ?? 0;
-      end = j.meta?.is_end ?? true;
-      for (const d of j.documents ?? []) {
-        if (seen.has(d.id)) continue;
-        seen.add(d.id);
-        fetched++;
-        if (inGeom(Number(d.x), Number(d.y), f.geometry)) inside++;
+  const hit = new Set();
+  async function walk(x1, y1, x2, y2, depth) {
+    for (const q of t.queries) {
+      let lastHits = 0, end = false;
+      for (let page = 1; page <= 3 && !end; page++) {
+        const j = await kakaoKeyword({ query: q, rect: `${x1},${y1},${x2},${y2}`, page: String(page) });
+        end = j.meta?.is_end ?? true;
+        lastHits = 0;
+        for (const d of j.documents ?? []) {
+          if (!t.re.test(`${d.place_name} ${d.category_name}`)) continue;
+          lastHits++;
+          if (inGeom(Number(d.x), Number(d.y), f.geometry)) hit.add(d.id);
+        }
+        await sleep(60);
       }
-      await sleep(70);
+      if (!end && lastHits > 0 && depth < 5) {
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        for (const [a, b, c, d] of [[x1, y1, mx, my], [mx, y1, x2, my], [x1, my, mx, y2], [mx, my, x2, y2]]) {
+          if (bboxHits(f, a, b, c, d)) await walk(a, b, c, d, depth + 1);
+        }
+        return; // 쪼갠 쪽이 이 질의를 다시 센다(다른 표기 질의도 쪼갠 칸에서)
+      }
     }
-    est += end || !fetched ? inside : Math.round((inside / fetched) * total);
   }
-  return est;
+  const [x1, y1, x2, y2] = f._bbox ??= bbox(f.geometry);
+  await walk(x1, y1, x2, y2, 0);
+  return hit.size;
+}
+
+/** 쪼갠 칸이 시군구 상자와 겹치는지 — 경계 밖 칸은 건너뛴다(대충, 상자끼리만) */
+function bboxHits(f, a, b, c, d) {
+  const [x1, y1, x2, y2] = f._bbox ??= bbox(f.geometry);
+  return a < x2 && c > x1 && b < y2 && d > y1;
 }
 
 async function buildKakao() {
@@ -152,7 +170,7 @@ async function loadCounts() {
   console.log(`카카오 집계 시작: 시군구 ${muni.length} × 국밥 ${TYPES.length}`);
   const c = { builtAt: new Date().toISOString(), source: "kakao", counts: await buildKakao() };
   const total = Object.values(c.counts).reduce((a, v) => a + Object.values(v).reduce((x, y) => x + y, 0), 0);
-  if (total < 1000) throw new Error(`집계가 너무 적다(${total}) — 카카오 응답 이상, 캐시하지 않음`);
+  if (total < 300) throw new Error(`집계가 너무 적다(${total}) — 카카오 응답 이상, 캐시하지 않음`);
   fs.writeFileSync(CACHE, JSON.stringify(c));
   return c;
 }
@@ -242,7 +260,7 @@ function renderSvg(muniWin, sidoWin, total, source) {
     return s;
   }).join("");
   const note = source === "kakao"
-    ? `카카오맵 국밥집 ${total.toLocaleString("ko-KR")}곳 · 전국 평균보다 유난히 많은 국밥`
+    ? `카카오맵 상호에 국밥 이름이 든 가게 ${total.toLocaleString("ko-KR")}곳 · 전국 평균보다 유난히 많은 국밥`
     : `시안 · 착한가격업소 국밥집 ${total}곳 기준`;
 
   return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
