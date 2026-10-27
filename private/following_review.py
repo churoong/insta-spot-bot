@@ -18,7 +18,8 @@ from common import STATE, client, get_logger, nap
 log = get_logger("following")
 HANGUL = re.compile(r"[가-힣ㄱ-ㆎ]")
 OTHER = re.compile(r"[ऀ-ॿ฀-๿؀-ۿЀ-ӿ぀-ヿ一-鿿ঀ-৿ក-៿ༀ-࿿]")
-MAX_INFO = 400  # 상세 조회 상한(한 번 실행당) — 넘치면 다음 실행에서 이어 본다
+import os
+MAX_INFO = int(os.environ.get("MAX_INFO", "150"))  # 상세 조회 상한(한 번 실행당) — 로그인 직후 대량 조회는 탐지 위험이라 작게
 
 
 def main():

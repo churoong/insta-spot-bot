@@ -106,6 +106,12 @@ def db(sql: str, args: list | None = None) -> dict:
 def ensure_tables() -> None:
     db("""CREATE TABLE IF NOT EXISTS private_log (
             key TEXT PRIMARY KEY, value TEXT, updated_at TEXT DEFAULT (datetime('now')))""")
+    # posts.handoff는 원래 lib/db.ts 마이그레이션이 만들지만, 그건 다음 GitHub 발행 때에야 돈다.
+    # 에이전트가 먼저 켜지면 "no such column"으로 매 바퀴 실패했다(2026-10-27 실측) — 여기서도 만든다.
+    try:
+        db("ALTER TABLE posts ADD COLUMN handoff TEXT")
+    except Exception:
+        pass  # 이미 있음
 
 
 def state_get(key: str) -> str | None:
