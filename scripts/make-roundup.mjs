@@ -3220,6 +3220,7 @@ async function main() {
       sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
       args: [mediaId, cid],
     });
+    await crossPostThreads(db, cid, theme, places, { imageFile: imgs[0] });
     try {
       const { publishStory } = await import("../lib/instagram.ts");
       console.log("📣 표지 스토리 공유:", await publishStory(await uploadPublic(reelCover)));
@@ -3432,6 +3433,7 @@ ${bgm.attribution}`;
   // 공식 API로는 안 된다. 에이전트가 10분 안에 안 가져가면(PC 꺼짐 등) 아래 공식 경로로 그대로 발행.
   // 켜고 끄기: GitHub 저장소 변수 PRIVATE_HANDOFF=1 (코드 수정 없이).
   let privateDone = false;
+  let finalVideoUrl = reelUrl; // 스레드 동시 발행용 — 재업로드되면 바뀐다
   if (process.env.PRIVATE_HANDOFF === "1") {
     const viaPrivate = await handoffToPrivate({
       db, cid, reelUrl, coverJpg: reelCover ?? cards?.[0], caption, bgmLine: bgm?.attribution ?? "",
@@ -3450,6 +3452,7 @@ ${bgm.attribution}`;
     await new Promise((r) => setTimeout(r, 20000));
     const retryUrl = await uploadPublic(reelMp4, { avoidHostOf: reelUrl });
     console.log("모음집 릴스 재업로드:", retryUrl);
+    finalVideoUrl = retryUrl;
     // 마지막 시도는 커버 프레임 지정 없이 — 커버 하나 때문에 그날 콘텐츠를 통째로 잃지 않는다
     mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt, { thumbOffsetMs: 0 });
   }
@@ -3470,6 +3473,8 @@ ${bgm.attribution}`;
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published', reel_format = ? WHERE content_id = ?`,
     args: [mediaId, reelFormat, cid],
   });
+  // 스레드에도 같은 영상(공식·비공식 경로 무관 — 노트북과 상관없이 GitHub가 올린다)
+  await crossPostThreads(db, cid, theme, places, { videoUrl: finalVideoUrl, imageFile: reelCover ?? cards?.[0] ?? "" });
 
   // 발행 직후 표지를 스토리로도 공유 — 팔로워 재도달 + 프로필 방문 루프.
   // (표지는 이미 9:16이라 그대로 스토리 규격. 실패해도 본 발행에는 영향 없음)
@@ -3679,6 +3684,33 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
   await db.execute({ sql: "UPDATE posts SET status = 'publishing' WHERE content_id = ? AND status = 'handoff_claimed'", args: [cid] });
   console.log("[handoff] 에이전트 응답 없음(가져간 뒤 끊김) — 공식 API로 발행");
   return null;
+}
+
+/**
+ * 스레드 동시 발행(2026-10-27 사용자 결정). 인스타 발행이 끝난 뒤 같은 영상(없으면 표지)을
+ * 공식 Threads API로 올린다. 연결 전(/api/threads/connect 미완료)이면 조용히 건너뛴다.
+ * 실패해도 인스타 발행에는 영향 없음. 글은 500자 한도라 상호·지역 목록만, 식당 평가는 긍정만.
+ */
+async function crossPostThreads(db, cid, theme, places, { videoUrl = "", imageFile = "" } = {}) {
+  if (DRY) return;
+  try {
+    const { publishThreads } = await import("../lib/threads.ts");
+    const food = String(theme.mode === "area" ? theme.keyword : theme.food || theme.keyword || "").replace(/[\s·.&]/g, "");
+    const lines = places.slice(0, 8).map((p, i) => `${i + 1}. ${p.name}${p.region ? ` (${p.region})` : ""}`);
+    let text = `${theme.titleResolved}\n\n${lines.join("\n")}\n\n여러분이 아끼는 ${food} 맛집도 알려주세요\n영상·지도는 인스타 @tourist_710`;
+    while (Buffer.byteLength(text) > 1400 && lines.length > 3) { // 500자 한도 — 한글 3바이트 기준으로 넉넉히
+      lines.pop();
+      text = `${theme.titleResolved}\n\n${lines.join("\n")}\n\n영상·지도는 인스타 @tourist_710`;
+    }
+    let imageUrl = "";
+    if (imageFile) try { imageUrl = await uploadPublic(imageFile); } catch { /* 영상만 시도 */ }
+    const id = await publishThreads({ text, videoUrl, imageUrl, topicTag: food ? `${food}맛집`.slice(0, 50) : undefined });
+    if (!id) return console.log("[threads] 미연결 — 건너뜀");
+    await db.execute({ sql: "UPDATE posts SET threads_id = ? WHERE content_id = ?", args: [id, cid] });
+    console.log("🧵 스레드 동시 발행:", id);
+  } catch (e) {
+    console.error("스레드 발행 실패(무시):", String(e).slice(0, 200));
+  }
 }
 
 async function uploadPublic(filePath, { avoidHostOf = "" } = {}) {

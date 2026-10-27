@@ -116,6 +116,8 @@ export async function initDb() {
     "ALTER TABLE posts ADD COLUMN reel_format TEXT",
     // 비공식 API 핸드오프 재료(JSON) — scripts/make-roundup.mjs handoffToPrivate → private/agent.py
     "ALTER TABLE posts ADD COLUMN handoff TEXT",
+    // 같은 편의 스레드 글 ID(2026-10-27 스레드 동시 발행)
+    "ALTER TABLE posts ADD COLUMN threads_id TEXT",
   ];
   for (const sql of migrations) {
     try {
