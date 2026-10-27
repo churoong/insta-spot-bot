@@ -548,6 +548,9 @@ def growth_round():
         ("추천 요청 응답", lambda: engage.recommend_requests(c)),
         ("팔로워 접속 시간", lambda: engage.refresh_online_hours()),
         ("DM 후속 대화", lambda: engage.dm_followups(c)),
+        ("좋아요 누른 사람 팔로우", lambda: follows.follow_likers(c, own_recent_media(4))),
+        ("질문 스티커 스토리", lambda: engage.question_story(c)),
+        ("질문 답변 DM", lambda: engage.question_answers(c)),
     ):
         try:
             fn()

@@ -723,3 +723,105 @@ def dm_followups(c):
             if _blocked(e):
                 raise
         nap(60, 180)
+
+
+# ---------- 스토리 질문 스티커 "동네 맛집 물어보세요"(2026-10-27 사용자 결정) ----------
+QUESTION_DOW = (1, 4)  # 화·금 (월=0)
+
+
+def _question_image(path):
+    """1080x1920 단색 배경 + 안내 문구. 질문 스티커가 안 붙어도 이 문구만으로 DM을 유도한다."""
+    from PIL import Image, ImageDraw, ImageFont
+    from common import REPO
+    img = Image.new("RGB", (1080, 1920), "#1a0f0a")
+    d = ImageDraw.Draw(img)
+    for i in range(1920):  # 아래로 갈수록 붉게
+        d.line([(0, i), (1080, i)], fill=(26 + i * 60 // 1920, 15, 10))
+    fb = REPO / "assets" / "fonts" / "Pretendard-ExtraBold.otf"  # G마켓 산스 복원본은 공백 글리프가 없어 네모로 나온다
+    fr = REPO / "assets" / "fonts" / "Pretendard-Bold.otf"
+    big = ImageFont.truetype(str(fb), 96)
+    mid = ImageFont.truetype(str(fr), 46)
+    d.text((540, 520), "동네 맛집", font=big, fill="#ffffff", anchor="mm")
+    d.text((540, 640), "물어보세요", font=big, fill="#ffffff", anchor="mm")
+    d.text((540, 1420), "동네 이름 남기면", font=mid, fill="#ffd9c9", anchor="mm")
+    d.text((540, 1490), "근처 맛집 리스트를 DM으로 보내드려요", font=mid, fill="#ffd9c9", anchor="mm")
+    d.text((540, 1600), "(DM으로 바로 보내셔도 돼요)", font=ImageFont.truetype(str(fr), 36), fill="#c9a89a", anchor="mm")
+    img.save(path, quality=92)
+
+
+def question_story(c):
+    """화·금 하루 1회: 질문 스티커 스토리. instagrapi에 정식 기능이 없어 투표 스티커와 같은 방식(앱 내부 형식)으로
+    붙인다 — 검증 전. 실패하면 안내 문구만 있는 스토리로 올린다."""
+    import tempfile
+    from pathlib import Path
+    if now_kst().weekday() not in QUESTION_DOW or state_get(f"qstory:{today()}") or not _slot_passed("qstory"):
+        return
+    state_set(f"qstory:{today()}", "trying")
+    with tempfile.TemporaryDirectory() as tmp:
+        img = Path(tmp) / "q.jpg"
+        _question_image(img)
+        qs = [{"x": 0.5, "y": 0.43, "z": 0, "width": 0.78, "height": 0.2, "rotation": 0.0,
+               "question": "어느 동네 맛집이 궁금하세요? 🍲", "viewer_can_interact": True,
+               "background_color": "#ffffff", "text_color": "#000000", "question_type": "text",
+               "profile_pic_url": "", "is_sticker": True}]
+        try:
+            story = c.photo_upload_to_story(img, extra_data={"story_questions": json.dumps(qs, ensure_ascii=False),
+                                                              "story_sticker_ids": "question_sticker_ma"})
+            qid = ""
+            try:
+                qid = str(c.last_json["media"]["story_questions"][0]["question_sticker"]["question_id"])
+            except Exception:
+                pass
+            state_set(f"qstory:{today()}", json.dumps({"pk": str(story.pk), "qid": qid, "at": time.time()}))
+            log.info(f"❓ 질문 스티커 스토리 {'(스티커 확인)' if qid else '(스티커 미확인 — 문구만)'}")
+        except Exception as e:
+            if _blocked(e):
+                raise
+            log.warning(f"질문 스티커 실패 — 문구만 올림: {str(e)[:120]}")
+            story = c.photo_upload_to_story(img)
+            state_set(f"qstory:{today()}", json.dumps({"pk": str(story.pk), "qid": "", "at": time.time()}))
+
+
+def question_answers(c):
+    """살아 있는 질문 스토리(24시간)의 답변을 읽어 동네가 있으면 근처 맛집 리스트를 DM으로(20분마다)."""
+    last = float(state_get("qans:last") or 0)
+    if time.time() - last < 20 * 60:
+        return
+    state_set("qans:last", str(time.time()))
+    rows = db("SELECT key, value FROM private_log WHERE key LIKE 'qstory:%'")["rows"]
+    for r in rows:
+        try:
+            v = json.loads(r["value"])
+        except Exception:
+            continue
+        if not v.get("qid") or time.time() - v.get("at", 0) > 26 * 3600:
+            continue
+        try:
+            res = c.private_request(f"media/{v['pk']}_{c.user_id}/{v['qid']}/story_question_responses/")
+        except Exception as e:
+            if _blocked(e):
+                raise
+            log.warning(f"질문 답변 조회 실패: {str(e)[:120]}")
+            continue
+        for a in (res.get("responder_info", {}) or {}).get("responders", []):
+            uid = str((a.get("user") or {}).get("pk") or "")
+            text = a.get("response") or ""
+            rid = str(a.get("id") or f"{uid}:{text[:20]}")
+            if not uid or state_get(f"qa:{rid}"):
+                continue
+            state_set(f"qa:{rid}", "1")
+            g = geocode_text(text)
+            body = near_list(g[0], g[1], g[2]) if g else ""
+            if not body:
+                food = next((f for f in FOODS_DM if f in text), "")
+                body = food_reply(food) if food else ""
+            if not body:
+                continue
+            try:
+                c.direct_send(body, user_ids=[int(uid)])
+                remember_followup(uid, f"{g[0] if g else '추천'} 맛집")
+                log.info(f"❓→📨 질문 답변 DM: {text[:20]}")
+            except Exception as e:
+                if _blocked(e):
+                    raise
+            nap(30, 90)
