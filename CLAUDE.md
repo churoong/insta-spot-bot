@@ -120,6 +120,11 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 
 클라우드 세션에는 시크릿이 없다 — 코드 수정·오프라인 렌더·PR·`gh workflow run`까지가 범위이고, 실발행·DB 조회는 로컬 세션이나 Actions를 거친다.
 
+**노트북 없이 작업하기(2026-10-27 사용자 결정)**: 노트북이 꺼져 있을 때는 claude.ai/code 클라우드 세션에서 이 저장소로 작업한다.
+- 발행·스토리·스레드는 전부 GitHub Actions + Vercel이라 노트북과 무관하게 돈다. 결과 확인은 `gh run list --workflow roundup.yml` / `gh run view <id> --log`(로그에 `✅ 모음집 릴스 발행`, `🧵 스레드 동시 발행`, `📣 아침 스토리 발행` 줄)로.
+- `private/` 에이전트 수정은 main에 머지만 하면 된다 — 에이전트가 10분마다 `git fetch`로 main을 fast-forward하고 `private/`가 바뀌었으면 스스로 재시작한다(`self_update`, 노트북이 main 브랜치·추적 파일 무변경일 때만). 노트북이 다시 켜지면 반영된다. 새 pip 패키지가 필요한 변경은 자동 설치되지 않는다 — 피할 것.
+- DB(Turso)·인스타 비공식 API·`.env`는 클라우드에 없다. DB 수치가 필요하면 `gh workflow run report.yml` 로그를 본다.
+
 ## 표지·디자인 결정사항
 - 스타일 순환 **classic 10 : pages 2 : hero 1** (13주기, `COVER_STYLES` 배열 길이가 곧 주기, dark 제외).
   2026-09-07 실측(cover-report, 17건): classic 조회 평균 1,565(중앙값 약 800) vs hero 150 · pages 181 · dark 256
