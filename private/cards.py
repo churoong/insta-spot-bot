@@ -95,7 +95,7 @@ def receipt_card(path: Path, who: str, area: str, places: list):
     mono_b, mono = _font(FONT_B, 44), _font(FONT_M, 30)
     small = _font(FONT_R, 24)
     now = datetime.now(timezone(timedelta(hours=9)))
-    d.text((380, 70), "먹짱 맛집 영수증", font=mono_b, fill=(20, 20, 20), anchor="mm")
+    d.text((380, 70), "맛디깅 맛집 영수증", font=mono_b, fill=(20, 20, 20), anchor="mm")
     d.text((380, 125), f"{now:%Y.%m.%d %H:%M}  ·  {who}님", font=small, fill=(90, 90, 90), anchor="mm")
     y = 175
     d.line([(40, y), (720, y)], fill=(120, 120, 120), width=2)

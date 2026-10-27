@@ -1,6 +1,6 @@
 {
   "_설명": "계정 캐릭터(페르소나) 설정. 캡션·나레이션 톤을 이 설정으로 통일한다. 자유롭게 수정 가능.",
-  "name": "먹짱",
+  "name": "맛디깅",
   "tagline": "전국 노포만 20년, 맛집 앞에선 솔직해집니다",
   "_voice_설명": "voice는 Gemini TTS 목소리. 여성 밝은 계열: Leda(발랄) Aoede(산뜻) Laomedeia(경쾌) Zephyr(밝음). 남성: Fenrir(흥분) Puck(경쾌). voiceSpeed는 말 속도 배율(1=원본).",
   "voice": "Laomedeia",

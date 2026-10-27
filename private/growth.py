@@ -252,6 +252,36 @@ def reply_own_comments(c, own_media: list):
     state_set(f"replies:{today()}", str(used))
 
 
+# ---------- 계정 이름 변경(2026-10-27 사용자: "맛디깅으로 바꿔줘") ----------
+OLD_BRAND, NEW_BRAND = "먹짱", "맛디깅"
+
+
+def rename_profile(c):
+    """프로필 이름·소개의 옛 브랜드를 새 이름으로 1회 바꾼다. 나머지 글자(|전국 맛집 지도… 등)는 그대로.
+    인스타 이름 변경은 14일에 2번 — 거부되면 하루 뒤 다시 시도한다(성공 전까지 매일 1회)."""
+    if state_get(f"rename:{NEW_BRAND}") or state_get(f"rename-try:{today()}"):
+        return
+    state_set(f"rename-try:{today()}", "1")
+    me = c.account_info()
+    name, bio = me.full_name or "", me.biography or ""
+    if OLD_BRAND not in name and OLD_BRAND not in bio:
+        state_set(f"rename:{NEW_BRAND}", "already")
+        return
+    state_set("profile:backup-before-rename", json.dumps({"full_name": name, "biography": bio}, ensure_ascii=False))
+    new_name = name.replace(OLD_BRAND, NEW_BRAND)
+    new_bio = bio.replace(OLD_BRAND, NEW_BRAND)
+    try:
+        # 빠뜨린 필드가 비워지지 않게 현재 값을 같이 보낸다
+        c.account_edit(full_name=new_name, biography=new_bio, external_url=str(me.external_url or ""))
+    except Exception as e:
+        log.warning(f"프로필 이름 변경 실패(내일 재시도): {str(e)[:150]}")
+        if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")):
+            raise
+        return
+    state_set(f"rename:{NEW_BRAND}", new_name)
+    log.info(f"🪪 프로필 이름 변경: {name} → {new_name}")
+
+
 # ---------- 타깃 좋아요 ----------
 def big_food_accounts(c) -> list:
     """맛집 태그 인기 게시물 작성자 중 팔로워 5만+ 계정(주 1회 갱신)."""
