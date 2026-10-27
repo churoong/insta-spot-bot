@@ -217,10 +217,15 @@ def handle_handoffs():
                 gid = graph_id_for_code(media.code) or f"private:{media.pk}"
                 db("UPDATE posts SET status = 'published', ig_media_id = ? WHERE content_id = ?", [gid, cid])
                 state_set(f"pp:{cid}", "handoff")
+                title = (p.get("caption") or "").split("\n")[0].split("| ")[-1].strip()
+                engage.trigger_burst(cid)
                 try:
-                    engage.daily_note(c, (p.get("caption") or "").split("\n")[0].split("| ")[-1].strip())
+                    engage.daily_note(c, title)
+                    engage.congrats_dm(c, p.get("places", []), title)
                 except Exception as e:
-                    log.warning(f"노트 갱신 실패: {str(e)[:100]}")
+                    log.warning(f"노트·축하 DM 실패: {str(e)[:100]}")
+                    if is_block(e):
+                        raise
                 after_publish(c, media.id, media.pk, p.get("first_comment"), cover, loc, p.get("theme"))
                 enqueue_trials(cid, p)
         except Exception as e:
@@ -258,7 +263,7 @@ def after_publish(c, media_id, media_pk, first_comment, cover, loc, theme=None):
 
 # ---------- 2) 공식 경로 발행분 사후 처리 ----------
 def postprocess_recent():
-    rows = db(f"""SELECT content_id, ig_media_id, address, handoff FROM posts
+    rows = db(f"""SELECT content_id, ig_media_id, address, handoff, created_at FROM posts
                   WHERE status = 'published' AND ig_media_id IS NOT NULL
                     AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
                     AND created_at >= datetime('now', '-2 days') AND created_at >= '{START_DATE}'""")["rows"]
@@ -304,6 +309,11 @@ def postprocess_recent():
                 log.info(f"📌 첫 댓글 고정 {cid}")
             state_set(f"pp:{cid}", "official")
             enqueue_trials(cid, p)
+            if row.get("created_at") and (time.time() - _utc_ts(row["created_at"])) < 3600:
+                engage.trigger_burst(cid)  # 방금 공식 경로로 올라간 편 — 집중 활동
+                title = str(p.get("caption") or "").split("\n")[0].split("| ")[-1].strip()
+                if title and p.get("places"):
+                    engage.congrats_dm(c, p.get("places", []), title)
         except Exception as e:
             log.warning(f"사후 처리 실패 {cid}: {str(e)[:160]}")
             if is_block(e):
@@ -489,6 +499,11 @@ def report_trials():
         nap(5, 15)
 
 
+def _utc_ts(s: str) -> float:
+    from datetime import datetime, timezone
+    return datetime.strptime(str(s)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+
+
 def own_recent_media(days: int = 7) -> list:
     rows = db(f"""SELECT content_id, place_name FROM posts WHERE status = 'published'
                   AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
@@ -527,6 +542,7 @@ def growth_round():
         ("소개 식당 장소 피드", lambda: engage.visited_engage(c, find_location)),
         ("스토리 보기", lambda: engage.story_views(c)),
         ("비슷한 계정 팔로워 좋아요", lambda: engage.peer_follower_likes(c)),
+        ("단골 관리", lambda: engage.regulars_engage(c, own_recent_media(14))),
     ):
         try:
             fn()

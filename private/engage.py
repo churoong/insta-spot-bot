@@ -205,7 +205,7 @@ def story_views(c):
         if stories:
             c.story_seen([int(s.pk) for s in stories[:3]])
             seen += 1
-            if _count("story-like") < STORY_LIKES_PER_DAY and random.random() < 0.15:
+            if random.random() < 0.15 and not story_react(c, stories[0], uid) and _count("story-like") < STORY_LIKES_PER_DAY:
                 c.story_like(stories[0].id)
                 _bump("story-like")
         nap(4, 12)
@@ -336,3 +336,134 @@ def peer_follower_likes(c):
             continue
         nap(40, 110)
     log.info(f"🤝 비슷한 계정 팔로워 좋아요 {_count('peer-like')}")
+
+
+# ---------- 발행 직후 30분 집중(2026-10-27 사용자 결정) ----------
+BURST_KEYS = ["likes-at", "tlikes-at", "acom-at", "visited-at", "peer-at"]
+
+
+def trigger_burst(why: str):
+    """새 편이 올라가면 아직 안 돈 하루 1회 활동들의 시각을 '지금'으로 당긴다 — 알림을 보고 들어온 사람이
+    방금 올린 릴스를 맨 위에서 보고, 인스타가 새 게시물을 평가하는 첫 30분에 계정 활동이 몰린다."""
+    now = f"{now_kst():%H:%M}"
+    for k in BURST_KEYS:
+        state_set(f"{k}:{today()}", now)
+    state_set("pp:last", "0")  # 다음 바퀴에 바로 growth_round
+    log.info(f"🚀 발행 직후 집중 활동 시작({why})")
+
+
+# ---------- 단골 관리 ----------
+REGULAR_LIKES, REGULAR_COMMENTS = 10, 3
+
+
+def regulars(c, own_media: list) -> list:
+    """최근 우리 게시물에 댓글·좋아요를 자주 남긴 팔로워 상위 15명(주 1회 갱신)."""
+    k = f"regulars:{now_kst():%G-%V}"
+    cached = state_get(k)
+    if cached:
+        return json.loads(cached)
+    from collections import Counter
+    cnt = Counter()
+    me = str(c.user_id)
+    for media_id, _t in own_media[:6]:
+        try:
+            for cm in c.media_comments(media_id, amount=40):
+                cnt[str(cm.user.pk)] += 3
+            nap(3, 8)
+            for u in c.media_likers(media_id)[:100]:
+                cnt[str(u.pk)] += 1
+        except Exception as e:
+            if _blocked(e):
+                raise
+        nap(5, 15)
+    cnt.pop(me, None)
+    top = [u for u, n in cnt.most_common(15) if n >= 2]
+    state_set(k, json.dumps(top))
+    log.info(f"⭐ 단골 {len(top)}명 갱신")
+    return top
+
+
+def regulars_engage(c, own_media: list):
+    if _count("reg-like") >= REGULAR_LIKES or not _slot_passed("reg"):
+        return
+    regs = regulars(c, own_media)
+    for uid in random.sample(regs, min(REGULAR_LIKES, len(regs))):
+        if _count("reg-like") >= REGULAR_LIKES:
+            break
+        try:
+            ms = c.user_medias(uid, amount=1)
+        except Exception as e:
+            if _blocked(e):
+                raise
+            continue
+        if not ms or time.time() - ms[0].taken_at.timestamp() > 10 * 86400:
+            continue
+        m = ms[0]
+        if not getattr(m, "has_liked", False):
+            c.media_like(m.id)
+            _bump("reg-like")
+        cap = (m.caption_text or "").strip()
+        if _count("reg-cmt") < REGULAR_COMMENTS and len(cap) >= 8 and not _user_recent(uid):
+            text = llm("늘 우리 계정에 반응해 주는 팔로워의 게시물에 다는 다정한 댓글 한 문장. 게시물 내용을 하나 짚을 것. "
+                       "존댓말 30자 안팎, 이모지 최대 1개, 홍보·링크·팔로우 요청 금지. 음식·식당 얘기면 긍정만. 댓글만 출력.\n게시물: " + cap[:300], 70)
+            if text and not re.search(r"팔로우|맞팔|http|#", text):
+                c.media_comment(m.id, text)
+                _touch(uid, 14)
+                _bump("reg-cmt")
+                log.info(f"⭐ 단골 댓글: {text}")
+        nap(40, 120)
+    log.info(f"⭐ 단골 관리: 좋아요 {_count('reg-like')} · 댓글 {_count('reg-cmt')}")
+
+
+# ---------- 스토리 이모지 반응 ----------
+STORY_REACTS_PER_DAY = 15
+
+
+def story_react(c, story, uid: str) -> bool:
+    """스토리에 이모지 반응(앱의 '빠른 반응'). instagrapi에 공식 함수가 없어 앱 내부 호출을 직접 쓴다 —
+    검증 전이라 실패하면 그날은 반응을 끄고 스토리 좋아요로 대신한다(2026-10-27)."""
+    if state_get(f"react-off:{today()}") or _count("story-react") >= STORY_REACTS_PER_DAY:
+        return False
+    emoji = random.choice(["😋", "😍", "🔥"])
+    try:
+        cc = c.generate_uuid()
+        c.private_request("direct_v2/threads/broadcast/reel_react/", data={
+            "recipient_users": f"[[{uid}]]", "action": "send_item", "client_context": cc, "mutation_token": cc,
+            "media_id": f"{story.pk}_{uid}", "reel_id": str(uid), "entry": "reel", "text": emoji,
+            "reaction_emoji": emoji, "send_attribution": "reel_feed_timeline", "_uuid": c.uuid,
+        })
+        _bump("story-react")
+        return True
+    except Exception as e:
+        if _blocked(e):
+            raise
+        state_set(f"react-off:{today()}", str(e)[:120])
+        log.warning(f"스토리 이모지 반응 실패(오늘은 좋아요로 대신): {str(e)[:120]}")
+        return False
+
+
+# ---------- 선정 식당 축하 DM ----------
+CONGRATS_PER_DAY = 5
+
+
+def congrats_dm(c, places: list, title: str):
+    """1~3위로 소개한 식당 중 인스타 계정을 확신 있게 찾은 곳에만(growth.find_restaurant_account 캐시)."""
+    import growth
+    for rank, p in enumerate(places[:3], start=1):
+        if _count("congrats") >= CONGRATS_PER_DAY:
+            break
+        acc = growth.find_restaurant_account(c, p.get("name", ""), p.get("region", ""), p.get("address", ""))
+        if not acc or _user_recent(acc["pk"]):
+            continue
+        msg = (f"안녕하세요! 전국 맛집 큐레이션 계정 먹짱입니다 🙌 오늘 올린 '{title}'에서 "
+               f"{p.get('name')}을(를) {rank}위로 소개해 드렸어요. 축하드려요! 앞으로도 번창하세요 🍲")
+        try:
+            c.direct_send(msg, user_ids=[int(acc["pk"])])
+            _touch(acc["pk"], 60)
+            _bump("congrats")
+            log.info(f"🎉 축하 DM: @{acc['username']} ({rank}위)")
+        except Exception as e:
+            log.warning(f"축하 DM 실패: {str(e)[:100]}")
+            if _blocked(e):
+                raise
+        nap(60, 180)
