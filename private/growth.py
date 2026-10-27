@@ -282,6 +282,52 @@ def rename_profile(c):
     log.info(f"🪪 프로필 이름 변경: {name} → {new_name}")
 
 
+# ---------- 아이디 변경(2026-10-27 사용자: 아이디도 맛디깅으로) ----------
+HANDLE_CANDIDATES = ["matdigging", "mat.digging", "matdigging.kr"]
+
+
+def rename_handle(c):
+    """아이디를 후보 순서대로 시도해 비어 있는 첫 번째로 바꾼다. 성공하면
+    ① config.ig_handle(표지·카드·스레드·공개 페이지가 읽는 값) ② .env IG_USERNAME(다음 로그인용)을 고친다.
+    프로필 이름 변경이 끝난 뒤에만 — 같은 날 계정 정보를 두 번 크게 바꾸지 않는다. 실패하면 하루 뒤 재시도."""
+    if state_get("handle:done") or not state_get(f"rename:{NEW_BRAND}") or state_get(f"rename-try:{today()}"):
+        return
+    if state_get(f"handle-try:{today()}"):
+        return
+    state_set(f"handle-try:{today()}", "1")
+    me = c.account_info()
+    if me.username in HANDLE_CANDIDATES:
+        _handle_done(me.username)
+        return
+    state_set("profile:username-before", me.username)
+    for cand in HANDLE_CANDIDATES:
+        try:
+            c.account_edit(username=cand, full_name=me.full_name or "", biography=me.biography or "",
+                           external_url=str(me.external_url or ""))
+        except Exception as e:
+            if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")):
+                raise
+            log.warning(f"아이디 @{cand} 실패: {str(e)[:120]}")
+            nap(20, 60)
+            continue
+        _handle_done(cand)
+        log.info(f"🪪 아이디 변경: @{me.username} → @{cand}")
+        return
+    log.warning("아이디 후보가 전부 실패 — 내일 다시 시도")
+
+
+def _handle_done(handle: str):
+    db("INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('ig_handle', ?, datetime('now'))", [handle])
+    state_set("handle:done", handle)
+    env = ROOT.parent / ".env"
+    try:
+        lines = env.read_text(encoding="utf-8").splitlines()
+        lines = [f"IG_USERNAME={handle}" if l.startswith("IG_USERNAME=") else l for l in lines]
+        env.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except Exception as e:
+        log.warning(f".env IG_USERNAME 갱신 실패 — 직접 고쳐야 다음 로그인이 된다: {e}")
+
+
 # ---------- 타깃 좋아요 ----------
 def big_food_accounts(c) -> list:
     """맛집 태그 인기 게시물 작성자 중 팔로워 5만+ 계정(주 1회 갱신)."""

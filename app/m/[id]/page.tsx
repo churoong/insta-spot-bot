@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Shell, { card, link } from "../Shell";
-import { BRAND, BRAND_SUBJ, IG_URL, SITE, foodOf, kakaoMapLink, nearbyPins, pinById, regionOf, ymd } from "@/lib/publicmap";
+import { BRAND, BRAND_SUBJ, SITE, igHandle, igUrl, foodOf, kakaoMapLink, nearbyPins, pinById, regionOf, ymd } from "@/lib/publicmap";
 
 export const revalidate = 86400;
 // 빈 목록 = 빌드 때는 안 만들고 첫 요청 때 만들어 하루 캐시(ISR). 없으면 요청마다 DB 조회.
@@ -30,6 +30,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const r = regionOf(p.address);
   const food = foodOf(p.title);
   const near = await nearbyPins(p);
+  const IG_URL = igUrl(await igHandle());
   const ld = {
     "@context": "https://schema.org",
     "@type": "Restaurant",

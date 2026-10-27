@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Shell, { card, link } from "../../m/Shell";
-import { BRAND, IG_URL, SITE, editionById, regionOf, ymd } from "@/lib/publicmap";
+import { BRAND, SITE, igHandle, igUrl, editionById, regionOf, ymd } from "@/lib/publicmap";
 
 export const revalidate = 86400;
 // 빈 목록 = 빌드 때는 안 만들고 첫 요청 때 만들어 하루 캐시(ISR). 없으면 요청마다 DB 조회.
@@ -25,6 +25,8 @@ export async function generateMetadata({ params }: { params: Promise<{ cid: stri
 export default async function Page({ params }: { params: Promise<{ cid: string }> }) {
   const e = await load(params);
   if (!e) notFound();
+  const h = await igHandle();
+  const IG_URL = igUrl(h);
   const ld = {
     "@context": "https://schema.org",
     "@type": "ItemList",
@@ -49,7 +51,7 @@ export default async function Page({ params }: { params: Promise<{ cid: string }
           <div style={{ color: "#666", fontSize: 14 }}>{regionOf(p.address).short || p.address}</div>
         </div>
       ))}
-      <p style={{ marginTop: 20 }}><a href={IG_URL} style={{ color: "#e02020", fontWeight: 700 }}>영상으로 보기 — 인스타 @tourist_710</a></p>
+      <p style={{ marginTop: 20 }}><a href={IG_URL} style={{ color: "#e02020", fontWeight: 700 }}>영상으로 보기 — 인스타 @{h}</a></p>
     </Shell>
   );
 }

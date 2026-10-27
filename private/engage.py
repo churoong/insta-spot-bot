@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 import requests
 
-from common import ENV, db, get_logger, like_too, llm, nap, now_kst, online_slot, state_get, state_set
+from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
 VISITED_LIKES, VISITED_COMMENTS = 15, 5
@@ -985,7 +985,7 @@ def _map_image(path, rows, recent_names):
         rad = 9 if recent else 6
         d.ellipse([cx - rad, cy - rad, cx + rad, cy + rad], fill="#e02020" if recent else "#ffffff")
     d.text((W // 2, H - 150), "빨간 점 = 이번 주 새로 소개", font=fr, fill="#c9a89a", anchor="mm")
-    d.text((W // 2, H - 90), "@tourist_710", font=ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-Bold.otf"), 34), fill="#8a7a72", anchor="mm")
+    d.text((W // 2, H - 90), "@" + ig_handle(), font=ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-Bold.otf"), 34), fill="#8a7a72", anchor="mm")
     im.save(path, quality=92)
 
 

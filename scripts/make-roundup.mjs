@@ -15,7 +15,8 @@ import os from "node:os";
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "roundup-"));
 const TOUR = "https://apis.data.go.kr/B551011/KorService2";
 const DRY = process.env.ROUNDUP_DRY === "1";
-const HANDLE = process.env.IG_USERNAME || "tourist_710";
+// 인스타 아이디 — 에이전트가 아이디를 바꾸면 config.ig_handle에 쓴다(2026-10-27 맛디깅 개명). main()이 DB에서 다시 읽는다.
+let HANDLE = process.env.IG_HANDLE || "tourist_710";
 // 발행 '전에' 선기록한 posts 행. 발행 중 예외로 죽으면 마지막 catch가 이 행을 'failed'로
 // 바꾼다 — 안 그러면 'publishing'이 영원히 남아 대시보드엔 "게시된 것처럼" 보이고
 // 하루 1회 가드가 "오늘 이미 발행"으로 재발행까지 막는다 (2026-09-03 성수 편 실측).
@@ -2710,6 +2711,10 @@ async function main() {
     fs.readFileSync(new URL("../data/roundup-themes.json", import.meta.url), "utf8")
   );
   await initDb();
+  try {
+    const h = (await db.execute("SELECT value FROM config WHERE key = 'ig_handle'")).rows[0]?.value;
+    if (h) HANDLE = String(h);
+  } catch { /* 기본값 유지 */ }
   // title_font·reel_format 컬럼은 lib/db.ts initDb 마이그레이션에서 만든다 —
   // 여기서만 만들면 발행이 한 번 돌기 전까지 컬럼이 없어 조회 전용 리포트가 죽는다(9/8 실측).
 
@@ -3705,10 +3710,10 @@ async function crossPostThreads(db, cid, theme, places, { videoUrl = "", imageFi
     const { publishThreads } = await import("../lib/threads.ts");
     const food = String(theme.mode === "area" ? theme.keyword : theme.food || theme.keyword || "").replace(/[\s·.&]/g, "");
     const lines = places.slice(0, 8).map((p, i) => `${i + 1}. ${p.name}${p.region ? ` (${p.region})` : ""}`);
-    let text = `${theme.titleResolved}\n\n${lines.join("\n")}\n\n여러분이 아끼는 ${food} 맛집도 알려주세요\n영상·지도는 인스타 @tourist_710`;
+    let text = `${theme.titleResolved}\n\n${lines.join("\n")}\n\n여러분이 아끼는 ${food} 맛집도 알려주세요\n영상·지도는 인스타 @${HANDLE}`;
     while (Buffer.byteLength(text) > 1400 && lines.length > 3) { // 500자 한도 — 한글 3바이트 기준으로 넉넉히
       lines.pop();
-      text = `${theme.titleResolved}\n\n${lines.join("\n")}\n\n영상·지도는 인스타 @tourist_710`;
+      text = `${theme.titleResolved}\n\n${lines.join("\n")}\n\n영상·지도는 인스타 @${HANDLE}`;
     }
     let imageUrl = "";
     if (imageFile) try { imageUrl = await uploadPublic(imageFile); } catch { /* 영상만 시도 */ }

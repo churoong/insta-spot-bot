@@ -22,6 +22,7 @@ const FONT = "'Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
 const TFONT = "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
 
 const db = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+let HANDLE = "tourist_710"; // main()이 config.ig_handle로 덮는다
 const kstDate = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 
 async function cfg(key) {
@@ -85,7 +86,7 @@ async function compose(buf, place) {
   <text x="110" y="${y0 + 92}" font-family="${FONT}" font-weight="700" font-size="44" fill="#ffd9c9">맛디깅 지난 편 1위</text>
   <text x="110" y="${y0 + 92 + Math.round(nameSize * 1.12)}" font-family="${TFONT}" font-weight="700" font-size="${nameSize}" fill="#fff">${esc(place.name)}</text>
   <text x="110" y="${y0 + 92 + Math.round(nameSize * 1.12) + 74}" font-family="${FONT}" font-weight="600" font-size="48" fill="#d8d0cc">${esc(place.region)}</text>
-  <text x="110" y="${y0 + 92 + Math.round(nameSize * 1.12) + 140}" font-family="${FONT}" font-weight="600" font-size="36" fill="#9c928d">@tourist_710</text>
+  <text x="110" y="${y0 + 92 + Math.round(nameSize * 1.12) + 140}" font-family="${FONT}" font-weight="600" font-size="36" fill="#9c928d">@${HANDLE}</text>
 </svg>`;
   return sharp(base)
     .composite([{ input: band, left: 0, top: bandTop }, { input: Buffer.from(svg), left: 0, top: 0 }])
@@ -136,6 +137,7 @@ async function uploadPublic(filePath) {
 
 async function main() {
   const today = kstDate();
+  HANDLE = (await cfg("ig_handle").catch(() => null)) || HANDLE;
   if (!DRY && (await cfg("morning_story")) === today) {
     console.log(`오늘(${today}) 아침 스토리는 이미 올렸다 — 스킵`);
     return;

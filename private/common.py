@@ -139,6 +139,17 @@ def state_set(key: str, value: str) -> None:
     db("INSERT OR REPLACE INTO private_log (key, value, updated_at) VALUES (?, ?, datetime('now'))", [key, value])
 
 
+def ig_handle() -> str:
+    """지금 인스타 아이디(@ 없이). 에이전트가 아이디를 바꾸면 config.ig_handle에 쓴다(2026-10-27 맛디깅 개명)."""
+    try:
+        rows = db("SELECT value FROM config WHERE key = 'ig_handle'")["rows"]
+        if rows and rows[0].get("value"):
+            return str(rows[0]["value"])
+    except Exception:
+        pass
+    return "tourist_710"
+
+
 def graph_token() -> str:
     try:
         r = db("SELECT value FROM config WHERE key = 'ig_token'")["rows"]

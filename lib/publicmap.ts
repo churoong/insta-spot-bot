@@ -10,9 +10,19 @@ export const BRAND_SUBJ = (() => {
   const c = BRAND.charCodeAt(BRAND.length - 1) - 0xac00;
   return BRAND + (c >= 0 && c < 11172 && c % 28 ? "이" : "가");
 })();
-export const IG_HANDLE = "tourist_710";
+/** 인스타 아이디 — 에이전트가 바꾸면 config.ig_handle(2026-10-27 맛디깅 개명). 페이지는 igHandle()로 읽는다. */
+export const DEFAULT_HANDLE = "tourist_710";
+export async function igHandle(): Promise<string> {
+  try {
+    await initDb();
+    const v = (await db.execute("SELECT value FROM config WHERE key = 'ig_handle'")).rows[0]?.value;
+    return v ? String(v) : DEFAULT_HANDLE;
+  } catch {
+    return DEFAULT_HANDLE;
+  }
+}
+export const igUrl = (h: string) => `https://www.instagram.com/${h}/`;
 export const SITE = (process.env.PUBLIC_SITE_URL || "https://insta-spot-bot.vercel.app").replace(/\/$/, "");
-export const IG_URL = `https://www.instagram.com/${IG_HANDLE}/`;
 
 const SIDO: Record<string, string> = {
   서울특별시: "서울", 부산광역시: "부산", 대구광역시: "대구", 인천광역시: "인천", 광주광역시: "광주",
