@@ -269,6 +269,7 @@ def answer_dms(c):
             if body:
                 nap(20, 60)
                 c.direct_send(body, thread_ids=[int(th.id)])
+                remember_followup(str(msg.user_id), f"{food_only} 맛집")
                 log.info(f"📨 DM 음식 답장: {food_only}")
             continue
         food = next((f for f in ["국밥", "냉면", "칼국수", "곱창", "짬뽕", "삼겹살", "회", "족발", "보쌈", "돈까스", "초밥", "해장국", "순대국"] if f in msg.text), "")
@@ -277,6 +278,7 @@ def answer_dms(c):
             continue
         nap(20, 60)
         c.direct_send(body, thread_ids=[int(th.id)])
+        remember_followup(str(msg.user_id), f"{g[0]} 맛집")
         log.info(f"📨 DM 답장: {g[0]} {food}")
         nap(10, 30)
 
@@ -293,6 +295,7 @@ def dm_commenter(c, user_id: str, username: str, comment: str) -> bool:
         return False
     try:
         c.direct_send(body, user_ids=[int(user_id)])
+        remember_followup(str(user_id), f"{g[0]} 맛집")
         _touch(user_id)
         _bump("cmt-dm")
         log.info(f"📨 댓글러 DM(@{username}): {g[0]}")
@@ -683,3 +686,40 @@ def refresh_online_hours():
     state_set(f"onlinehours:{now_kst():%G-%V}", "1")
     top = sorted(kst.items(), key=lambda kv: -kv[1])[:4]
     log.info(f"🕒 팔로워 접속 많은 시각(KST): {top}")
+
+
+# ---------- DM 후속 대화(2026-10-27 사용자 결정) ----------
+FOLLOWUP_PER_DAY = 10
+
+
+def remember_followup(uid: str, what: str):
+    """맛집 리스트를 DM으로 보낸 사람 — 7일 뒤 한 번 안부를 묻는다(같은 사람은 한 번만)."""
+    if state_get(f"dmfu:{uid}"):
+        return
+    state_set(f"dmfu:{uid}", json.dumps({"at": time.time(), "what": what, "done": False}, ensure_ascii=False))
+
+
+def dm_followups(c):
+    if _count("followup") >= FOLLOWUP_PER_DAY or not _slot_passed("followup"):
+        return
+    rows = db("SELECT key, value FROM private_log WHERE key LIKE 'dmfu:%'")["rows"]
+    for r in rows:
+        if _count("followup") >= FOLLOWUP_PER_DAY:
+            break
+        v = json.loads(r["value"])
+        if v.get("done") or time.time() - v["at"] < 7 * 86400:
+            continue
+        uid = r["key"].split(":", 1)[1]
+        what = v.get("what") or "맛집"
+        msg = f"지난번 보내드린 {what} 중에 가보신 곳 있으세요? 어떠셨는지 궁금해요 😊 다른 동네나 음식도 언제든 보내주세요!"
+        try:
+            c.direct_send(msg, user_ids=[int(uid)])
+            v["done"] = True
+            state_set(r["key"], json.dumps(v, ensure_ascii=False))
+            _bump("followup")
+            log.info(f"💌 DM 후속: {uid} ({what})")
+        except Exception as e:
+            log.warning(f"DM 후속 실패: {str(e)[:100]}")
+            if _blocked(e):
+                raise
+        nap(60, 180)

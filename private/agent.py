@@ -547,6 +547,7 @@ def growth_round():
         ("위치 질문 답글", lambda: engage.answer_where(c)),
         ("추천 요청 응답", lambda: engage.recommend_requests(c)),
         ("팔로워 접속 시간", lambda: engage.refresh_online_hours()),
+        ("DM 후속 대화", lambda: engage.dm_followups(c)),
     ):
         try:
             fn()
