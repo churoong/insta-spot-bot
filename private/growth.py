@@ -214,6 +214,13 @@ def reply_own_comments(c, own_media: list):
             # 이모지·짧은 감탄만 있으면 하트만. '지도' 요청은 웹훅이 DM을 보낸다.
             if len(re.sub(r"[^\w가-힣]", "", text)) < 3 or re.fullmatch(r"\s*지도\s*[!?.~요]*\s*", text):
                 continue
+            # 댓글에 지역이 나오면 그 지역 맛집 리스트를 DM으로 보내고, 공개 답글은 그 사실만
+            import engage
+            if engage.dm_commenter(c, str(cm.user.pk), cm.user.username, text):
+                c.media_comment(media_id, f"@{cm.user.username} 근처 맛집 DM으로 보내드렸어요 😊", replied_to_comment_id=cm.pk)
+                used += 1
+                nap(40, 120)
+                continue
             reply = llm(
                 "인스타 맛집 큐레이션 계정 운영자로서 아래 댓글에 답글 한 문장을 써라. "
                 "존댓말, 25자 안팎, 이모지 최대 1개, 링크·해시태그·홍보·팔로우 요청 금지. 식당·음식은 언제나 긍정적으로만 말할 것(단점·아쉬움·비교 우열·호불호 금지). 부정적인 댓글에도 반박 없이 감사·공감으로. 답글만 출력.\n"

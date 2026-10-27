@@ -58,6 +58,7 @@ def follow_back(c):
     skip = _done_set() | _approved_ids()
     following = set(state_get("fb:following-cache") and json.loads(state_get("fb:following-cache")) or [])
     n = 0
+    followed = []
     for uid in new:
         if used + n >= FOLLOWBACK_PER_DAY:
             break
@@ -76,6 +77,7 @@ def follow_back(c):
                     continue
             c.user_follow(uid)
             state_set(f"fbat:{uid}", str(time.time()))
+            followed.append(uid)
             n += 1
             log.info(f"🤝 맞팔: @{u.username}")
         except Exception as e:
@@ -84,6 +86,10 @@ def follow_back(c):
                 raise
         nap(30, 90)
     state_set(f"fb:{today}", str(used + n))
+    # 맞팔한 새 팔로워에게 환영 DM(하루 20) — "동네 알려주시면 근처 맛집 보내드려요"
+    if followed:
+        import engage
+        engage.welcome_dm(c, followed)
 
 
 def weekly_cleanup(c):

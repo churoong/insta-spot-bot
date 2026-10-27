@@ -27,6 +27,7 @@ import requests
 from common import (GRAPH, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
                     graph_id_for_code, graph_token, nap, next_weekday_at, now_kst, online_slot,
                     state_get, state_set)
+import engage
 import follows
 import growth
 
@@ -216,6 +217,10 @@ def handle_handoffs():
                 gid = graph_id_for_code(media.code) or f"private:{media.pk}"
                 db("UPDATE posts SET status = 'published', ig_media_id = ? WHERE content_id = ?", [gid, cid])
                 state_set(f"pp:{cid}", "handoff")
+                try:
+                    engage.daily_note(c, (p.get("caption") or "").split("\n")[0].split("| ")[-1].strip())
+                except Exception as e:
+                    log.warning(f"노트 갱신 실패: {str(e)[:100]}")
                 after_publish(c, media.id, media.pk, p.get("first_comment"), cover, loc, p.get("theme"))
                 enqueue_trials(cid, p)
         except Exception as e:
@@ -517,6 +522,11 @@ def growth_round():
         ("자동 맞팔", lambda: follows.follow_back(c)),
         ("주간 팔로잉 정리", lambda: follows.weekly_cleanup(c)),
         ("검색 수요 수집", lambda: growth.demand_snapshot(c)),
+        ("노트", lambda: engage.daily_note(c)),
+        ("DM 답장", lambda: engage.answer_dms(c)),
+        ("소개 식당 장소 피드", lambda: engage.visited_engage(c, find_location)),
+        ("스토리 보기", lambda: engage.story_views(c)),
+        ("비슷한 계정 팔로워 좋아요", lambda: engage.peer_follower_likes(c)),
     ):
         try:
             fn()
