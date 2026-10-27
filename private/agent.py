@@ -165,6 +165,7 @@ def handle_handoffs():
         cid = row["content_id"]
         # 원자적 가져가기 — GitHub 쪽 되찾기(WHERE status='handoff')와 경합해도 한쪽만 이긴다
         got = db("UPDATE posts SET status = 'handoff_claimed' WHERE content_id = ? AND status = 'handoff'", [cid])
+        claimed_at = time.time()
         if not got["affected"]:
             continue
         log.info(f"▶ 핸드오프 가져감: {cid}")
@@ -198,6 +199,10 @@ def handle_handoffs():
                     if is_block(e):
                         raise
                     log.warning(f"식당 태그 실패(태그 없이): {str(e)[:120]}")
+                # 가져간 지 12분이 넘었으면 올리지 않는다 — GitHub는 25분에 공식 API로 직접 발행하므로,
+                # 인터넷이 끊겼다 돌아와 늦게 올리면 같은 편이 두 번 나간다.
+                if time.time() - claimed_at > 12 * 60:
+                    raise RuntimeError("가져간 지 12분 초과 — 이중 발행 방지로 업로드 중단")
                 media = c.clip_upload(path, caption, thumbnail=cover, usertags=tags, location=loc, extra_data=extra)
                 state_set(f"mid:{cid}", str(media.id))
                 published = True
