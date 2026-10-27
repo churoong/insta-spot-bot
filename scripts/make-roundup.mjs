@@ -253,11 +253,21 @@ async function themeWeights(db, all) {
   //    나머지 40개 × 2.0 = 80이 순대국 5.2 하나를 압도해, 9월에 장어·냉면-영남·부대찌개가
   //    뽑힌 게 이 구조다. 그래서 사전 가중치는 "탐험을 어디로 보낼지"를 정한다.
   const prior = await visitorPrior(all);
+  // 검색 수요 배수(2026-10-27) — 사용자 PC 에이전트(private/growth.py demand_snapshot)가 매일 아침
+  // 인스타 검색 자동완성·해시태그 증가율로 음식별 1.0~2.0을 config 'trend_boost'에 쓴다. 3일 넘으면 무시.
+  let trend = null;
+  try {
+    const r = await db.execute("SELECT value FROM config WHERE key = 'trend_boost'");
+    const j = r.rows[0] ? JSON.parse(String(r.rows[0].value)) : null;
+    if (j?._at && Date.now() - new Date(j._at).getTime() < 3 * 86400e3) trend = j;
+  } catch { /* 없으면 배수 없이 */ }
   const weights = all.map((t) =>
-    byKey[t.key] === undefined
+    (byKey[t.key] === undefined
       ? prior?.[t.key] ?? soupPrior(t) // 실측 조회수가 없을 때만 사전 가중치
-      : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))
+      : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))) *
+    (trend?.[t.food || t.keyword] ?? 1)
   );
+  if (trend) console.log("검색 수요 배수 적용:", Object.entries(trend).filter(([k, v]) => k !== "_at" && v >= 1.6).map(([k, v]) => `${k}×${v}`).join(" ") || "(1.6 이상 없음)");
   console.log(
     "테마 가중치(조회수):",
     all
@@ -1035,6 +1045,87 @@ async function enrichPlaces(places) {
  * 노포 연차 표시(2026-10-27 사용자 결정). 근거는 상호명·관광공사 소개글에 적힌 사실뿐
  * ("70년 역사", "3대째 운영", "1984년 개업"). 실측 88곳 중 6곳(7%). 30년 미만은 표시하지 않는다.
  */
+// ===== 전국 맛집 지도 프로젝트(2026-10-27 사용자 결정) =====
+// 회차마다 소개한 식당을 map_pins에 쌓고, 그리드 표지 오른쪽 위에 점 지도 + "전국 맛집 지도 N곳"을 그린다.
+// 지도 외곽선 데이터를 쓰지 않는다 — 쌓인 점들이 스스로 한반도 모양을 만든다(라이선스 걱정 없음).
+async function kakaoGeo(p) {
+  if (p.lat && p.lng) return { x: Number(p.lng), y: Number(p.lat) };
+  const key = process.env.KAKAO_REST_KEY;
+  if (!key) return null;
+  const get = async (u) => (await fetch(u, { headers: { Authorization: `KakaoAK ${key}` }, signal: AbortSignal.timeout(8000) })).json();
+  try {
+    const addr = String(p.address ?? "").split(/\s{2,}|\(/)[0].trim();
+    if (addr) {
+      const d = (await get(`https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(addr)}`)).documents?.[0];
+      if (d) return { x: Number(d.x), y: Number(d.y) };
+    }
+    const d2 = (await get(`https://dapi.kakao.com/v2/local/search/keyword.json?category_group_code=FD6&query=${encodeURIComponent(`${p.region ?? ""} ${p.name}`.trim())}`)).documents?.[0];
+    if (d2) return { x: Number(d2.x), y: Number(d2.y) };
+  } catch { /* 좌표 없으면 지도에서만 빠진다 */ }
+  return null;
+}
+
+async function prepareMap(db, places) {
+  for (const p of places) if (!p.geo) p.geo = await kakaoGeo(p);
+  const rows = (await db.execute("SELECT name, x, y FROM map_pins")).rows;
+  const have = new Set(rows.map((r) => String(r.name)));
+  const fresh = places.filter((p) => p.geo && !have.has(p.name));
+  return {
+    pins: rows.map((r) => ({ x: Number(r.x), y: Number(r.y) })),
+    current: places.filter((p) => p.geo).map((p) => p.geo),
+    total: rows.length + fresh.length,
+  };
+}
+
+async function addMapPins(db, places, cid) {
+  let n = 0;
+  for (const p of places) {
+    if (!p.geo) p.geo = await kakaoGeo(p);
+    if (!p.geo) continue;
+    const r = await db.execute({
+      sql: "INSERT OR IGNORE INTO map_pins (name, address, x, y, content_id) VALUES (?, ?, ?, ?, ?)",
+      args: [p.name, p.address ?? "", p.geo.x, p.geo.y, cid],
+    });
+    n += r.rowsAffected ?? 0;
+  }
+  if (n) console.log(`📍 전국 맛집 지도 +${n}곳`);
+}
+
+/** 오른쪽 위 점 지도. 남한 범위(경도 125.0~129.6, 위도 33.0~38.7)를 위도 36도 기준 비율로 투영. */
+function miniMapSvg(m) {
+  const W = 150, H = Math.round((150 * 5.7) / (4.6 * 0.81));
+  const X0 = 1080 - 54 - W, Y0 = 330;
+  const px = (g) => [X0 + ((g.x - 125.0) / 4.6) * W, Y0 + ((38.7 - g.y) / 5.7) * H];
+  const inBox = (g) => g.x > 124.6 && g.x < 130 && g.y > 32.8 && g.y < 38.9;
+  const dots = m.pins.filter(inBox).map((g) => { const [x, y] = px(g); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="#ffffff" fill-opacity="0.55"/>`; }).join("");
+  const now = m.current.filter(inBox).map((g) => { const [x, y] = px(g); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" fill="#e02020" stroke="#ffffff" stroke-width="2"/>`; }).join("");
+  return `<g>
+    <text x="${1080 - 54}" y="${Y0 - 12}" font-family="${FONT}" font-size="22" font-weight="800" fill="#ffffff" fill-opacity="0.85" text-anchor="end">전국 맛집 지도 ${m.total.toLocaleString()}곳</text>
+    ${dots}${now}
+  </g>`;
+}
+
+/**
+ * POV 서사형 윗줄(2026-10-27 사용자 결정) — 그리드 회차의 절반에만 붙여 효과를 비교할 수 있게 한다
+ * (캡션에 "POV:"가 있는지로 나중에 가른다). 상황 묘사만 — 우리가 다녀왔다는 주장은 하지 않는다.
+ */
+async function makePov(theme) {
+  const subject = theme.mode === "area" ? `${theme.keyword} 일대 맛집` : `${theme.food || theme.keyword} 맛집`;
+  const t = await llmGenerate(
+    `인스타 릴스 표지 윗줄에 들어갈 "POV: …" 한 줄을 써라. 주제: ${subject}.\n` +
+    `규칙: "POV: "로 시작, 그 뒤 8~16자. 그 음식이 생각나는 상황 묘사(예: "POV: 퇴근길 국밥이 당길 때", "POV: 비 오는 날 점심 고민 중"). ` +
+    `"다녀왔다·먹어봤다" 같은 직접 방문 주장 금지, "~요/~다"로 끝내지 말 것, 지역명은 주제에 있을 때만, 과장 금지. 그 한 줄만 출력.`,
+    60
+  );
+  const s = String(t ?? "").split("\n")[0].replace(/["'`]/g, "").trim();
+  const body = s.replace(/^POV:\s*/, "");
+  if (!/^POV:/.test(s) || body.length < 5 || body.length > 18) return null;
+  if (/(요|다)[.!]?$|다녀|먹어봤|가봤|TOP|웨이팅|줄서|현지인/.test(body)) return null;
+  const regions = ["서울", "부산", "대구", "인천", "광주", "대전", "울산", "제주", "강릉", "전주", "경주", "여수"];
+  if (theme.mode !== "area" && (theme.region ?? "전국") === "전국" && regions.some((r) => body.includes(r))) return null;
+  return `POV: ${body}`;
+}
+
 function markNopo(places) {
   const year = new Date().getFullYear();
   for (const p of places) {
@@ -1634,6 +1725,7 @@ async function composeReelCoverV2(theme, places, bgUrl = null) {
     <rect x="56" y="${HEADER_END - 62}" width="7" height="44" fill="#e02020"/>
     <text x="80" y="${HEADER_END - 26}" font-family="${TFONT}" font-size="42" font-weight="900" fill="#ffffff">${esc(tp.sub)}</text>
     <text x="${W - 54}" y="${HEADER_END - 26}" font-family="${FONT}" font-size="24" fill="#ffffff" fill-opacity="0.5" text-anchor="end">@${HANDLE}</text>
+    ${theme._map && 54 + mainLen * ms * 0.95 < W - 54 - 150 - 30 ? miniMapSvg(theme._map) : ""}
   </svg>`;
   const cellSvg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${cells}</svg>`;
 
@@ -2489,6 +2581,7 @@ function buildCaption(theme, places, descending = false, ep = null) {
   ][Math.floor(Math.random() * 3)];
   return (
     `🔥 ${ep ? `전국맛집로드 EP.${ep} | ` : ""}${theme.titleResolved || theme.title}\n\n` +
+    (theme.pov ? `${theme.pov}\n\n` : "") +
     `${lines.join("\n")}\n\n` +
     hundredLine +
     // 선정 기준 라인 제외 (2026-09-09 사용자 지시 "캡션에 선정 기준 문구 다 빼줘").
@@ -2862,6 +2955,16 @@ async function main() {
     console.log(`📺 방송 출연 ${places.filter((p) => p.tv).length}곳 → ${theme.titleResolved}`);
   }
 
+  // POV 윗줄 — 그리드 회차의 절반(효과 비교용)
+  if (!cdMode && STYLE === "grid" && (process.env.POV_FORCE === "1" || Math.random() < 0.5)) {
+    const pov = await makePov(theme).catch(() => null);
+    if (pov) {
+      theme.pov = pov;
+      theme.coverParts = { ...(theme.coverParts ?? buildPunchyTitle(theme, places.length)), top: pov };
+      console.log(`🎬 ${pov}`);
+    }
+  }
+
   // 카운트다운은 '아래 순위 → 1위' 순으로 뒤집어 공개
   const ranked = cdMode ? [...places].reverse() : places;
 
@@ -2938,6 +3041,7 @@ async function main() {
     // (공공누리 1유형 — 캡션에 크레딧 필수). 스타일 결정은 위(main 초입)에서 완료.
     pkBg = theme.mode === "area" ? null : await photoKoreaPhoto(theme.keyword);
     if (pkBg) console.log(`포토코리아 배경: ${pkBg.title}${pkBg.photographer ? " ⓒ" + pkBg.photographer : ""}`);
+    try { theme._map = await prepareMap(db, places); } catch (e) { console.error("지도 준비 실패(지도 없이):", String(e).slice(0, 80)); }
     reelCover = await composeReelCover(theme, places, coverStyle === "dark", pkBg?.url);
   }
 
@@ -3286,6 +3390,7 @@ ${bgm.attribution}`;
     mediaId = await publishReelSmart(retryUrl, finalCaption, musicOpt, { thumbOffsetMs: 0 });
   }
   console.log("✅ 모음집 릴스 발행:", mediaId);
+  await addMapPins(db, places, cid).catch((e) => console.error("지도 핀 저장 실패(무시):", String(e).slice(0, 80)));
   await db.execute({
     sql: `UPDATE posts SET ig_media_id = ?, status = 'published', reel_format = ? WHERE content_id = ?`,
     args: [mediaId, reelFormat, cid],
