@@ -3321,6 +3321,9 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
     first_comment: `🥇 1위 ${top.name}${top.region ? ` (${top.region})` : ""}` +
       (menu ? ` — ${menu}${gp ? ` ${Number(gp.price).toLocaleString()}원` : ""}` : ""),
     hashtag: (theme.tags ?? [])[0] ?? null,
+    // 식당 계정 태그·하이라이트 분류용(2026-10-27) — 에이전트가 상호+지역으로 인스타 계정을 찾는다
+    theme: { key: theme.key, mode: theme.mode ?? "food", food: theme.food || theme.keyword, keyword: theme.keyword },
+    places: places.slice(0, 6).map((pl) => ({ name: pl.name, region: pl.region ?? "", address: pl.address ?? "" })),
   };
   await db.execute({ sql: "UPDATE posts SET status = 'handoff', handoff = ? WHERE content_id = ?", args: [JSON.stringify(payload), cid] });
   console.log("[handoff] 로컬 에이전트에 발행을 넘김 — 대기");

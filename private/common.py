@@ -181,3 +181,25 @@ def client(interactive: bool = False):
     cl.login(user, pw, verification_code=code or "")
     cl.dump_settings(SESSION)
     return cl
+
+
+def llm(prompt: str, max_chars: int = 120) -> str | None:
+    """짧은 한국어 문장 생성(Gemini 무료 등급, lib/llm.ts와 같은 기본 모델). 실패하면 None — 호출부는
+    그때 아무것도 안 하는 쪽으로 처리한다(뻔한 템플릿 댓글은 스팸으로 보이므로 쓰지 않는다)."""
+    key = ENV.get("GEMINI_API_KEY", "")
+    if not key:
+        return None
+    m = ENV.get("GEMINI_MODEL") or "gemini-flash-lite-latest"
+    if m == "gemini-flash-latest":
+        m = "gemini-flash-lite-latest"
+    try:
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}",
+            json={"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.9, "maxOutputTokens": 120}},
+            timeout=30,
+        )
+        t = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip().strip('"').strip()
+        t = t.splitlines()[0].strip()
+        return t[:max_chars] if t else None
+    except Exception:
+        return None
