@@ -93,9 +93,9 @@ def find_location(c, loc: dict | None):
 
 
 # ---------- 음원 ----------
-def pick_track(c):
+def pick_track(c, skip: int = 0):
     try:
-        t = growth.trending_track(c)
+        t = growth.trending_track(c, skip)
         if t:
             log.info(f"🎵 음원(맛집 릴스 인기): {t.title} — {t.display_artist}")
             return t
@@ -105,7 +105,7 @@ def pick_track(c):
         log.warning(f"인기 음원 실패(목록으로): {str(e)[:120]}")
     qs = [l.strip() for l in (ROOT / "music.txt").read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
     random.shuffle(qs)
-    for q in qs[:3]:
+    for q in qs[skip:skip + 3] or qs[:3]:
         try:
             for t in c.search_music(q):
                 if not t.is_explicit and (t.uri or t.progressive_download_url):
@@ -130,9 +130,10 @@ def video_seconds(p: Path) -> float:
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else 8.0
 
 
-def with_music(c, video: Path, work: Path):
-    """영상 소리를 인스타 음원으로 바꾼 파일과 음원 메타데이터를 돌려준다. 음원이 없으면 (None, None)."""
-    t = pick_track(c)
+def with_music(c, video: Path, work: Path, skip: int = 0):
+    """영상 소리를 인스타 음원으로 바꾼 파일과 음원 메타데이터를 돌려준다. 음원이 없으면 (None, None).
+    skip: 오늘의 인기 음원 순위에서 건너뛸 개수 — 트라이얼 변형이 본편과 다른 곡을 쓰게."""
+    t = pick_track(c, skip)
     if not t:
         return None, None
     audio = c.track_download_by_url(str(t.uri or t.progressive_download_url), "track", work)
@@ -204,6 +205,7 @@ def handle_handoffs():
                 db("UPDATE posts SET status = 'published', ig_media_id = ? WHERE content_id = ?", [gid, cid])
                 state_set(f"pp:{cid}", "handoff")
                 after_publish(c, media.id, media.pk, p.get("first_comment"), cover, loc, p.get("theme"))
+                enqueue_trials(cid, p)
         except Exception as e:
             log.error(f"핸드오프 실패 {cid}: {type(e).__name__} {str(e)[:200]}")
             if not published:
@@ -373,6 +375,95 @@ def unfollow_batch():
     log.info(f"👋 언팔 {n}명 (오늘 누적 {used + n})")
 
 
+# ---------- 트라이얼 릴스 대량 시험(2026-10-27 사용자 결정) ----------
+TRIALS_PER_POST = 2
+
+
+def enqueue_trials(cid: str, p: dict):
+    """저녁 모음집(음원 붙는 회차)마다 같은 영상을 다른 음원·다른 첫 줄로 트라이얼 릴스 2개 더 올린다.
+    트라이얼은 비팔로워에게만 보여 팔로워 피드를 도배하지 않는다. 본편 직후가 아니라 2~4시간 간격."""
+    if not p.get("music_ok") or not p.get("reel_url"):
+        return
+    q = json.loads(state_get("trialq") or "[]")
+    q.append({"cid": cid, "n": 1, "at": time.time() + random.randint(2, 4) * 3600, "p": p})
+    state_set("trialq", json.dumps(q, ensure_ascii=False))
+    log.info(f"🧪 트라이얼 {TRIALS_PER_POST}개 예약: {cid}")
+
+
+def alt_first_line(p: dict) -> str | None:
+    from common import llm
+    title = (p.get("caption") or "").split("\n")[0]
+    t = llm("인스타 맛집 릴스 캡션 첫 줄을 같은 뜻의 다른 제목으로 한 줄 써라. 규칙: 'N대 맛집' 형식 유지, "
+            "'TOP N'·'N선'·'줄서는'·'웨이팅'·'현지인' 금지, 지역명은 뒤쪽에, 과장·거짓 금지, 이모지 1개로 시작. 제목만 출력.\n원래 제목: " + title, 80)
+    if not t or "대 맛집" not in t or re.search(r"TOP|\d선|줄서|웨이팅|현지인", t):
+        return None
+    # 원래 제목에 없던 지역을 지어내면 버린다("전국 국밥 6대 맛집 서울" 실측)
+    regions = ["서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "제주", "경기", "강원", "충북", "충남", "전북", "전남", "경북", "경남"]
+    if any(r in t and r not in title for r in regions):
+        return None
+    food = (p.get("theme") or {}).get("food") or ""
+    return t if not food or food in t else None
+
+
+def process_trials():
+    q = json.loads(state_get("trialq") or "[]")
+    if not q or q[0]["at"] > time.time():
+        return
+    job = q.pop(0)
+    p, cid, n = job["p"], job["cid"], job["n"]
+    c = cl()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            video = download(p["reel_url"], work / "reel.mp4")
+            cover = download(p["cover_url"], work / "cover.jpg") if p.get("cover_url") else None
+            mv, extra = with_music(c, video, work, skip=n)  # 본편은 0번째 곡, 트라이얼 n은 n번째 곡
+            caption = p["caption"]
+            alt = alt_first_line(p)
+            if alt:
+                caption = alt + "\n" + "\n".join(caption.split("\n")[1:])
+            if not mv and p.get("bgm_line"):
+                caption += "\n" + p["bgm_line"]
+            try:
+                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data=extra or {},
+                                      trial=True, trial_graduation_strategy="ss_performance")
+            except Exception as e:
+                if is_block(e):
+                    raise
+                log.warning(f"자동 승격 트라이얼 거부 — 수동 승격으로 재시도: {str(e)[:120]}")
+                media = c.clip_upload(mv or video, caption, thumbnail=cover, extra_data=extra or {}, trial=True)
+            state_set(f"trial:{cid}:{n}", json.dumps({"pk": str(media.pk), "code": media.code, "at": time.time()}))
+            log.info(f"🧪 트라이얼 {n} 발행: {cid} https://www.instagram.com/reel/{media.code}/")
+    except Exception as e:
+        log.error(f"트라이얼 실패 {cid}#{n}: {type(e).__name__} {str(e)[:160]}")
+        if is_block(e):
+            pause(12, "트라이얼 중 차단 신호")
+    if n < TRIALS_PER_POST:
+        q.insert(0, {**job, "n": n + 1, "at": time.time() + random.randint(2, 4) * 3600})
+    state_set("trialq", json.dumps(q, ensure_ascii=False))
+
+
+def report_trials():
+    """발행 72시간 지난 트라이얼의 재생 수를 본편과 나란히 기록(하루 1회). 승격 판단 자료."""
+    if state_get(f"trialrep:{now_kst():%Y-%m-%d}"):
+        return
+    state_set(f"trialrep:{now_kst():%Y-%m-%d}", "1")
+    rows = db("SELECT key, value FROM private_log WHERE key LIKE 'trial:%' AND key NOT LIKE 'trialq%'")["rows"]
+    c = cl()
+    for r in rows:
+        v = json.loads(r["value"])
+        if v.get("views") is not None or time.time() - v["at"] < 72 * 3600:
+            continue
+        try:
+            info = c.media_info(v["pk"])
+            v["views"] = int(getattr(info, "play_count", 0) or getattr(info, "view_count", 0) or 0)
+            state_set(r["key"], json.dumps(v))
+            log.info(f"🧪 트라이얼 결과 {r['key']}: 재생 {v['views']}")
+        except Exception as e:
+            log.warning(f"트라이얼 결과 조회 실패: {str(e)[:100]}")
+        nap(5, 15)
+
+
 def own_recent_media(days: int = 7) -> list:
     rows = db(f"""SELECT content_id, place_name FROM posts WHERE status = 'published'
                   AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
@@ -416,6 +507,7 @@ def tick():
     if time.time() < _paused_until or not SESSION.exists():
         return
     handle_handoffs()
+    process_trials()
     last_pp = float(state_get("pp:last") or 0)
     if time.time() - last_pp > 600:
         state_set("pp:last", str(time.time()))
@@ -423,6 +515,7 @@ def tick():
         likes_daily()
         unfollow_batch()
         growth_round()
+        report_trials()
 
 
 def main():
