@@ -394,7 +394,14 @@ async function main() {
       "-t", "8", "-movflags", "+faststart", mp4,
     ]);
     const videoUrl = await uploadPublic(mp4, "video/mp4");
-    const { publishReelSmart, commentOnMedia, publishStory } = await import("../lib/instagram.ts");
+    const { publishReelSmart, commentOnMedia, publishStory, findRecentByCaption } = await import("../lib/instagram.ts");
+    // 앞 실행이 발행까지 하고 뒤에서 죽었을 수 있다 — 하루 안에 같은 첫 줄 게시물이 있으면 다시 올리지 않는다
+    const already = await findRecentByCaption(caption.split("\n")[0], 24 * 3600e3).catch(() => null);
+    if (already) {
+      await db.execute({ sql: "UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?", args: [already, cid] });
+      console.log("이미 올라가 있음 — 다시 발행하지 않음:", already);
+      return;
+    }
     const mediaId = await publishReelSmart(videoUrl, caption, null);
     await db.execute({ sql: "UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?", args: [mediaId, cid] });
     console.log("✅ 국밥 국경선 릴스 발행:", mediaId);
@@ -428,5 +435,7 @@ async function main() {
 
 main().catch((e) => {
   console.error(e);
+  // 로그 원문을 못 받는 환경(클라우드 세션)에서도 API(check-runs annotations)로 사유를 읽게
+  console.log(`::error title=make-border::${String(e?.stack || e).replace(/\r?\n/g, " | ").slice(0, 900)}`);
   process.exit(1);
 });
