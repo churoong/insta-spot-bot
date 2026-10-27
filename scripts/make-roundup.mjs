@@ -3459,8 +3459,8 @@ ${bgm.attribution}`;
   if (!privateDone && !DRY) {
     try {
       const { commentOnMedia } = await import("../lib/instagram.ts");
-      const cmId = await commentOnMedia(mediaId, buildFirstComment(theme, places));
-      console.log("💬 첫 댓글(해시태그 포함):", cmId);
+      const text = buildFirstComment(theme, places);
+      if (text) console.log("💬 첫 댓글(해시태그):", await commentOnMedia(mediaId, text), text);
     } catch (e) {
       console.error("첫 댓글 실패(무시 — 에이전트가 나중에 단다):", String(e).slice(0, 160));
     }
@@ -3586,15 +3586,11 @@ function commentHashtags(theme, places) {
   return [...new Set(tags)].filter((t) => /^[가-힣A-Za-z0-9]+$/.test(t)).slice(0, 5);
 }
 
+// 2026-10-27 사용자 결정: 첫 댓글은 해시태그로만("댓글 형식은 그냥 해시태그로만 구성해"). 고정하지 않는다.
 function buildFirstComment(theme, places) {
-  const top = places[0] ?? {};
-  const gp = top.goodPrice?.price ? top.goodPrice : null;
-  const menu = String((gp ? gp.menu : top.menu) || "").split(/[,·/]/)[0].trim();
-  const tags = commentHashtags(theme, places);
-  return `🥇 1위 ${top.name}${top.region ? ` (${top.region})` : ""}` +
-    (menu ? ` — ${menu}${gp ? ` ${Number(gp.price).toLocaleString()}원` : ""}` : "") +
-    `\n👇 여러분이 꼽는 ${theme.mode === "area" ? theme.keyword : theme.food || theme.keyword} 원픽은 어디예요? 댓글로 알려주세요` +
-    (tags.length ? `\n${tags.map((t) => `#${t}`).join(" ")}` : "");
+  let tags = commentHashtags(theme, places);
+  if (!tags.length) tags = (theme.tags ?? []).filter((t) => /^[가-힣A-Za-z0-9]+$/.test(t)).slice(0, 3);
+  return tags.map((t) => `#${t}`).join(" ");
 }
 
 async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, musicOk, thumbMs, theme, places, reelFormat }) {

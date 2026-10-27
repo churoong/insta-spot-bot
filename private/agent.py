@@ -252,10 +252,8 @@ def after_publish(c, media_id, media_pk, first_comment, cover, loc, theme=None):
     if first_comment:
         try:
             nap(20, 50)
-            cm = c.media_comment(media_id, first_comment)
-            nap(3, 8)
-            c.comment_pin(media_id, cm.pk)
-            log.info(f"📌 첫 댓글 고정: {first_comment}")
+            c.media_comment(media_id, first_comment)  # 해시태그만(2026-10-27) — 고정하지 않는다
+            log.info(f"#️⃣ 첫 댓글: {first_comment}")
         except Exception as e:
             log.warning(f"첫 댓글 실패: {str(e)[:160]}")
     if cover:
@@ -296,7 +294,6 @@ def postprocess_recent():
                 m2 = re.match(r"\s*1\.\s*(.+?)\s+—\s+(.+?)(?:\s+2\.|$)", str(row["address"] or ""))
                 if m2:
                     loc_q = {"query": m2[1], "address": m2[2]}
-                    first = first or f"🥇 1위 {m2[1]}\n👇 여러분의 원픽은 어디예요? 댓글로 알려주세요"
             state_set(f"mid:{cid}", str(info.id))
             loc = find_location(c, loc_q)
             places = p.get("places") or [
@@ -311,23 +308,15 @@ def postprocess_recent():
                 nap(5, 15)
                 c.media_edit(info.id, info.caption_text, usertags=tags, location=loc if loc else info.location)
                 log.info(f"📍 위치·식당 태그 {cid}: {loc.name if loc else '-'} / {len(tags)}곳")
-            if first:
-                # 공식 경로 회차는 GitHub가 발행 직후 공식 API로 첫 댓글을 이미 달았다(2026-10-27) — 찾아서 고정만.
-                # 못 찾으면(예전 회차·공식 댓글 실패) 여기서 단다.
-                nap(5, 15)
-                mine = [cm for cm in c.media_comments(info.id, amount=30) if str(cm.user.pk) == str(c.user_id) and (cm.text or "").startswith("🥇")]
-                if mine:
-                    cm = mine[-1]
-                else:
-                    tags = engage.comment_hashtags(p)
-                    if tags and "#" not in first:
-                        first += "\n" + " ".join("#" + t for t in tags)
-                    nap(15, 40)
-                    cm = c.media_comment(info.id, first)
-                nap(3, 8)
-                c.comment_pin(info.id, cm.pk)
-                engage.remember_hashtag_check(pk, engage.comment_hashtags(p))
-                log.info(f"📌 첫 댓글 고정 {cid}{' (공식 댓글)' if mine else ''}")
+            # 첫 댓글(해시태그만)은 공식 경로면 GitHub가 발행 직후 이미 달았다. 우리 해시태그 댓글이 없을 때만 단다.
+            nap(5, 15)
+            mine = [cm for cm in c.media_comments(info.id, amount=30) if str(cm.user.pk) == str(c.user_id) and (cm.text or "").startswith("#")]
+            tags = engage.comment_hashtags(p)
+            if not mine and tags:
+                nap(15, 40)
+                c.media_comment(info.id, " ".join("#" + t for t in tags))
+                log.info(f"#️⃣ 첫 댓글(해시태그) {cid}")
+            engage.remember_hashtag_check(pk, tags)
             state_set(f"pp:{cid}", "official")
             enqueue_trials(cid, p)
             if row.get("created_at") and (time.time() - _utc_ts(row["created_at"])) < 3600:
