@@ -988,3 +988,55 @@ def weekly_map_highlight(c):
         log.warning(f"지도 하이라이트 실패: {str(e)[:120]}")
         if _blocked(e):
             raise
+
+
+# ---------- 고정 댓글 해시태그 보강(2026-10-27 사용자 결정) ----------
+def comment_hashtags(p: dict) -> list:
+    """캡션 해시태그는 5개 제한 — 고정 댓글에 지역 해시태그를 최대 5개 더. 댓글 해시태그가 검색에 잡히는지는
+    check_hashtag_visibility가 2시간 뒤 직접 확인해 private_log에 남긴다."""
+    theme = p.get("theme") or {}
+    food = re.sub(r"\s", "", theme.get("food") or theme.get("keyword") or "")
+    tags = []
+    if theme.get("mode") == "area" and theme.get("keyword"):
+        kw = re.sub(r"\s|·", "", theme["keyword"])
+        tags += [f"{kw}맛집", f"{kw}맛집추천"]
+    sidos = []
+    for pl in p.get("places") or []:
+        s = (pl.get("region") or "").split(" ")[0]
+        if s and not s.endswith("역") and s not in sidos:
+            sidos.append(s)
+    for s in sidos[:3]:
+        tags.append(f"{s}맛집")
+        if food and theme.get("mode") not in ("area", "density"):
+            tags.append(f"{s}{food}")
+    out = []
+    for t in tags:
+        if t not in out and re.fullmatch(r"[가-힣A-Za-z0-9]+", t):
+            out.append(t)
+    return out[:5]
+
+
+def remember_hashtag_check(media_pk, tags: list):
+    if tags:
+        state_set(f"htcheck:{media_pk}", json.dumps({"tags": tags, "at": time.time(), "done": False}, ensure_ascii=False))
+
+
+def check_hashtag_visibility(c):
+    """댓글에 단 해시태그 페이지(최근 게시물)에 우리 게시물이 뜨는지 2~24시간 사이에 한 번 확인."""
+    for r in db("SELECT key, value FROM private_log WHERE key LIKE 'htcheck:%'")["rows"]:
+        v = json.loads(r["value"])
+        if v.get("done") or time.time() - v["at"] < 2 * 3600:
+            continue
+        pk = r["key"].split(":", 1)[1]
+        found = {}
+        for t in v["tags"][:2]:
+            try:
+                found[t] = any(str(m.pk) == pk for m in c.hashtag_medias_recent(t, amount=60))
+            except Exception as e:
+                if _blocked(e):
+                    raise
+                found[t] = None
+            nap(5, 15)
+        v.update({"done": True, "found": found})
+        state_set(r["key"], json.dumps(v, ensure_ascii=False))
+        log.info(f"#️⃣ 댓글 해시태그 노출 확인 {pk}: {found}")

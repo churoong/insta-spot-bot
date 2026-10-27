@@ -234,7 +234,9 @@ def handle_handoffs():
                     log.warning(f"노트·축하 DM 실패: {str(e)[:100]}")
                     if is_block(e):
                         raise
+                # 첫 댓글 문구(1위 소개 + 원픽 질문 + 지역 해시태그)는 make-roundup buildFirstComment가 만든다
                 after_publish(c, media.id, media.pk, p.get("first_comment"), cover, loc, p.get("theme"))
+                engage.remember_hashtag_check(media.pk, engage.comment_hashtags(p))
                 enqueue_trials(cid, p)
         except Exception as e:
             log.error(f"핸드오프 실패 {cid}: {type(e).__name__} {str(e)[:200]}")
@@ -310,11 +312,22 @@ def postprocess_recent():
                 c.media_edit(info.id, info.caption_text, usertags=tags, location=loc if loc else info.location)
                 log.info(f"📍 위치·식당 태그 {cid}: {loc.name if loc else '-'} / {len(tags)}곳")
             if first:
-                nap(20, 50)
-                cm = c.media_comment(info.id, first)
+                # 공식 경로 회차는 GitHub가 발행 직후 공식 API로 첫 댓글을 이미 달았다(2026-10-27) — 찾아서 고정만.
+                # 못 찾으면(예전 회차·공식 댓글 실패) 여기서 단다.
+                nap(5, 15)
+                mine = [cm for cm in c.media_comments(info.id, amount=30) if str(cm.user.pk) == str(c.user_id) and (cm.text or "").startswith("🥇")]
+                if mine:
+                    cm = mine[-1]
+                else:
+                    tags = engage.comment_hashtags(p)
+                    if tags and "#" not in first:
+                        first += "\n" + " ".join("#" + t for t in tags)
+                    nap(15, 40)
+                    cm = c.media_comment(info.id, first)
                 nap(3, 8)
                 c.comment_pin(info.id, cm.pk)
-                log.info(f"📌 첫 댓글 고정 {cid}")
+                engage.remember_hashtag_check(pk, engage.comment_hashtags(p))
+                log.info(f"📌 첫 댓글 고정 {cid}{' (공식 댓글)' if mine else ''}")
             state_set(f"pp:{cid}", "official")
             enqueue_trials(cid, p)
             if row.get("created_at") and (time.time() - _utc_ts(row["created_at"])) < 3600:
@@ -562,6 +575,7 @@ def growth_round():
         ("맞교환 제안", lambda: engage.peer_proposals(c)),
         ("추천 계정 스토리", lambda: engage.peer_shoutout_story(c)),
         ("지도 하이라이트", lambda: engage.weekly_map_highlight(c)),
+        ("댓글 해시태그 노출 확인", lambda: engage.check_hashtag_visibility(c)),
     ):
         try:
             fn()
