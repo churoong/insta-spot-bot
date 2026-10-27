@@ -2612,12 +2612,16 @@ async function main() {
   //   슬롯마다 포인터 따로. 큐레이션·캐러셀은 음식 테마만.
   //   ※ 도시×단일음식(춘천 닭갈비 등)은 실측 풀 0~9곳이라 불가 — 권역 단위까지만.
   const kstDow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay(); // 0=일
-  const SLOT_BY_DOW = ["nation", "nation", "spot", "nation", "spot", "nation", "spot"]; // 일~토
+  // 2026-10-27 지하철역 맛집 시리즈(사용자 결정): 목·토 상권 → 지하철역(반경 700m, 풀 20곳+ 역만 —
+  // scripts/build-stations.mjs가 data/stations.json·테마를 만든다). 화요일은 상권 그대로.
+  const SLOT_BY_DOW = ["nation", "nation", "spot", "nation", "station", "nation", "station"]; // 일~토
   const slot = process.env.ROUNDUP_STYLE ? "food" : SLOT_BY_DOW[kstDow];
-  const isSpot = (t) => t.mode === "area" && t.tour?.mapX;
+  const isStation = (t) => t.series === "station";
+  const isSpot = (t) => t.mode === "area" && t.tour?.mapX && !isStation(t);
   const isCity = (t) => (t.mode === "area" && !t.tour?.mapX) || (t.mode !== "area" && (t.areaCode || t.areaCodes));
   const inSlot = (t) =>
-    slot === "spot" ? isSpot(t)
+    slot === "station" ? isStation(t)
+    : slot === "spot" ? isSpot(t)
     : slot === "city" ? isCity(t)
     : slot === "nation" ? t.mode !== "area" && !t.areaCode && !t.areaCodes
     : t.mode !== "area"; // food: 큐레이션·캐러셀 (전국+권역 음식)
@@ -2626,7 +2630,7 @@ async function main() {
   const IDX_KEY =
     process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx"
     : process.env.ROUNDUP_STYLE === "carousel" ? "carousel_idx"
-    : slot === "spot" ? "spot_idx" : slot === "city" ? "city_idx" : "roundup_idx";
+    : slot === "spot" ? "spot_idx" : slot === "station" ? "station_idx" : slot === "city" ? "city_idx" : "roundup_idx";
   const idxRow = await db.execute({
     sql: "SELECT value FROM config WHERE key = ?",
     args: [IDX_KEY],

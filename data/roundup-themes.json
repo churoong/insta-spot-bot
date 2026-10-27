@@ -2039,6 +2039,481 @@
     "mapY": 37.3443,
     "radius": 3000
    }
+  },
+  {
+   "key": "stn-18234120",
+   "mode": "area",
+   "series": "station",
+   "keyword": "서울숲역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "서울숲역맛집",
+    "서울숲맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.04475,
+    "mapY": 37.54365,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160627",
+   "mode": "area",
+   "series": "station",
+   "keyword": "뚝섬역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "뚝섬역맛집",
+    "뚝섬맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.04739,
+    "mapY": 37.54724,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-18234115",
+   "mode": "area",
+   "series": "station",
+   "keyword": "압구정로데오역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "압구정로데오역맛집",
+    "압구정로데오맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.0406,
+    "mapY": 37.52752,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160613",
+   "mode": "area",
+   "series": "station",
+   "keyword": "종각역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "종각역맛집",
+    "종각맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.98315,
+    "mapY": 37.57023,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160622",
+   "mode": "area",
+   "series": "station",
+   "keyword": "을지로입구역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "을지로입구역맛집",
+    "을지로입구맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9822,
+    "mapY": 37.56604,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160626",
+   "mode": "area",
+   "series": "station",
+   "keyword": "성수역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "성수역맛집",
+    "성수맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.05607,
+    "mapY": 37.54459,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160803",
+   "mode": "area",
+   "series": "station",
+   "keyword": "강남역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "강남역맛집",
+    "강남맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.02809,
+    "mapY": 37.49743,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160570",
+   "mode": "area",
+   "series": "station",
+   "keyword": "시청역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "시청역맛집",
+    "시청맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9764,
+    "mapY": 37.56451,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160852",
+   "mode": "area",
+   "series": "station",
+   "keyword": "한강진역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "한강진역맛집",
+    "한강진맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.00177,
+    "mapY": 37.53979,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160530",
+   "mode": "area",
+   "series": "station",
+   "keyword": "을지로3가역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "을지로3가역맛집",
+    "을지로3가맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9918,
+    "mapY": 37.56636,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160784",
+   "mode": "area",
+   "series": "station",
+   "keyword": "종로3가역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "종로3가역맛집",
+    "종로3가맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.99148,
+    "mapY": 37.57152,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160762",
+   "mode": "area",
+   "series": "station",
+   "keyword": "이태원역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "이태원역맛집",
+    "이태원맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.99433,
+    "mapY": 37.53453,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160648",
+   "mode": "area",
+   "series": "station",
+   "keyword": "명동역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "명동역맛집",
+    "명동맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9864,
+    "mapY": 37.56097,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160642",
+   "mode": "area",
+   "series": "station",
+   "keyword": "회현역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "회현역맛집",
+    "회현맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.97844,
+    "mapY": 37.55876,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160543",
+   "mode": "area",
+   "series": "station",
+   "keyword": "충무로역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "충무로역맛집",
+    "충무로맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.9947,
+    "mapY": 37.56145,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160801",
+   "mode": "area",
+   "series": "station",
+   "keyword": "신당역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "신당역맛집",
+    "신당맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.01783,
+    "mapY": 37.56588,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160565",
+   "mode": "area",
+   "series": "station",
+   "keyword": "동대문역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "동대문역맛집",
+    "동대문맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.00997,
+    "mapY": 37.57129,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160578",
+   "mode": "area",
+   "series": "station",
+   "keyword": "을지로4가역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "을지로4가역맛집",
+    "을지로4가맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.99784,
+    "mapY": 37.5671,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-17754615",
+   "mode": "area",
+   "series": "station",
+   "keyword": "청구역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "청구역맛집",
+    "청구맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.01405,
+    "mapY": 37.56056,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160608",
+   "mode": "area",
+   "series": "station",
+   "keyword": "동묘앞역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "동묘앞역맛집",
+    "동묘앞맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.01604,
+    "mapY": 37.57269,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160791",
+   "mode": "area",
+   "series": "station",
+   "keyword": "종로5가역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "종로5가역맛집",
+    "종로5가맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.00154,
+    "mapY": 37.57098,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160617",
+   "mode": "area",
+   "series": "station",
+   "keyword": "동대문역사문화공원역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "동대문역사문화공원역맛집",
+    "동대문역사문화공원맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.0075,
+    "mapY": 37.56511,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160629",
+   "mode": "area",
+   "series": "station",
+   "keyword": "동대입구역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "동대입구역맛집",
+    "동대입구맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.00532,
+    "mapY": 37.55906,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160673",
+   "mode": "area",
+   "series": "station",
+   "keyword": "녹사평역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "녹사평역맛집",
+    "녹사평맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 126.98655,
+    "mapY": 37.53472,
+    "radius": 700
+   }
+  },
+  {
+   "key": "stn-21160619",
+   "mode": "area",
+   "series": "station",
+   "keyword": "역삼역",
+   "region": "서울",
+   "count": 6,
+   "emoji": "🚇",
+   "tags": [
+    "역삼역맛집",
+    "역삼맛집",
+    "서울맛집"
+   ],
+   "tour": {
+    "mapX": 127.03647,
+    "mapY": 37.50067,
+    "radius": 700
+   }
   }
  ]
 }
