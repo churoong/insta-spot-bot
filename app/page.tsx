@@ -5,6 +5,8 @@ import LeaveGuard from "./components/LeaveGuard";
 import themesData from "@/data/roundup-themes.json";
 
 export const dynamic = "force-dynamic";
+// 관리 대시보드는 검색에 안 나오게 — 공개 페이지는 /m·/e (robots.ts)
+export const metadata = { robots: { index: false, follow: false } };
 
 // ===== 수동 참여 가이드: 매일 바뀌는 추천 해시태그·시간대 =====
 // 자동 좋아요/팔로우는 API 미지원+계정 정지 위험이라, 사람이 직접 하는 참여를 돕는다.
