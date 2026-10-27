@@ -551,6 +551,8 @@ def growth_round():
         ("좋아요 누른 사람 팔로우", lambda: follows.follow_likers(c, own_recent_media(4))),
         ("질문 스티커 스토리", lambda: engage.question_story(c)),
         ("질문 답변 DM", lambda: engage.question_answers(c)),
+        ("맞교환 제안", lambda: engage.peer_proposals(c)),
+        ("추천 계정 스토리", lambda: engage.peer_shoutout_story(c)),
     ):
         try:
             fn()

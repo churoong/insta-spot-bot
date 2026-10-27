@@ -259,6 +259,8 @@ def answer_dms(c):
         if not msg.text:
             continue
         state_set(f"dmdone:{msg.id}", "1")
+        if peer_reply(c, str(msg.user_id), msg.text, th.id):  # 맞교환 제안에 대한 답
+            continue
         if time.time() - msg.timestamp.timestamp() > 3 * 86400:
             continue
         g = geocode_text(msg.text)
@@ -825,3 +827,85 @@ def question_answers(c):
                 if _blocked(e):
                     raise
             nap(30, 90)
+
+
+# ---------- 비슷한 작은 계정과 스토리 맞교환(2026-10-27 사용자 결정) ----------
+# 상대 게시물을 퍼오지 않는다(리그램 금지 규칙) — 우리 카드에 그 계정을 멘션해 소개하고, 상대도 우리를 소개해 주길 부탁한다.
+PEER_PROPOSAL = ("안녕하세요! 전국 맛집 큐레이션 계정 먹짱입니다 🙌 결이 비슷한 맛집 계정이라 연락드려요. "
+                 "매주 서로를 스토리로 한 번씩 소개해 보면 어떨까요? 저희는 '이번 주 추천 맛집 계정'으로 소개해 드릴게요. 좋으시면 편하게 답장 주세요!")
+YES = re.compile(r"좋아요|좋습니다|좋네요|그래요|네\b|넵|오케이|ok|OK|콜|감사|함께|해요|하죠|좋죠")
+PEER_PROPOSALS_PER_DAY = 2
+
+
+def peer_proposals(c):
+    if _count("peerprop") >= PEER_PROPOSALS_PER_DAY or not _slot_passed("peerprop"):
+        return
+    for uid in peer_accounts(c):
+        if _count("peerprop") >= PEER_PROPOSALS_PER_DAY:
+            break
+        if state_get(f"peerprop:{uid}"):
+            continue
+        try:
+            c.direct_send(PEER_PROPOSAL, user_ids=[int(uid)])
+            state_set(f"peerprop:{uid}", str(time.time()))
+            _bump("peerprop")
+            log.info(f"🤝 맞교환 제안 DM: {uid}")
+        except Exception as e:
+            log.warning(f"맞교환 제안 실패: {str(e)[:100]}")
+            if _blocked(e):
+                raise
+        nap(90, 240)
+
+
+def peer_reply(c, uid: str, text: str, thread_id) -> bool:
+    """제안한 계정이 긍정으로 답하면 수락으로 기록하고 감사 답장. 처리했으면 True."""
+    if not state_get(f"peerprop:{uid}") or state_get(f"peeraccept:{uid}"):
+        return False
+    if not YES.search(text or ""):
+        return False
+    state_set(f"peeraccept:{uid}", str(time.time()))
+    c.direct_send("감사해요! 이번 주부터 스토리로 소개해 드릴게요 😊 저희 새 편도 마음에 드시면 한 번씩 소개 부탁드려요!", thread_ids=[int(thread_id)])
+    log.info(f"🤝 맞교환 수락: {uid}")
+    return True
+
+
+def peer_shoutout_story(c):
+    """금요일 하루 1회: 수락한 계정을 '이번 주 추천 맛집 계정' 카드에 멘션(최대 3개)."""
+    import tempfile
+    from pathlib import Path
+    from PIL import Image, ImageDraw, ImageFont
+    from instagrapi.types import StoryMention, UserShort
+    from common import REPO
+    if now_kst().weekday() != 4 or state_get(f"shoutout:{today()}") or not _slot_passed("shoutout"):
+        return
+    acc = [r["key"].split(":", 1)[1] for r in db("SELECT key FROM private_log WHERE key LIKE 'peeraccept:%'")["rows"]]
+    if not acc:
+        return
+    state_set(f"shoutout:{today()}", "1")
+    users = []
+    for uid in random.sample(acc, min(3, len(acc))):
+        try:
+            users.append(c.user_info(uid))
+        except Exception as e:
+            if _blocked(e):
+                raise
+        nap(3, 8)
+    if not users:
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        img = Path(tmp) / "shout.jpg"
+        im = Image.new("RGB", (1080, 1920), "#1a0f0a")
+        d = ImageDraw.Draw(im)
+        fb = ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-ExtraBold.otf"), 84)
+        fr = ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-Bold.otf"), 52)
+        d.text((540, 420), "이번 주", font=fb, fill="#ffffff", anchor="mm")
+        d.text((540, 530), "추천 맛집 계정", font=fb, fill="#ffffff", anchor="mm")
+        mentions = []
+        for i, u in enumerate(users):
+            y = 820 + i * 220
+            d.text((540, y), f"@{u.username}", font=fr, fill="#ffd9c9", anchor="mm")
+            mentions.append(StoryMention(user=UserShort(pk=str(u.pk), username=u.username), x=0.5, y=y / 1920, width=0.6, height=0.07))
+        d.text((540, 1600), "결이 맞는 맛집 계정이에요 🍲", font=ImageFont.truetype(str(REPO / "assets" / "fonts" / "Pretendard-Bold.otf"), 40), fill="#c9a89a", anchor="mm")
+        im.save(img, quality=92)
+        c.photo_upload_to_story(img, mentions=mentions)
+    log.info(f"📣 추천 계정 스토리: {[u.username for u in users]}")
