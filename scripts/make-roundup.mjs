@@ -3488,6 +3488,16 @@ function curlUpload(args) {
  *    에이전트가 가져간 뒤에는 결과가 나올 때까지 기다린다 — 그 사이 공식 발행을 하면 두 번 올라간다.
  */
 async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, musicOk, thumbMs, theme, places, reelFormat }) {
+  // 에이전트 PC는 저녁·주말에 인터넷이 없다(2026-10-27 사용자). 살아 있다는 신호(45초마다 갱신)가
+  // 5분 넘게 끊겼으면 기다리지 않고 바로 공식 API로 — 예전엔 매번 10분을 헛되이 기다렸다.
+  try {
+    const hb = (await db.execute("SELECT updated_at FROM private_log WHERE key = 'agent:alive'")).rows[0];
+    const ageMin = hb ? (Date.now() - new Date(String(hb.updated_at).replace(" ", "T") + "Z").getTime()) / 60e3 : Infinity;
+    if (!(ageMin < 5)) {
+      console.log(`[handoff] 에이전트 오프라인(마지막 신호 ${Number.isFinite(ageMin) ? Math.round(ageMin) + "분 전" : "없음"}) — 공식 API로 바로 발행`);
+      return null;
+    }
+  } catch { return null; }
   let coverUrl = null;
   try { if (coverJpg) coverUrl = await uploadPublic(coverJpg); } catch { /* 스토리만 못 올림 */ }
   const top = places[0] ?? {};
@@ -3542,8 +3552,24 @@ async function handoffToPrivate({ db, cid, reelUrl, coverJpg, caption, bgmLine, 
       }
     }
   }
-  // 에이전트가 가져간 채 끝내 결과가 없다 — 공식 발행을 하면 이중 발행 위험이라 여기서 멈춘다.
-  throw new Error("핸드오프 결과 없음(에이전트가 가져간 뒤 응답 없음) — 이중 발행 방지로 공식 발행 생략");
+  // 에이전트가 가져간 채 결과가 없다(가져간 직후 인터넷이 끊긴 경우). 에이전트는 가져간 지 12분이 넘으면
+  // 업로드를 시작하지 않으므로, 여기(25분)서 실제로 올라간 게 없는지만 확인하고 공식 API로 발행한다.
+  try {
+    const tok = (await db.execute("SELECT value FROM config WHERE key = 'ig_token'")).rows[0]?.value || process.env.IG_ACCESS_TOKEN;
+    const j = await (await fetch(`https://graph.instagram.com/v23.0/me/media?fields=id,caption,timestamp&limit=5&access_token=${tok}`, { signal: AbortSignal.timeout(15000) })).json();
+    const first = String(caption).split("\n")[0].trim();
+    const hit = (j.data ?? []).find((m) => Date.now() - new Date(m.timestamp).getTime() < 40 * 60e3 && String(m.caption ?? "").startsWith(first.slice(0, 20)));
+    if (hit) {
+      await db.execute({ sql: "UPDATE posts SET status = 'published', ig_media_id = ? WHERE content_id = ?", args: [hit.id, cid] });
+      console.log("[handoff] 에이전트가 올린 게시물을 찾아 채택:", hit.id);
+      return String(hit.id);
+    }
+  } catch (e) {
+    console.error("[handoff] 최근 게시물 확인 실패:", String(e).slice(0, 100));
+  }
+  await db.execute({ sql: "UPDATE posts SET status = 'publishing' WHERE content_id = ? AND status = 'handoff_claimed'", args: [cid] });
+  console.log("[handoff] 에이전트 응답 없음(가져간 뒤 끊김) — 공식 API로 발행");
+  return null;
 }
 
 async function uploadPublic(filePath, { avoidHostOf = "" } = {}) {
