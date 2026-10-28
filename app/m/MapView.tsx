@@ -47,12 +47,18 @@ export default function MapView({ pins }: { pins: MapPin[] }) {
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 18, attribution: "&copy; OpenStreetMap contributors",
       }).addTo(m);
+      // 전국 보기에서 맛디 아이콘 450개는 서로 덮여 지도가 안 보인다(2026-10-28 실사이트 점검) —
+      // 멀리서는 작은 빨간 점, 확대(10 이상)하면 맛디 아이콘으로 바꾼다.
       const icon = L.icon({ iconUrl: "/mascot.png", iconSize: [38, 38], iconAnchor: [19, 34], popupAnchor: [0, -30] });
-      for (const p of pins) {
-        L.marker([p.y, p.x], { icon, title: p.name })
-          .addTo(m)
-          .bindPopup(`<b>${p.name.replace(/</g, "&lt;")}</b><br>${p.food} · ${p.title.replace(/</g, "&lt;")}<br><a href="/m/${p.id}">자세히 보기 →</a>`);
-      }
+      const popup = (p: MapPin) => `<b>${p.name.replace(/</g, "&lt;")}</b><br>${p.food} · ${p.title.replace(/</g, "&lt;")}<br><a href="/m/${p.id}">자세히 보기 →</a>`;
+      const dots = L.layerGroup(pins.map((p) => L.circleMarker([p.y, p.x], { radius: 4, color: "#fff", weight: 1, fillColor: "#e02020", fillOpacity: 0.9 }).bindPopup(popup(p))));
+      const icons = L.layerGroup(pins.map((p) => L.marker([p.y, p.x], { icon, title: p.name }).bindPopup(popup(p))));
+      const sync = () => {
+        const near = m.getZoom() >= 10;
+        if (near) { m.removeLayer(dots); icons.addTo(m); } else { m.removeLayer(icons); dots.addTo(m); }
+      };
+      m.on("zoomend", sync);
+      sync();
       map.current = m;
     }).catch(() => setMsg("지도를 불러오지 못했어요. 아래 목록을 이용해 주세요."));
     fetch("/border/index.json").then((r) => (r.ok ? r.json() : [])).then((s) => alive && setSeries(s)).catch(() => {});
@@ -90,7 +96,7 @@ export default function MapView({ pins }: { pins: MapPin[] }) {
       (pos) => {
         const L = (window as any).L;
         const { latitude: lat, longitude: lng } = pos.coords;
-        map.current?.setView([lat, lng], 13);
+        map.current?.setView([lat, lng], 13); // 13 ≥ 10이라 맛디 아이콘으로 보인다
         if (L && map.current) L.circleMarker([lat, lng], { radius: 8, color: "#e02020", fillOpacity: 1 }).addTo(map.current).bindTooltip("내 위치");
         const near = pins.filter((p) => Math.hypot((p.x - lng) * 88.2, (p.y - lat) * 111) <= 5).length;
         setMsg(near ? `반경 5km에 맛디깅이 소개한 맛집 ${near}곳` : "반경 5km에는 아직 소개한 집이 없어요. 지도를 넓혀 보세요.");
