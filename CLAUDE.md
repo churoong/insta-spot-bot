@@ -66,6 +66,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **2026-10-27 계정 이름 먹짱 → 맛디깅**(사용자 결정): 코드 속 표기(아침 스토리·영수증 카드·DM 문구·persona·공개 페이지 `BRAND`) 일괄 교체. 인스타 프로필 이름·소개는 에이전트 `growth.rename_profile`이 '먹짱'만 '맛디깅'으로 바꿔 1회 반영(거부되면 매일 재시도, 원래 값은 `private_log` `profile:backup-before-rename`). ⚠️ 이름 변경 14일 2회 제한.
 - **2026-10-27 아이디 @tourist_710 → @matdigging**(사용자 결정, 후보 순서 matdigging → mat.digging → matdigging.kr): 에이전트 `growth.rename_handle`이 프로필 이름 변경 다음 날 이후 시도. 성공하면 `config.ig_handle`에 쓰고 `.env` IG_USERNAME도 고친다. **아이디는 하드코딩하지 말 것** — 표지·카드·스레드·공개 페이지가 모두 `config.ig_handle`을 읽는다(JS `HANDLE`/`igHandle()`, Python `common.ig_handle()`). **2026-10-28 사용자가 인스타·스레드 아이디를 앱에서 직접 matdigging으로 바꿈** — 기본값도 matdigging, 에이전트는 다음 실행 때 config·.env만 맞춘다.
 - **2026-10-28 프로필 사진 = 캐릭터 "맛디"**(갈색 두더지가 빨간 국그릇에서 쏙, 숟가락 더듬이·하트 코 — 디그다 모티브지만 귀·주둥이·손·하트 코로 다른 캐릭터. 포켓몬 캐릭터 자체는 저작권·상표 때문에 쓰지 않는다). 원본 `assets/profile/matdigging.jpg`, 에이전트 `growth.set_profile_picture`가 파일 해시당 1회 적용(바꾸려면 파일만 교체해 커밋). 스레드는 API가 없어 사용자가 직접.
+- **2026-10-28 프로필 링크 = 맛디 지도**(`https://insta-spot-bot.vercel.app/m`): 에이전트 `growth.set_profile_link`가 URL당 1회 `account_edit(external_url)`(원래 값 `private_log` `profile:link-before`). 도메인을 바꾸면 `PROFILE_LINK`만 고치면 다시 적용된다. 스레드 링크는 사용자가 직접.
 - 차단 신호(Challenge·PleaseWait·Feedback 등)를 받으면 6~24시간 비공식 호출을 전부 멈춘다. 상태는 DB `private_log` 테이블(`agent:alive`, `agent:paused`, `pp:<content_id>`, `likes:<날짜>`).
 
 ### ▶ 2026-10-27 AI 검색 노출용 공개 맛집 페이지 (GEO)
