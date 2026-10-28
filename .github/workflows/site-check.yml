@@ -1,0 +1,27 @@
+name: 배포 사이트 점검 (site-check 브랜치 전용)
+
+# 클라우드 세션이 vercel.app에 접속할 수 없어, 러너에서 실제 사이트를 열어 스크린샷·응답을 이 브랜치에 커밋한다.
+on:
+  push:
+    branches: [site-check]
+    paths: [".github/workflows/site-check.yml", "site-check/run.mjs"]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i --no-save playwright@1.48.2 && npx playwright install --with-deps chromium
+      - run: node site-check/run.mjs
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add site-check/out
+          git commit -m "site-check 결과 [skip ci]" && git push
