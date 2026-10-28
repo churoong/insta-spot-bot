@@ -324,6 +324,33 @@ ${legend}
 </svg>`;
 }
 
+// ---------- 후속편 ----------
+// 통계청 시도 코드 → 관광공사 areaCode
+const TOUR_AREA = { 11: 1, 21: 6, 22: 4, 23: 2, 24: 5, 25: 3, 26: 7, 29: 8, 31: 31, 32: 32, 33: 33, 34: 34, 35: 37, 36: 38, 37: 35, 38: 36, 39: 39 };
+
+/** 시도 × 종류 중 전국 비율 대비 가장 도드라진 조합(그 종류 가게 10곳 이상, 시도 합계 30곳 이상) → 모음집 테마 */
+function followupTheme(bySido, national) {
+  const N = Object.values(national).reduce((a, b) => a + b, 0) || 1;
+  let best = null;
+  for (const [sc, c] of Object.entries(bySido)) {
+    const n = Object.values(c).reduce((a, b) => a + b, 0);
+    if (n < 30 || !TOUR_AREA[sc]) continue;
+    for (const t of TYPES) {
+      const k = c[t.key] || 0;
+      if (k < 10) continue;
+      const lq = (k / n) / ((national[t.key] || 1) / N);
+      if (!best || lq > best.lq) best = { sc, type: t.key, lq };
+    }
+  }
+  if (!best) return null;
+  const region = SIDO_SHORT[best.sc];
+  return {
+    key: `bf-${SKEY}-${best.sc}`, food: best.type, keyword: best.type, region, areaCodes: [TOUR_AREA[best.sc]],
+    count: 6, emoji: S.emoji, fixedTop: `${S.food} 국경선이 고른`,
+    tags: [best.type, `${best.type}맛집`, `${region}맛집`],
+  };
+}
+
 // ---------- 발행 ----------
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -492,6 +519,17 @@ async function main() {
     await db.execute({ sql: "UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?", args: [mediaId, cid] });
     console.log(`✅ ${S.food} 국경선 릴스 발행:`, mediaId);
     if (cfgDb) await cfgDb.execute({ sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('border_idx', ?, datetime('now'))", args: [String(idx + 1)] });
+    // 다음 날 저녁 모음집 = 이 지도가 가장 도드라지게 칠한 시도·음식의 맛집 편(2026-10-28 사용자 결정)
+    try {
+      const nx = followupTheme(bySido, national);
+      if (nx) {
+        const tomorrow = new Date(Date.now() + 9 * 3600e3 + 86400e3).toISOString().slice(0, 10);
+        await db.execute({ sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('next_roundup_theme', ?, datetime('now'))", args: [JSON.stringify({ date: tomorrow, theme: nx })] });
+        console.log(`🔗 내일 모음집 예약: ${nx.region} ${nx.food}`);
+      }
+    } catch (e) {
+      console.error("후속편 예약 실패(무시):", String(e).slice(0, 150));
+    }
     try {
       const tags = S.comment;
       console.log("💬 첫 댓글(해시태그):", await commentOnMedia(mediaId, tags));

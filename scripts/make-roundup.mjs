@@ -2116,7 +2116,8 @@ function buildPunchyTitle(theme, n) {
   const regional = r !== "전국";
   const pool = regional ? tops.filter((t) => !t.includes(r)) : tops;
   // 가격형 테마는 가격 조건이 곧 수식어("1만 원 이하") — 착한가격업소로 확인된 사실만 쓴다.
-  const top = theme.maxPrice
+  const top = theme.fixedTop ? theme.fixedTop // 국경선 후속편(2026-10-28) — "국밥 국경선이 고른"
+    : theme.maxPrice
     ? `${theme.maxPrice % 10000 === 0 ? theme.maxPrice / 10000 + "만" : theme.maxPrice.toLocaleString()} 원 이하`
     : theme.tvTop ? "방송에 나온"
     : theme.nopoTop ? "오래된 노포"
@@ -2804,6 +2805,21 @@ async function main() {
     ? weightedOrder(all, perf.weights, perf.recent)
     : all.map((_, i) => all[(idx + i) % all.length]);
   if (perf?.recent.length) console.log("직전 테마 제외:", perf.recent.join(", "));
+  // 국경선 후속편(2026-10-28 사용자 결정): 국경선 편이 "오늘 이 지역·이 음식"을 예약해 두면 맨 앞에서 시도한다.
+  // 수집이 모자라면 평소 순서로 넘어간다. 한 번 읽으면 지운다(실패해도 다음 날로 넘기지 않음).
+  if (!process.env.ROUNDUP_STYLE && !process.env.ROUNDUP_THEME) {
+    try {
+      const row = (await db.execute("SELECT value FROM config WHERE key = 'next_roundup_theme'")).rows[0];
+      const nx = row ? JSON.parse(String(row.value)) : null;
+      if (nx?.date === new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10) && nx.theme?.key) {
+        ordered.unshift(nx.theme);
+        console.log("국경선 후속편 먼저 시도:", nx.theme.key, `(${nx.theme.region} ${nx.theme.food})`);
+        if (!DRY) await db.execute("DELETE FROM config WHERE key = 'next_roundup_theme'");
+      }
+    } catch (e) {
+      console.error("후속편 예약 읽기 실패(무시):", String(e).slice(0, 120));
+    }
+  }
   console.log("테마 시도 순서:", ordered.slice(0, 3).map((t) => t.key).join(" → "));
 
   let theme = null, places = [];
