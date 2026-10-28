@@ -2597,12 +2597,25 @@ function engagementLine(theme, count) {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
+/** private/growth.py _norm과 같은 규칙 — igacct 캐시 키를 맞춘다 */
+const igNorm = (s) => String(s ?? "").toLowerCase().replace(/[\s()·.\-_&]|본점|지점|점$|official|kr$/g, "");
+
+async function attachIgHandles(top) {
+  for (const p of top) {
+    try {
+      const r = await db.execute({ sql: "SELECT value FROM private_log WHERE key = ?", args: [`igacct:${igNorm(p.name)}:${p.region ?? ""}`] });
+      const u = JSON.parse(String(r.rows[0]?.value ?? "{}")).username;
+      if (u && /^[A-Za-z0-9._]{1,30}$/.test(u)) { p.ig = u; console.log(`🏷 @멘션: ${p.name} → @${u}`); }
+    } catch { /* 캐시 없음 — 멘션 없이 */ }
+  }
+}
+
 function buildCaption(theme, places, descending = false, ep = null) {
   // 공개형 — "어디야→DM" 유도 문구 없음. 참여(추천 댓글)·저장 유도만.
   // descending: 카운트다운 영상과 같은 순서(N위 → 1위)로 번호를 매긴다.
   const lines = places.map((p, i) => {
     const num = descending ? places.length - i : i + 1;
-    return `${num}. ${p.name}${p.hundred ? " 🏅" : ""} (${p.region})
+    return `${num}. ${p.name}${p.ig ? ` @${p.ig}` : ""}${p.hundred ? " 🏅" : ""} (${p.region})
    ${p.detail || p.desc}`;
   });
   const hundredCount = places.filter((p) => p.hundred).length;
@@ -3061,6 +3074,10 @@ async function main() {
     );
     ep = Number(c.rows[0]?.n ?? 0) + 1;
   } catch { /* 실패해도 EP 없이 진행 */ }
+
+  // 1~3위 식당 계정 @멘션(2026-10-28 사용자 결정) — 노트북 에이전트가 찾아 둔 계정(private_log igacct:)만.
+  // 확신 있게 찾은 곳만 캐시에 있다(이름·지역 일치). 없는 곳은 에이전트가 사후 처리 때 캡션을 고쳐 붙인다.
+  await attachIgHandles(places.slice(0, 3));
 
   // ⚠️ 캡션은 순위가 확정된 뒤에 만든다(정렬 전에 만들면 번호가 영상과 어긋남).
   //    카운트다운은 영상과 같은 순서로 N위 → 1위 내림차순 표기.

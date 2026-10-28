@@ -203,6 +203,7 @@ def handle_handoffs():
                 try:
                     tags = growth.usertags_for(c, p.get("places", []))
                     log.info(f"🏷 식당 태그 {len(tags)}곳")
+                    caption = growth.add_mentions(c, caption, p.get("places", []))  # 1~3위 @멘션
                 except Exception as e:
                     if is_block(e):
                         raise
@@ -307,10 +308,16 @@ def postprocess_recent():
             except Exception as e:
                 if is_block(e):
                     raise
-            if (loc and not info.location) or tags:
+            new_cap = info.caption_text
+            try:
+                new_cap = growth.add_mentions(c, info.caption_text or "", places)  # 발행 때 캐시에 없던 1~3위 계정 @멘션
+            except Exception as e:
+                if is_block(e):
+                    raise
+            if (loc and not info.location) or tags or new_cap != info.caption_text:
                 nap(5, 15)
-                c.media_edit(info.id, info.caption_text, usertags=tags, location=loc if loc else info.location)
-                log.info(f"📍 위치·식당 태그 {cid}: {loc.name if loc else '-'} / {len(tags)}곳")
+                c.media_edit(info.id, new_cap, usertags=tags, location=loc if loc else info.location)
+                log.info(f"📍 위치·식당 태그·멘션 {cid}: {loc.name if loc else '-'} / 태그 {len(tags)}곳 / 멘션 {new_cap.count('@') - (info.caption_text or '').count('@')}")
             # 첫 댓글(해시태그만)은 공식 경로면 GitHub가 발행 직후 이미 달았다. 우리 해시태그 댓글이 없을 때만 단다.
             nap(5, 15)
             mine = [cm for cm in c.media_comments(info.id, amount=30) if str(cm.user.pk) == str(c.user_id) and (cm.text or "").startswith("#")]
