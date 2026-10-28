@@ -1,0 +1,49 @@
+name: 스레드 동네 질문 글
+
+# 2026-10-28 사용자 결정(계정 노출): 매일 저녁 "○○구 사시는 분들, 단골 ○○집 어디세요?" 한 편.
+# 팔로워 접속 최다 KST 20~22시(10/27 실측)에 맞춰 20:30 출발, 게이트는 19:30~23:30 도착분만. 하루 1회 가드는 스크립트.
+on:
+  schedule:
+    - cron: "30 11 * * *" # UTC 11:30 = KST 20:30
+    - cron: "30 12 * * *" # 폴백
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "올리지 않고 문구만 로그로"
+        type: boolean
+        default: true
+
+concurrency:
+  group: threads-question
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 시간 창 게이트 (KST 19:30~23:30, 수동 실행은 통과)
+        id: gate
+        run: |
+          T=$((10#$(TZ=Asia/Seoul date +%H%M)))
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$T" -ge 1930 ] && [ "$T" -lt 2330 ]; }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "시간 창 밖(KST $T) — 스킵"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
+        run: npm ci
+      - name: 질문 글 발행
+        if: steps.gate.outputs.go == '1'
+        run: npx tsx scripts/threads-question.mjs
+        env:
+          THREADS_Q_DRY: ${{ inputs.dry && '1' || '' }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

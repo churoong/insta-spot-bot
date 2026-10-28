@@ -84,6 +84,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 
 ### ▶ 2026-10-28 계정 노출
 - **스레드 추천 답글**(`scripts/threads-replies.mjs`, `threads-replies.yml` 3시간마다): 공식 Threads API 키워드 검색 → 지역이 적힌 "맛집 추천" 글에 그 지역 소개 맛집 2~3곳 + 맛디 지도 링크 답글. 하루 8, 같은 사람 7일 1회, 지역 못 찾으면 안 단다. 기록 `threads_replies` 테이블. 권한 `threads_keyword_search`·`threads_manage_replies` — 메타 앱에서 켜고 `/api/threads/connect` 재연결 필요. 고급 접근 승인 전엔 검색 결과가 제한될 수 있다.
+- **스레드 동네 질문 글**(`scripts/threads-question.mjs`, `threads-question.yml` 매일 KST 20:30, 창 19:30~23:30): 소개 맛집 2곳+ 시군구 하나를 골라(30일 재사용 금지 `config.threads_q_used`, 하루 1회 `threads_q_day`) "○○구 사시는 분들, 단골 ○○집 어디세요?" + 우리가 소개한 두 곳 이름, 토픽 태그 `<시도>맛집`, 링크 없음. 발행 권한만 써서 검수 불필요.
 - **검색엔진**: 루트 레이아웃이 Vercel 환경변수 `NAVER_SITE_VERIFICATION`·`GOOGLE_SITE_VERIFICATION`을 메타 태그로 낸다. `/rss.xml`(최근 30편) — 네이버 서치어드바이저에 사이트맵과 함께 제출.
 - 인스타 "검색 엔진에 게시물 표시" 설정은 사용자가 앱에서 켠다(프로페셔널 계정).
 
