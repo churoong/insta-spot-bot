@@ -1,5 +1,6 @@
 /**
- * "대한민국 국밥 국경선" 지도 릴스(2026-10-27 사용자 결정).
+ * "대한민국 ○○ 국경선" 지도 릴스(2026-10-27 국밥 → 2026-10-28 연재: 국밥·냉면·칼국수·순대).
+ * 시리즈는 SERIES — 일요일 예약 실행은 config.border_idx 순서로 하나씩, 수동은 BORDER_SERIES=키.
  *
  * 시군구마다 국밥 다섯 종류(돼지국밥·순대국·해장국·콩나물국밥·소머리국밥) 가게 수를 카카오 로컬로 세고,
  * 전국 평균보다 유난히 많은 국밥(특화 지수)으로 지도를 칠해 8초 릴스로 올린다. 사진이 필요 없어
@@ -22,20 +23,65 @@ const OFFLINE = process.env.BORDER_OFFLINE === "1";
 const DRY = OFFLINE || process.env.BORDER_DRY === "1";
 const REBUILD = process.env.BORDER_REBUILD === "1";
 const KAKAO = process.env.KAKAO_REST_KEY;
-const CACHE = "data/border-gukbap.json";
 const W = 1080, H = 1920;
 const RED = "#e02020";
 const BG = "#f6f1e7";
 const FONT = "'Pretendard','Noto Sans CJK KR',sans-serif";
 const TFONT = "'Gmarket Sans','Pretendard','Noto Sans CJK KR',sans-serif";
 
-const TYPES = [
-  { key: "돼지국밥", queries: ["돼지국밥"], re: /돼지\s?(수육)?국밥/, color: "#e02020" },
-  { key: "순대국", queries: ["순대국", "순댓국"], re: /순대\s?국|순댓국/, color: "#2f5da8" },
-  { key: "해장국", queries: ["해장국"], re: /해장국/, color: "#e9a23b" },
-  { key: "콩나물국밥", queries: ["콩나물국밥"], re: /콩나물/, color: "#4e9a5a" },
-  { key: "소머리국밥", queries: ["소머리국밥"], re: /소머리/, color: "#7a4e3a" },
-];
+const SERIES = {
+  gukbap: {
+    food: "국밥", minTotal: 8, emoji: "🍲", topic: "국밥맛집",
+    tags: "#국밥 #국밥맛집 #돼지국밥 #순대국 #전국맛집", comment: "#국밥지도 #해장국 #콩나물국밥 #소머리국밥 #국밥러버",
+    types: [
+      { key: "돼지국밥", queries: ["돼지국밥"], re: /돼지\s?(수육)?국밥/, color: "#e02020" },
+      { key: "순대국", queries: ["순대국", "순댓국"], re: /순대\s?국|순댓국/, color: "#2f5da8" },
+      { key: "해장국", queries: ["해장국"], re: /해장국/, color: "#e9a23b" },
+      { key: "콩나물국밥", queries: ["콩나물국밥"], re: /콩나물/, color: "#4e9a5a" },
+      { key: "소머리국밥", queries: ["소머리국밥"], re: /소머리/, color: "#7a4e3a" },
+    ],
+  },
+  naengmyeon: {
+    food: "냉면", minTotal: 4, emoji: "🍜", topic: "냉면맛집",
+    tags: "#냉면 #냉면맛집 #평양냉면 #밀면 #전국맛집", comment: "#냉면지도 #함흥냉면 #막국수 #칡냉면 #면스타그램",
+    types: [
+      { key: "평양냉면", queries: ["평양냉면"], re: /평양냉면|면옥/, color: "#2f5da8" },
+      { key: "함흥냉면", queries: ["함흥냉면"], re: /함흥/, color: "#e02020" },
+      { key: "밀면", queries: ["밀면"], re: /밀면/, color: "#e9a23b" },
+      { key: "막국수", queries: ["막국수"], re: /막국수/, color: "#4e9a5a" },
+      { key: "칡냉면", queries: ["칡냉면"], re: /칡냉면/, color: "#7a4e3a" },
+    ],
+  },
+  kalguksu: {
+    food: "칼국수", minTotal: 4, emoji: "🍜", topic: "칼국수맛집",
+    tags: "#칼국수 #칼국수맛집 #바지락칼국수 #장칼국수 #전국맛집", comment: "#칼국수지도 #닭칼국수 #팥칼국수 #들깨칼국수 #면스타그램",
+    types: [
+      { key: "바지락칼국수", queries: ["바지락칼국수"], re: /바지락/, color: "#2f5da8" },
+      { key: "장칼국수", queries: ["장칼국수"], re: /장칼국수/, color: "#e02020" },
+      { key: "닭칼국수", queries: ["닭칼국수"], re: /닭칼국수/, color: "#e9a23b" },
+      { key: "팥칼국수", queries: ["팥칼국수"], re: /팥칼국수/, color: "#7a4e3a" },
+      { key: "들깨칼국수", queries: ["들깨칼국수"], re: /들깨/, color: "#4e9a5a" },
+    ],
+  },
+  sundae: {
+    food: "순대", minTotal: 4, emoji: "🥢", topic: "순대맛집",
+    tags: "#순대 #순대맛집 #피순대 #병천순대 #전국맛집", comment: "#순대지도 #아바이순대 #찹쌀순대 #막창순대 #순대국",
+    types: [
+      { key: "피순대", queries: ["피순대"], re: /피순대/, color: "#e02020" },
+      { key: "아바이순대", queries: ["아바이순대"], re: /아바이/, color: "#2f5da8" },
+      { key: "병천순대", queries: ["병천순대"], re: /병천/, color: "#e9a23b" },
+      { key: "찹쌀순대", queries: ["찹쌀순대"], re: /찹쌀순대/, color: "#4e9a5a" },
+      { key: "막창순대", queries: ["막창순대"], re: /막창순대/, color: "#7a4e3a" },
+    ],
+  },
+};
+const SERIES_ORDER = ["gukbap", "naengmyeon", "kalguksu", "sundae"];
+// 함수들이 실행 시점에 읽는 현재 시리즈 — main()이 useSeries로 정한다
+let SKEY, S, TYPES, CACHE;
+function useSeries(k) {
+  if (!SERIES[k]) throw new Error("알 수 없는 시리즈: " + k);
+  SKEY = k; S = SERIES[k]; TYPES = S.types; CACHE = `data/border-${k}.json`;
+}
 const SIDO_SHORT = {
   11: "서울", 21: "부산", 22: "대구", 23: "인천", 24: "광주", 25: "대전", 26: "울산", 29: "세종", 31: "경기",
   32: "강원", 33: "충북", 34: "충남", 35: "전북", 36: "전남", 37: "경북", 38: "경남", 39: "제주",
@@ -168,7 +214,7 @@ async function loadCounts() {
     }
   }
   if (!KAKAO) throw new Error("KAKAO_REST_KEY 없음 — 집계 불가(시안은 BORDER_OFFLINE=1)");
-  console.log(`카카오 집계 시작: 시군구 ${muni.length} × 국밥 ${TYPES.length}`);
+  console.log(`카카오 집계 시작(${S.food}): 시군구 ${muni.length} × ${TYPES.length}종`);
   const c = { builtAt: new Date().toISOString(), source: "kakao", counts: await buildKakao() };
   const total = Object.values(c.counts).reduce((a, v) => a + Object.values(v).reduce((x, y) => x + y, 0), 0);
   if (total < 300) throw new Error(`집계가 너무 적다(${total}) — 카카오 응답 이상, 캐시하지 않음`);
@@ -263,15 +309,15 @@ function renderSvg(muniWin, sidoWin, total, source) {
     return s;
   }).join("");
   const note = source === "kakao"
-    ? `카카오맵 상호에 국밥 이름이 든 가게 ${total.toLocaleString("ko-KR")}곳 · 전국 평균보다 유난히 많은 국밥`
-    : `시안 · 착한가격업소 국밥집 ${total}곳 기준`;
+    ? `카카오맵 상호에 ${S.food} 이름이 든 가게 ${total.toLocaleString("ko-KR")}곳 · 전국 평균보다 유난히 많은 ${S.food}`
+    : `시안 · 착한가격업소 ${S.food}집 ${total}곳 기준`;
 
   return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
 <rect width="${W}" height="${H}" fill="${BG}"/>
 ${fills}${borders}${labelSvg}
 <text x="80" y="210" font-family="${TFONT}" font-weight="700" font-size="64" fill="#111">대한민국</text>
-<text x="80" y="335" font-family="${TFONT}" font-weight="700" font-size="118" fill="${RED}">국밥 국경선</text>
-<text x="84" y="415" font-family="${FONT}" font-weight="700" font-size="44" fill="#222">우리 동네는 무슨 국밥파?</text>
+<text x="80" y="335" font-family="${TFONT}" font-weight="700" font-size="${Math.min(118, Math.floor(880 / ([...S.food].length + 4)))}" fill="${RED}">${S.food} 국경선</text>
+<text x="84" y="415" font-family="${FONT}" font-weight="700" font-size="44" fill="#222">우리 동네는 무슨 ${S.food}파?</text>
 ${legend}
 <text x="80" y="1790" font-family="${FONT}" font-size="26" fill="#777">${esc(note)}</text>
 <text x="80" y="1834" font-family="${FONT}" font-weight="600" font-size="28" fill="#999">@${HANDLE}</text>
@@ -325,21 +371,41 @@ function buildCaption(sidoWin, bgm) {
     .filter(([c]) => sidoWin[c])
     .map(([c, s]) => `${s} · ${sidoWin[c]}`);
   return [
-    "대한민국 국밥 국경선 🗺",
-    "우리 동네는 무슨 국밥파?",
+    `대한민국 ${S.food} 국경선 🗺`,
+    `우리 동네는 무슨 ${S.food}파?`,
     "",
     ...lines,
     "",
-    "여러분 동네는 어느 국밥 쪽이에요? 댓글로 알려주세요 🍲",
-    "📤 국밥 친구에게 보내서 서로 동네 국밥 확인해 보기",
+    `여러분 동네는 어느 ${S.food} 쪽이에요? 댓글로 알려주세요 ${S.emoji}`,
+    `📤 ${S.food} 친구에게 보내서 서로 동네 ${S.food} 확인해 보기`,
     "",
-    "#국밥 #국밥맛집 #돼지국밥 #순대국 #전국맛집",
+    S.tags,
     ...(bgm ? ["", bgm.attribution] : []),
   ].join("\n");
 }
 
 async function main() {
-  const data = await loadCounts();
+  // 시리즈: BORDER_SERIES > (발행 시) config.border_idx 순서 > 국밥
+  let idx = null, cfgDb = null;
+  if (!process.env.BORDER_SERIES && !OFFLINE && process.env.TURSO_DATABASE_URL) {
+    const { createClient } = await import("@libsql/client");
+    cfgDb = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+    // 국밥은 10/28에 이미 나갔다 — 기록이 없으면 냉면(1)부터
+    idx = Number((await cfgDb.execute("SELECT value FROM config WHERE key = 'border_idx'")).rows[0]?.value ?? 1) || 0;
+  }
+  useSeries(process.env.BORDER_SERIES || (idx !== null ? SERIES_ORDER[idx % SERIES_ORDER.length] : "gukbap"));
+  console.log(`시리즈: ${S.food} 국경선 (${SKEY})`);
+  let data;
+  try {
+    data = await loadCounts();
+  } catch (e) {
+    // 집계가 안 되는 시리즈(가게가 너무 적음)에 연재가 영원히 걸리지 않게 다음 순서로 넘긴다
+    if (cfgDb && String(e).includes("너무 적다")) {
+      await cfgDb.execute({ sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('border_idx', ?, datetime('now'))", args: [String(idx + 1)] });
+      console.log("이 시리즈는 건너뛰고 다음 순서로:", SERIES_ORDER[(idx + 1) % SERIES_ORDER.length]);
+    }
+    throw e;
+  }
   const counts = data.counts;
   const national = {}, bySido = {};
   for (const [code, c] of Object.entries(counts)) {
@@ -350,7 +416,7 @@ async function main() {
   }
   const total = Object.values(national).reduce((a, b) => a + b, 0);
   const winner = makeWinner(national);
-  const muniWin = Object.fromEntries(muni.map((f) => [f.properties.code, winner(counts[f.properties.code], data.source === "kakao" ? 8 : 2)]));
+  const muniWin = Object.fromEntries(muni.map((f) => [f.properties.code, winner(counts[f.properties.code], data.source === "kakao" ? S.minTotal : 2)]));
   const sidoWin = Object.fromEntries(Object.entries(bySido).map(([s, c]) => [s, winner(c, 3)]));
   console.log("전국:", national, "합계", total);
   console.log("시도 1위:", Object.entries(sidoWin).map(([s, w]) => `${SIDO_SHORT[s]}=${w}`).join(" "));
@@ -361,6 +427,21 @@ async function main() {
       const c = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
       HANDLE = String((await c.execute("SELECT value FROM config WHERE key = 'ig_handle'")).rows[0]?.value || HANDLE);
     } catch { /* 기본값 */ }
+  }
+  // 맛디 지도 웹페이지(/m)의 국경선 층 — 커밋돼 Vercel 정적 파일로 나간다
+  if (!OFFLINE) {
+    fs.mkdirSync("public/border", { recursive: true });
+    fs.writeFileSync(`public/border/${SKEY}.json`, JSON.stringify({
+      key: SKEY, food: S.food, total, builtAt: data.builtAt,
+      types: TYPES.map((t) => ({ key: t.key, color: t.color })),
+      winners: Object.fromEntries(Object.entries(muniWin).filter(([, w]) => w)),
+      sido: sidoWin,
+    }));
+    const idxFile = "public/border/index.json";
+    const list = fs.existsSync(idxFile) ? JSON.parse(fs.readFileSync(idxFile, "utf8")) : [];
+    const next = [...list.filter((x) => x.key !== SKEY), { key: SKEY, food: S.food }]
+      .sort((a, b) => SERIES_ORDER.indexOf(a.key) - SERIES_ORDER.indexOf(b.key));
+    fs.writeFileSync(idxFile, JSON.stringify(next));
   }
   const svg = renderSvg(muniWin, sidoWin, total, data.source);
   const jpg = "border-preview.jpg";
@@ -378,14 +459,14 @@ async function main() {
 
   const { createClient } = await import("@libsql/client");
   const db = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
-  const cid = `border-gukbap-${kstDate()}`;
+  const cid = `border-${SKEY}-${kstDate()}`;
   const dup = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id = ? AND status IN ('published','publishing')", args: [cid] });
   if (dup.rows.length) return console.log("오늘 이미 발행 — 스킵:", cid);
   await db.execute({ sql: "DELETE FROM posts WHERE content_id = ? AND status = 'failed'", args: [cid] });
   await db.execute({
     sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, caption, status, reel_format)
-          VALUES (?, '대한민국 국밥 국경선', ?, '지도', NULL, ?, 'publishing', 'map8')`,
-    args: [cid, Object.entries(sidoWin).map(([s, w]) => `${SIDO_SHORT[s]} ${w ?? "-"}`).join("\n"), caption],
+          VALUES (?, ?, ?, '지도', NULL, ?, 'publishing', 'map8')`,
+    args: [cid, `대한민국 ${S.food} 국경선`, Object.entries(sidoWin).map(([s, w]) => `${SIDO_SHORT[s]} ${w ?? "-"}`).join("\n"), caption],
   });
   try {
     // 표지 8초 단일컷 — 모음집 grid8과 같은 구성(모션 없음). "-t"는 출력 옵션(입력 위치면 BGM 루프와 엉킨다)
@@ -409,9 +490,10 @@ async function main() {
     }
     const mediaId = await publishReelSmart(videoUrl, caption, null);
     await db.execute({ sql: "UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?", args: [mediaId, cid] });
-    console.log("✅ 국밥 국경선 릴스 발행:", mediaId);
+    console.log(`✅ ${S.food} 국경선 릴스 발행:`, mediaId);
+    if (cfgDb) await cfgDb.execute({ sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('border_idx', ?, datetime('now'))", args: [String(idx + 1)] });
     try {
-      const tags = "#국밥지도 #해장국 #콩나물국밥 #소머리국밥 #국밥러버";
+      const tags = S.comment;
       console.log("💬 첫 댓글(해시태그):", await commentOnMedia(mediaId, tags));
     } catch (e) {
       console.error("첫 댓글 실패(무시):", String(e).slice(0, 150));
@@ -423,8 +505,8 @@ async function main() {
     }
     try {
       const { publishThreads } = await import("../lib/threads.ts");
-      const text = `대한민국 국밥 국경선\n\n${Object.entries(SIDO_SHORT).filter(([c]) => sidoWin[c]).map(([c, s]) => `${s} · ${sidoWin[c]}`).join("\n")}\n\n여러분 동네는 어느 국밥 쪽이에요?\n지도는 인스타 @${HANDLE}`;
-      const id = await publishThreads({ text, videoUrl, topicTag: "국밥맛집" });
+      const text = `대한민국 ${S.food} 국경선\n\n${Object.entries(SIDO_SHORT).filter(([c]) => sidoWin[c]).map(([c, s]) => `${s} · ${sidoWin[c]}`).join("\n")}\n\n여러분 동네는 어느 ${S.food} 쪽이에요?\n지도는 인스타 @${HANDLE}`;
+      const id = await publishThreads({ text, videoUrl, topicTag: S.topic });
       if (id) {
         await db.execute({ sql: "UPDATE posts SET threads_id = ? WHERE content_id = ?", args: [id, cid] });
         console.log("🧵 스레드 동시 발행:", id);

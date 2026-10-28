@@ -1,12 +1,21 @@
-name: 국밥 국경선 지도 릴스
+name: 국경선 지도 릴스 (일요일 연재)
 
 # 2026-10-27 사용자 결정: 시군구별 국밥 종류(카카오 로컬 집계)로 칠한 "대한민국 국밥 국경선" 지도 릴스.
-# 수동 실행 전용 — 정기 슬롯에 넣지 않았다(발행 요일을 바꾸면 CLAUDE.md의 네 곳을 같이 고쳐야 한다).
-# 기본은 dry(발행 없이 집계 + 지도 렌더 → 아티팩트). 실제 발행은 dry 체크를 끄고 실행.
+# 2026-10-28 연재: 매주 일요일 12시 전후 국밥 → 냉면 → 칼국수 → 순대 순서(config.border_idx).
+# 요일을 바꾸면 CLAUDE.md의 네 곳(이 크론·게이트, vercel.json, publish-check, 표)을 같이 고칠 것.
+# 수동 실행 기본은 dry(발행 없이 집계 + 지도 렌더 → 아티팩트). 특정 시리즈는 series 입력.
 # 카카오 로컬만 쓰고 관광공사 API는 안 쓰므로 발행과 한도를 나누지 않는다.
 on:
+  schedule:
+    # Vercel 크론(일 11:30 KST)이 주 경로, 이건 폴백 — 게이트가 일요일 11:00~18:00 도착분만 통과
+    - cron: "30 2 * * 0" # UTC 일 02:30 = KST 일 11:30
+    - cron: "30 4 * * 0"
   workflow_dispatch:
     inputs:
+      series:
+        description: "시리즈 키(gukbap·naengmyeon·kalguksu·sundae) — 비우면 연재 순서"
+        type: string
+        default: ""
       dry:
         description: "발행 없이 집계·지도만 (아티팩트 border-preview)"
         type: boolean
@@ -26,24 +35,39 @@ concurrency:
 jobs:
   border:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 100 # 새 시리즈는 카카오 집계(칸 쪼개기)가 1시간 안팎
     steps:
+      - name: 발행 창 게이트 (일요일 KST 11:00~18:00, 수동 실행은 통과)
+        id: gate
+        run: |
+          D=$(TZ=Asia/Seoul date +%u); H=$((10#$(TZ=Asia/Seoul date +%H)))
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$D" = 7 ] && [ "$H" -ge 11 ] && [ "$H" -lt 18 ]; }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "발행 창 밖 — 스킵"
+          fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
       - name: 폰트·ffmpeg 설치
+        if: steps.gate.outputs.go == '1'
         run: |
           # 2026-10-27: apt-get update가 40분 넘게 멈춰 런이 취소됐다 — 이미 있으면 건너뛰고, 설치는 5분 제한
           command -v ffmpeg >/dev/null || timeout 300 sudo apt-get install -y --no-install-recommends ffmpeg \
             || { timeout 300 sudo apt-get update && timeout 300 sudo apt-get install -y --no-install-recommends ffmpeg; }
           mkdir -p ~/.fonts && cp assets/fonts/*.otf ~/.fonts/ && fc-cache -f > /dev/null
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
         with:
           node-version: 22
       - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
         run: npm ci
       - name: 집계·렌더·발행
+        if: steps.gate.outputs.go == '1'
         run: npx tsx scripts/make-border.mjs
         env:
           BORDER_DRY: ${{ inputs.dry && '1' || '' }}
+          BORDER_SERIES: ${{ inputs.series }}
           BORDER_REBUILD: ${{ inputs.rebuild && '1' || '' }}
           KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
@@ -58,8 +82,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/border-gukbap.json 2>/dev/null || true
-          git diff --cached --quiet || { git commit -m "국밥 국경선 집계 갱신 ($(date +%Y-%m-%d))" && git pull --rebase -q && git push; }
+          git add data/border-*.json public/border 2>/dev/null || true
+          git diff --cached --quiet || { git commit -m "국경선 집계 갱신 ($(date +%Y-%m-%d))" && git pull --rebase -q && git push; }
       - name: 미리보기 업로드
         if: always()
         uses: actions/upload-artifact@v4

@@ -24,6 +24,7 @@ const EXPECTED = [
   { key: "roundup", prefix: "roundup-", label: "모음집", dows: [0, 1, 2, 3, 4, 5, 6], workflow: "roundup.yml" },
   { key: "countdown", prefix: "countdown-", label: "큐레이션", dows: [1, 3, 5, 6], workflow: "countdown.yml" }, // 2026-10-22 수·토 캐러셀 슬롯 흡수
   { key: "carousel", prefix: "carousel-", label: "캐러셀", dows: [], workflow: "carousel.yml" }, // 2026-10-22 예약 발행 중단(수동만)
+  { key: "border", prefix: "border-", label: "국경선 지도", dows: [0], workflow: "border.yml" }, // 2026-10-28 일요일 연재
 ];
 
 // 마지막 발행 창(모음집 17:30~22:00 KST)이 닫힌 뒤에야 그날을 판정한다.
