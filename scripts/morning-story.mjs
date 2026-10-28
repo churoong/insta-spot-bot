@@ -22,7 +22,7 @@ const FONT = "'Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
 const TFONT = "'Gmarket Sans','Pretendard','Noto Sans CJK KR','Malgun Gothic',sans-serif";
 
 const db = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
-let HANDLE = "tourist_710"; // main()이 config.ig_handle로 덮는다
+let HANDLE = "matdigging"; // main()이 config.ig_handle로 덮는다
 const kstDate = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 
 async function cfg(key) {

@@ -11,7 +11,7 @@ export const BRAND_SUBJ = (() => {
   return BRAND + (c >= 0 && c < 11172 && c % 28 ? "이" : "가");
 })();
 /** 인스타 아이디 — 에이전트가 바꾸면 config.ig_handle(2026-10-27 맛디깅 개명). 페이지는 igHandle()로 읽는다. */
-export const DEFAULT_HANDLE = "tourist_710";
+export const DEFAULT_HANDLE = "matdigging";
 export async function igHandle(): Promise<string> {
   try {
     await initDb();

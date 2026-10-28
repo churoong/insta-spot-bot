@@ -16,7 +16,7 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "roundup-"));
 const TOUR = "https://apis.data.go.kr/B551011/KorService2";
 const DRY = process.env.ROUNDUP_DRY === "1";
 // 인스타 아이디 — 에이전트가 아이디를 바꾸면 config.ig_handle에 쓴다(2026-10-27 맛디깅 개명). main()이 DB에서 다시 읽는다.
-let HANDLE = process.env.IG_HANDLE || "tourist_710";
+let HANDLE = process.env.IG_HANDLE || "matdigging";
 // 발행 '전에' 선기록한 posts 행. 발행 중 예외로 죽으면 마지막 catch가 이 행을 'failed'로
 // 바꾼다 — 안 그러면 'publishing'이 영원히 남아 대시보드엔 "게시된 것처럼" 보이고
 // 하루 1회 가드가 "오늘 이미 발행"으로 재발행까지 막는다 (2026-09-03 성수 편 실측).

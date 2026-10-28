@@ -4,7 +4,7 @@ import { threadsRedirectUri } from "@/lib/threads";
 
 /**
  * 스레드 계정 연결 시작(한 번만) — 이 주소를 열면 스레드 권한 화면으로 보낸다.
- * 앱이 검수 전이라 'Threads 테스터'로 등록된 계정(@tourist_710)만 허용할 수 있다.
+ * 앱이 검수 전이라 'Threads 테스터'로 등록된 계정(@matdigging, 옛 @tourist_710)만 허용할 수 있다.
  */
 export async function GET() {
   if (!process.env.THREADS_APP_ID || !process.env.THREADS_APP_SECRET) {
