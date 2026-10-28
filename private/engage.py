@@ -25,11 +25,11 @@ import requests
 from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
-VISITED_LIKES, VISITED_COMMENTS = 15, 5
+VISITED_LIKES, VISITED_COMMENTS = 25, 8  # 2026-10-28 확대(15·5 → 25·8)
 STORY_USERS_PER_DAY, STORY_LIKES_PER_DAY, STORY_USERS_PER_ROUND = 150, 10, 30
 WELCOME_PER_DAY = 20
 COMMENTER_DM_PER_DAY = 10
-PEER_LIKES_PER_DAY = 15
+PEER_LIKES_PER_DAY = 25  # 2026-10-28 확대(15 → 25)
 REGION_HINT = re.compile(r"([가-힣]{1,6}(?:역|동|구|시|군|읍|면|시장|거리|길))|(서울|부산|대구|인천|광주|대전|울산|세종|제주|강릉|전주|경주|여수|춘천|수원|창원|포항|원주|천안|청주)")
 BLOCK = ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")
 
@@ -641,7 +641,7 @@ def answer_where(c):
 
 # ---------- "맛집 추천해 주세요" 게시물 응답 ----------
 REQ_TAGS = ["맛집추천해주세요", "맛집추천부탁", "맛집알려주세요", "맛집추천부탁드려요", "맛집추천좀"]
-REQ_PER_DAY = 5
+REQ_PER_DAY = 8  # 2026-10-28 확대(5 → 8)
 
 
 def recommend_requests(c):
