@@ -290,15 +290,17 @@ def rename_handle(c):
     """아이디를 후보 순서대로 시도해 비어 있는 첫 번째로 바꾼다. 성공하면
     ① config.ig_handle(표지·카드·스레드·공개 페이지가 읽는 값) ② .env IG_USERNAME(다음 로그인용)을 고친다.
     프로필 이름 변경이 끝난 뒤에만 — 같은 날 계정 정보를 두 번 크게 바꾸지 않는다. 실패하면 하루 뒤 재시도."""
-    if state_get("handle:done") or not state_get(f"rename:{NEW_BRAND}") or state_get(f"rename-try:{today()}"):
-        return
-    if state_get(f"handle-try:{today()}"):
+    if state_get("handle:done") or state_get(f"handle-try:{today()}"):
         return
     state_set(f"handle-try:{today()}", "1")
+    # 사용자가 앱에서 직접 바꿨을 수 있다(2026-10-28 실제로 matdigging으로 직접 변경) — 그러면 맞추기만 한다
     me = c.account_info()
     if me.username in HANDLE_CANDIDATES:
         _handle_done(me.username)
+        log.info(f"🪪 아이디가 이미 @{me.username} — config·.env만 맞춤")
         return
+    if not state_get(f"rename:{NEW_BRAND}") or state_get(f"rename-try:{today()}"):
+        return  # 직접 바꾸는 건 프로필 이름 변경 다음 날 이후
     state_set("profile:username-before", me.username)
     for cand in HANDLE_CANDIDATES:
         try:

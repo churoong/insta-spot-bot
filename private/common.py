@@ -147,7 +147,7 @@ def ig_handle() -> str:
             return str(rows[0]["value"])
     except Exception:
         pass
-    return "tourist_710"
+    return "matdigging"
 
 
 def graph_token() -> str:

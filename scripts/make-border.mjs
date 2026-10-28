@@ -43,7 +43,7 @@ const SIDO_SHORT = {
 
 const muni = JSON.parse(fs.readFileSync("data/geo/sigungu-2013.json", "utf8")).features;
 const prov = JSON.parse(fs.readFileSync("data/geo/sido-2013.json", "utf8")).features;
-let HANDLE = process.env.IG_HANDLE || "tourist_710"; // 발행 시 config.ig_handle로 덮는다
+let HANDLE = process.env.IG_HANDLE || "matdigging"; // 발행 시 config.ig_handle로 덮는다
 const kstDate = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

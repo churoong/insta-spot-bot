@@ -1,6 +1,6 @@
 # insta-spot-bot — 작업 가이드 (Claude 세션용)
 
-@tourist_710 인스타 맛집 계정("맛디깅" — 2026-10-27 먹짱에서 개명)의 **완전 자동 발행 봇**.
+@matdigging(옛 @tourist_710) 인스타 맛집 계정("맛디깅" — 2026-10-27 먹짱에서 개명)의 **완전 자동 발행 봇**.
 Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무료 티어**로 운영.
 이 문서는 로컬 세션의 메모리를 대신한다 — 클라우드 세션은 이 문서만 보고 작업한다.
 
@@ -63,7 +63,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **2026-10-27 스레드 동시 발행**: 모음집·큐레이션이 인스타에 나가면 `crossPostThreads`(make-roundup)가 같은 영상(실패하면 표지 이미지)을 공식 Threads API(`lib/threads.ts`)로 올린다 — 노트북 무관, 공식·비공식 경로 모두. 글 = 제목 + 상호(지역) 목록 + 긍정형 질문 + "영상·지도는 인스타 @tourist_710", 토픽 태그 1개(`<음식>맛집`). 글 ID는 `posts.threads_id`. 연결: 메타 앱(Threads 사용 사례) → 리디렉션 URI `https://insta-spot-bot.vercel.app/api/threads/callback` → Threads 테스터 초대 수락 → `/api/threads/connect` 열기. 장기 토큰 60일 — 쓸 때 + metrics 크론이 7일마다 갱신. 연결 전이면 조용히 건너뛴다.
 - **2026-10-27 남의 게시물 댓글 = 좋아요 동반 + 인기 게시물 대상**(사용자: "댓글 단 게시글 좋아요도 눌러줘야지", "너무 비주류 계정 위주"): 남의 게시물에 댓글을 다는 모든 경로(`auto_comments`·큰 계정 첫 댓글·소개 식당 방문자·추천 요청 응답)가 댓글 직후 `common.like_too`로 좋아요. `auto_comments` 대상은 해시태그 **인기 게시물 탭**(모자라면 최근 탭) 중 좋아요 100+ 또는 재생 5천+, 3일 이내만, 반응 큰 순 — 못 찾으면 하한을 낮추지 않고 그 태그를 건너뛴다.
 - **2026-10-27 계정 이름 먹짱 → 맛디깅**(사용자 결정): 코드 속 표기(아침 스토리·영수증 카드·DM 문구·persona·공개 페이지 `BRAND`) 일괄 교체. 인스타 프로필 이름·소개는 에이전트 `growth.rename_profile`이 '먹짱'만 '맛디깅'으로 바꿔 1회 반영(거부되면 매일 재시도, 원래 값은 `private_log` `profile:backup-before-rename`). ⚠️ 이름 변경 14일 2회 제한.
-- **2026-10-27 아이디 @tourist_710 → @matdigging**(사용자 결정, 후보 순서 matdigging → mat.digging → matdigging.kr): 에이전트 `growth.rename_handle`이 프로필 이름 변경 다음 날 이후 시도. 성공하면 `config.ig_handle`에 쓰고 `.env` IG_USERNAME도 고친다. **아이디는 하드코딩하지 말 것** — 표지·카드·스레드·공개 페이지가 모두 `config.ig_handle`을 읽는다(JS `HANDLE`/`igHandle()`, Python `common.ig_handle()`). 바뀌기 전엔 tourist_710.
+- **2026-10-27 아이디 @tourist_710 → @matdigging**(사용자 결정, 후보 순서 matdigging → mat.digging → matdigging.kr): 에이전트 `growth.rename_handle`이 프로필 이름 변경 다음 날 이후 시도. 성공하면 `config.ig_handle`에 쓰고 `.env` IG_USERNAME도 고친다. **아이디는 하드코딩하지 말 것** — 표지·카드·스레드·공개 페이지가 모두 `config.ig_handle`을 읽는다(JS `HANDLE`/`igHandle()`, Python `common.ig_handle()`). **2026-10-28 사용자가 인스타·스레드 아이디를 앱에서 직접 matdigging으로 바꿈** — 기본값도 matdigging, 에이전트는 다음 실행 때 config·.env만 맞춘다.
 - 차단 신호(Challenge·PleaseWait·Feedback 등)를 받으면 6~24시간 비공식 호출을 전부 멈춘다. 상태는 DB `private_log` 테이블(`agent:alive`, `agent:paused`, `pp:<content_id>`, `likes:<날짜>`).
 
 ### ▶ 2026-10-27 AI 검색 노출용 공개 맛집 페이지 (GEO)
