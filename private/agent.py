@@ -35,7 +35,7 @@ import growth
 log = get_logger("agent")
 START_DATE = "2026-10-27"  # 이 날짜 이후 발행분만 사후 처리(과거 게시물은 건드리지 않는다)
 LIKE_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", "해장국", "짬뽕맛집", "맛집추천", "전국맛집", "노포맛집", "가성비맛집"]
-LIKES_PER_DAY = (35, 50)  # 2026-10-28 사용자: 확대(18~26 → 35~50)
+LIKES_PER_DAY = (18, 26)  # 10/28 35~50으로 늘렸다가 같은 날 되돌림(사용자: 효과 작음 → 맛집 글 활동으로)
 UNFOLLOW_PER_DAY = 40
 UNFOLLOW_PER_RUN = 14
 
@@ -566,6 +566,7 @@ def growth_round():
         ("노트", lambda: engage.daily_note(c)),
         ("DM 답장", lambda: engage.answer_dms(c)),
         ("소개 식당 장소 피드", lambda: engage.visited_engage(c, find_location)),
+        ("맛집 글 좋아요·댓글·팔로우", lambda: engage.food_posts_engage(c)),
         ("스토리 보기", lambda: engage.story_views(c)),
         ("비슷한 계정 팔로워 좋아요", lambda: engage.peer_follower_likes(c)),
         ("단골 관리", lambda: engage.regulars_engage(c, own_recent_media(14))),
