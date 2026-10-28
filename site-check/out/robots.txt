@@ -1,0 +1,11 @@
+User-Agent: *
+Allow: /m
+Allow: /e/
+Allow: /llms.txt
+Allow: /rss.xml
+Disallow: /api/
+Disallow: /go/
+Disallow: /privacy
+Disallow: /$
+
+Sitemap: https://insta-spot-bot.vercel.app/sitemap.xml

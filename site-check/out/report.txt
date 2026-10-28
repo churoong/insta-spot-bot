@@ -1,0 +1,15 @@
+/m 200 295774B
+/sitemap.xml 200 66681B
+/rss.xml 200 10693B
+/llms.txt 200 50000B
+/robots.txt 200 187B
+/mascot.png 200 16479B
+/border/index.json 200 30B
+/border/gukbap.json 200 3826B
+/geo/sigungu.json 200 186644B
+/46d28bdf53d2b74b8bde474bf3c121ab.txt 200 32B
+sitemap urls: 542, first pin 708, first ed countdown-jjamppong-20261028
+pin title: 김가네서해짬뽕 — 충남 서천군 짬뽕 맛집 | 맛디깅
+pin jsonld: {"@context":"https://schema.org","@type":"Restaurant","name":"김가네서해짬뽕","address":{"@type":"PostalAddress","streetAddress":"충청남도 서천군 서인로 285","addressRegion":"충남","addressLocality":"서천군","addressCountry":"KR"},"geo":{"@type":"GeoCoordinates","latitude":36.1457677215367,"longitude":126.503363711558},"
+ed title: 아는 사람만 간다는 짬뽕 5대 맛집 | 맛디깅
+console errors: []
