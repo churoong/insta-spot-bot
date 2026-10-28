@@ -66,9 +66,14 @@ def now_kst() -> datetime:
     return datetime.now(KST)
 
 
+PROGRESS = [time.time()]  # 마지막으로 일이 진행된 시각 — agent 감시 스레드가 본다
+
+
 def nap(lo: float, hi: float) -> None:
-    """사람처럼 쉬기 — 비공식 API 호출 사이 간격은 늘 무작위로."""
+    """사람처럼 쉬기 — 비공식 API 호출 사이 간격은 늘 무작위로. 쉴 때마다 '진행 중' 표시도 남긴다."""
+    PROGRESS[0] = time.time()
     time.sleep(random.uniform(lo, hi))
+    PROGRESS[0] = time.time()
 
 
 BLOCK_SIGNALS = ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")
