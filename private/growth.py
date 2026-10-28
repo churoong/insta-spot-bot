@@ -355,6 +355,32 @@ def set_profile_picture(c):
     log.info(f"🖼 프로필 사진 변경: {PROFILE_PIC.name} ({h})")
 
 
+# ---------- 프로필 링크(2026-10-28 사용자: 맛디 지도를 프로필 링크로) ----------
+PROFILE_LINK = "https://insta-spot-bot.vercel.app/m"
+
+
+def set_profile_link(c):
+    """프로필 대표 링크를 맛디 지도로 1회 바꾼다(URL이 바뀌면 다시). 이름·소개는 현재 값 그대로 보낸다.
+    실패하면 하루 뒤 재시도. 스레드 프로필 링크는 API가 없어 사용자가 직접."""
+    if state_get(f"plink:{PROFILE_LINK}") or state_get(f"plink-try:{today()}"):
+        return
+    state_set(f"plink-try:{today()}", "1")
+    me = c.account_info()
+    if str(me.external_url or "").rstrip("/") == PROFILE_LINK:
+        state_set(f"plink:{PROFILE_LINK}", "already")
+        return
+    state_set("profile:link-before", str(me.external_url or ""))
+    try:
+        c.account_edit(external_url=PROFILE_LINK, full_name=me.full_name or "", biography=me.biography or "")
+    except Exception as e:
+        if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")):
+            raise
+        log.warning(f"프로필 링크 변경 실패(내일 재시도): {str(e)[:150]}")
+        return
+    state_set(f"plink:{PROFILE_LINK}", "1")
+    log.info(f"🔗 프로필 링크: {PROFILE_LINK}")
+
+
 # ---------- 타깃 좋아요 ----------
 def big_food_accounts(c) -> list:
     """맛집 태그 인기 게시물 작성자 중 팔로워 5만+ 계정(주 1회 갱신)."""
