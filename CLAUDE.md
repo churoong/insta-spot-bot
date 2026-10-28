@@ -22,6 +22,7 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 | 모음집 릴스 + 표지 스토리 | 매일 **16:45 출발 → 17시 전후 발행** (창 16:30~22:00, 2026-10-27 앞당김) — 화 상권 / **목·토 지하철역**(2026-10-27) / **월·수·금·일 전국 음식**(2026-09-15) | roundup.yml | scripts/make-roundup.mjs |
 | 큐레이션(카운트다운) | **월·수·금·토** **10:30 출발 → 11시 전후 발행** (창 10~16, 2026-10-27 — 에이전트 PC가 11:20~13:00 오프라인) — 2026-10-22 캐러셀 슬롯 흡수 | countdown.yml | make-roundup (ROUNDUP_STYLE=countdown) |
 | 아침 스토리 "오늘 점심 뭐 먹지?" | 매일 **07:30** (창 07~11, 2026-10-27) — 지난 모음집 1위 식당 사진·상호·지역, 공식 API라 노트북과 무관. √조회 가중, 최근 40회 재사용 안 함(config `morning_used`), 하루 1회 가드 `morning_story` | morning.yml | scripts/morning-story.mjs |
+| 국경선 지도 릴스 연재 | **일요일 11:30 출발**(창 일 11~18시, 2026-10-28) — 국밥(10/28 발행) → 냉면 → 칼국수 → 순대 순서(config `border_idx`), 새 시리즈는 그날 카카오 집계(1시간 안팎) | border.yml | scripts/make-border.mjs |
 | 캐러셀(저장형) | **예약 발행 중단**(2026-10-22, 수동 실행만) — 7건 중앙 39, 9/19 판정선 100 미달 | carousel.yml | make-roundup (ROUNDUP_STYLE=carousel) |
 
 ⚠️ 발행 요일을 바꾸면 **네 곳을 같이 고칠 것**: ① 해당 yml의 `schedule` 크론(UTC — KST 08시는 전날 23시라 요일이 하루 밀린다) + 첫 스텝 게이트의 요일 조건 ② `vercel.json` 크론 ③ `scripts/publish-check.mjs`의 `EXPECTED[].dows`(안 고치면 새 슬롯이 조용히 빠져도 이슈가 안 열린다 — 2026-09-09 캐러셀 주2회 전환 때 실제로 토요일만 보고 있었다) ④ 이 표.
@@ -73,6 +74,11 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **평점·리뷰 수를 구조화 데이터에 넣지 말 것**(없는 사실). 문구는 "○○ 편 N위로 소개한 집"까지.
 - 브랜드명은 `BRAND` 상수 한 곳(조사 이/가는 `BRAND_SUBJ`가 자동). 관리 대시보드(`/`)는 noindex.
 - 발행 직후 `make-roundup`이 IndexNow(`lib/indexnow.ts`, 키 파일 `public/<key>.txt` — 공개용)로 새 페이지를 Bing 등에 알린다(ChatGPT 검색 = Bing 색인). 구글은 사이트맵으로 — 서치 콘솔 등록은 사용자 몫(선택).
+
+### ▶ 2026-10-28 캐릭터 "맛디" 에셋 · 맛디 지도 · 국경선 연재
+- `scripts/make-mascot.mjs` → `public/mascot.png`(투명, 지도 핀) · `assets/stickers/matti-{pop,hi,tag}.gif`(GIPHY 스티커, 투명 480px — 업로드는 사용자 GIPHY 계정). 그림을 바꾸면 이 스크립트 하나만 고친다(프로필 사진 `assets/profile/matdigging.jpg`와 같은 그림).
+- **맛디 지도** `/m`: Leaflet(CDN unpkg 1.9.4) + OSM 타일(출처 표기 필수) + 맛디 핀 + "내 주변 맛집"(브라우저 위치, 반경 5km 개수) + 국경선 층 토글(`public/geo/sigungu.json` + `public/border/<시리즈>.json`, make-border가 집계 때 쓰고 워크플로가 커밋). 프로필 링크로 쓸 페이지.
+- **국경선 연재**: `make-border.mjs`의 `SERIES`(gukbap·naengmyeon·kalguksu·sundae — 음식마다 5종, 상호·카테고리 이름 일치로 셈). 수동 `-f series=키`. 집계가 300곳 미만이면 그 시리즈를 건너뛰고 다음 순서로.
 
 ### ▶ 2026-10-27 국밥 국경선 지도 릴스 (`scripts/make-border.mjs`, `border.yml` 수동 실행)
 - 시군구(통계청 2013 경계 `data/geo/`)마다 돼지국밥·순대국·해장국·콩나물국밥·소머리국밥 가게 수를 카카오 로컬로 세서(경계 상자 키워드 검색 → 경계 안 비율 × total_count) **특화 지수**(전국 비율 대비, 평활 K=6) 1위로 칠한다. 가게 8곳 미만 시군구는 시도 1위를 옅게. 단순 개수 1위로 칠하면 해장국이 전국을 덮어 경계가 안 생긴다.
