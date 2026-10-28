@@ -18,6 +18,7 @@ import math
 import random
 import re
 import time
+from datetime import timedelta
 from urllib.parse import quote
 
 import requests
@@ -25,7 +26,7 @@ import requests
 from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
-VISITED_LIKES, VISITED_COMMENTS = 25, 8  # 2026-10-28 확대(15·5 → 25·8)
+VISITED_LIKES, VISITED_COMMENTS = 40, 12  # 2026-10-28 확대(15·5 → 25·8 → 40·12, 사용자: 식당 좋아요·댓글이 너무 적다)
 STORY_USERS_PER_DAY, STORY_LIKES_PER_DAY, STORY_USERS_PER_ROUND = 150, 10, 30
 WELCOME_PER_DAY = 20
 COMMENTER_DM_PER_DAY = 10
@@ -143,15 +144,21 @@ def visited_engage(c, find_location):
         return
     if not _slot_passed("visited"):
         return
-    rows = db("""SELECT m.name, m.address, m.x, m.y, p.place_name AS title FROM map_pins m
-                 LEFT JOIN posts p ON p.content_id = m.content_id ORDER BY m.id DESC LIMIT 120""")["rows"]
+    # 2026-10-28 사용자: "식당 좋아요·댓글이 너무 적다" — 예전엔 최근 핀 120곳 중 무작위 6곳만 봤고, 위치를 못 찾은
+    # 식당(빈 값)도 6자리 중 하나를 차지했다. → 전체 핀, 위치를 아는 식당 먼저 12곳 + 모르는 식당 4곳 조회.
+    rows = db("""SELECT m.name, m.address, m.x, m.y, p.place_name AS title, l.value AS pk, l.updated_at AS pk_at
+                 FROM map_pins m LEFT JOIN posts p ON p.content_id = m.content_id
+                 LEFT JOIN private_log l ON l.key = 'locpk:' || m.name""")["rows"]
+    known = [r for r in rows if r.get("pk")]
+    # 못 찾은 식당은 14일 뒤 다시 찾아본다(예전엔 빈 값이 영구 저장됐다)
+    unknown = [r for r in rows if r.get("pk") is None or (not r.get("pk") and str(r.get("pk_at") or "") < f"{now_kst() - timedelta(days=14):%Y-%m-%d}")]
     me = str(c.user_id)
-    for r in random.sample(rows, min(6, len(rows))):
+    for r in random.sample(known, min(12, len(known))) + random.sample(unknown, min(4, len(unknown))):
         if _count("visited-like") >= VISITED_LIKES and _count("visited-cmt") >= VISITED_COMMENTS:
             break
         key = f"locpk:{r['name']}"
-        pk = state_get(key)
-        if pk is None:
+        pk = r.get("pk")
+        if not pk:
             loc = find_location(c, {"query": r["name"], "address": r["address"], "lat": r["y"], "lng": r["x"]})
             pk = str(getattr(loc, "pk", "") or "") if loc else ""
             state_set(key, pk)
@@ -166,7 +173,7 @@ def visited_engage(c, find_location):
             continue
         for m in medias:
             uid = str(m.user.pk)
-            if uid == me or (time.time() - m.taken_at.timestamp()) > 14 * 86400:
+            if uid == me or (time.time() - m.taken_at.timestamp()) > 30 * 86400:  # 작은 식당은 글이 드물어 14 → 30일
                 continue
             liked = bool(getattr(m, "has_liked", False))
             if _count("visited-like") < VISITED_LIKES and not liked:
@@ -189,6 +196,88 @@ def visited_engage(c, find_location):
                     nap(120, 300)
         nap(30, 90)
     log.info(f"🍽 장소 피드: 좋아요 {_count('visited-like')} · 댓글 {_count('visited-cmt')}")
+
+
+# ---------- 맛집 소개 게시물(우리가 소개한 식당이 아니어도) 좋아요·댓글·팔로우 — 2026-10-28 사용자 결정 ----------
+FOOD_POST_LIKES, FOOD_POST_COMMENTS, FOOD_FOLLOWS = 30, 10, 25
+FOOD_POST_TAGS = ["맛집", "맛집추천", "맛집탐방", "먹스타그램", "맛스타그램", "로컬맛집", "노포맛집", "국밥맛집",
+                  "서울맛집", "부산맛집", "대구맛집", "대전맛집", "광주맛집", "제주맛집", "전주맛집", "강릉맛집"]
+# 가게를 소개하는 글의 흔적(위치·메뉴·가격·영업시간 등) — 두 가지 이상 있어야 '맛집 소개'로 본다
+REVIEW_CUES = [r"📍|위치|주소", r"메뉴|주문", r"\d[\d,]*\s*원", r"영업|시간|휴무|브레이크", r"웨이팅|재방문|또\s?가", r"존맛|맛있|맛집"]
+AD_RE = re.compile(r"광고|협찬|체험단|제공\s?받|원고료|#ad\b|파트너십", re.I)
+
+
+def _is_food_review(cap: str) -> bool:
+    if len(cap) < 30 or not re.search(r"[가-힣]", cap) or AD_RE.search(cap):
+        return False
+    return sum(1 for p in REVIEW_CUES if re.search(p, cap)) >= 2
+
+
+def food_posts_engage(c):
+    """맛집 태그(인기 탭 먼저, 최근 탭 보충)에서 가게를 소개한 7일 이내 글에 좋아요 30·댓글 10, 작성자 팔로우 25(하루).
+    댓글은 같은 사람 30일 1회(touch), 팔로우는 이름에 한글이 있고 팔로워 300~3만인 개인 계정만 — 맞팔 가능성이 있는 쪽.
+    팔로우에는 fbat을 남겨 주간 정리가 14일 뒤 맞팔 안 한 계정을 언팔한다."""
+    import follows
+
+    if _count("fp-like") >= FOOD_POST_LIKES and _count("fp-cmt") >= FOOD_POST_COMMENTS and _count("fp-follow") >= FOOD_FOLLOWS:
+        return
+    if not _slot_passed("foodpost"):
+        return
+    me = str(c.user_id)
+    following = set(json.loads(state_get("fb:following-cache") or "[]"))
+    followers = set(json.loads(follows.FOLLOWERS_F.read_text(encoding="utf-8"))) if follows.FOLLOWERS_F.exists() else set()
+    skip_follow = follows._done_set() | follows._approved_ids() | following | followers | {me}
+    for tag in random.sample(FOOD_POST_TAGS, 4):
+        if _count("fp-like") >= FOOD_POST_LIKES and _count("fp-cmt") >= FOOD_POST_COMMENTS and _count("fp-follow") >= FOOD_FOLLOWS:
+            break
+        try:
+            medias = c.hashtag_medias_top(tag, amount=9)
+            nap(3, 8)
+            medias += c.hashtag_medias_recent(tag, amount=20)
+        except Exception as e:
+            if _blocked(e):
+                raise
+            continue
+        for m in medias:
+            uid = str(m.user.pk)
+            cap = (m.caption_text or "").strip()
+            if uid == me or (time.time() - m.taken_at.timestamp()) > 7 * 86400 or not _is_food_review(cap):
+                continue
+            liked = bool(getattr(m, "has_liked", False))
+            if _count("fp-like") < FOOD_POST_LIKES and not liked:
+                c.media_like(m.id)
+                liked = True
+                _bump("fp-like")
+                nap(20, 60)
+            if _count("fp-cmt") < FOOD_POST_COMMENTS and not getattr(m, "comments_disabled", False) and not _user_recent(uid):
+                text = llm(
+                    "아래 인스타 맛집 소개 게시물에 진짜 사람이 다는 듯한 댓글 한 문장을 써라. 게시물에 나온 가게나 음식을 "
+                    "구체적으로 짚을 것. 존댓말, 30자 안팎, 이모지 최대 1개. 금지: 링크, 해시태그, 계정 홍보, 맞팔·선팔·팔로우 요청, "
+                    "'좋은 정보 감사합니다' 같은 뻔한 말. 식당·음식은 언제나 긍정적으로만(단점·아쉬움·비교 우열·호불호 금지). "
+                    "가 봤다고 지어내지 말 것. 댓글만 출력.\n게시물: " + cap[:400], 70)
+                if text and not re.search(r"팔로우|맞팔|선팔|http|#", text):
+                    c.media_comment(m.id, text)
+                    _touch(uid)
+                    _bump("fp-cmt")
+                    log.info(f"🍜 맛집 글 댓글(#{tag}): {text}")
+                    nap(150, 360)
+            if _count("fp-follow") < FOOD_FOLLOWS and uid not in skip_follow and not state_get(f"fbat:{uid}") \
+                    and re.search(r"[가-힣]", f"{m.user.full_name or ''}"):
+                try:
+                    info = c.user_info(uid)
+                    nap(3, 8)
+                    if 300 <= (info.follower_count or 0) <= 30000 and not getattr(info, "is_business", False):
+                        c.user_follow(uid)
+                        state_set(f"fbat:{uid}", str(time.time()))
+                        _bump("fp-follow")
+                        log.info(f"➕ 맛집 글 작성자 팔로우: @{info.username} ({info.follower_count})")
+                        nap(40, 120)
+                except Exception as e:
+                    if _blocked(e):
+                        raise
+                skip_follow.add(uid)
+        nap(30, 90)
+    log.info(f"🍜 맛집 글: 좋아요 {_count('fp-like')} · 댓글 {_count('fp-cmt')} · 팔로우 {_count('fp-follow')}")
 
 
 # ---------- 3) 노트 ----------
@@ -396,7 +485,7 @@ def peer_follower_likes(c):
 
 
 # ---------- 발행 직후 30분 집중(2026-10-27 사용자 결정) ----------
-BURST_KEYS = ["likes-at", "tlikes-at", "acom-at", "visited-at", "peer-at"]
+BURST_KEYS = ["likes-at", "tlikes-at", "acom-at", "visited-at", "peer-at", "foodpost-at"]
 
 
 def trigger_burst(why: str):
