@@ -3088,8 +3088,16 @@ async function main() {
     // 컷 길이 = 나레이션 길이 비례. 인트로가 제목 전체(~30자)를 읽으면 첫 식당까지
     // 5초 가까이 걸린다("넘어가는 시간이 너무 길다" 피드백). 제목은 인트로 카드가
     // 이미 보여주므로 음성은 짧게 치고 바로 순위로 들어간다.
-    // 시그니처 오프닝 — 목소리 캐릭터를 계정 자산화(뉴스 브리핑 포맷)
-    narration.push(`맛집 브리핑, ${theme.food || theme.keyword} 톱${ranked.length}. ${ranked.length}위부터 갑니다`);
+    // 오프닝 = 친구한테 알려주듯 들뜬 반말(2026-10-28 사용자 결정 — 뉴스 브리핑 톤 "맛집 브리핑, ○○ 톱N" 대체).
+    // 제목 공식대로 "N대 맛집"(톱N 금지), 반문형 훅(물음표 2.02x).
+    const F = theme.food || theme.keyword;
+    const n = ranked.length;
+    const opens = [
+      `${F} ${n}대 맛집, 1위 어딘지 맞혀볼래?`,
+      `${F} 좋아하면 여기 ${n}곳은 알고 가자`,
+      `${F} 진짜 잘하는 집 ${n}곳, 바로 간다`,
+    ];
+    narration.push(opens[Math.floor(Math.random() * opens.length)]);
 
     for (let i = 0; i < ranked.length; i++) {
       const rank = ranked.length - i; // N위 → 1위
@@ -3102,11 +3110,15 @@ async function main() {
         // 컷이 늘어진다(실측 8/21 어탕 5선: "식당 간 간격이 너무 길다" 피드백).
         // 순위 공개는 빠르게 넘기는 맛 — 2~5위는 이름만 읽고(설명은 화면 자막이 보여줌),
         // 1위만 핵심 한 조각을 붙여 정점을 만든다.
-        const bite = p.descLines?.[0] ?? String(p.desc ?? "").split(/[,.]/)[0].trim();
+        // 반말 톤에 설명문(해요체)을 붙이면 말투가 섞인다 — 1위는 대표 메뉴 이름만 붙인다.
+        const where = `${p.region ? p.region + " " : ""}${p.name}`;
+        const menu1 = String(p.goodPrice?.menu || p.menu || "").split(/[,·/(]/)[0].trim().slice(0, 14);
         narration.push(
           rank === 1
-            ? `대망의 1위, ${p.region ? p.region + " " : ""}${p.name}${bite ? `. ${bite}` : ""}`
-            : `${rank}위, ${p.region ? p.region + " " : ""}${p.name}`
+            ? `1위는… ${where}!${menu1 ? ` 대표 메뉴는 ${menu1}` : ""}`
+            : rank === 2
+              ? `2위, ${where}. 자, 이제 1위`
+              : `${rank}위! ${where}`
         );
       } catch (e) {
         console.error(`순위 카드 ${rank} 실패(건너뜀):`, String(e).slice(0, 90));
@@ -3118,7 +3130,7 @@ async function main() {
       // — 캐러셀 마지막 장에만 유지. 릴스 아웃트로는 기존 카드로.
       fs.writeFileSync(outro, await composeOutroCard(sharpMod, places, theme.titleResolved));
       cards.push(outro);
-      narration.push("오늘 브리핑 끝. 저장해두고 하나씩 가보세요");
+      narration.push("가보고 싶은 곳, 댓글로 찍어줘");
     } catch { /* 아웃트로는 없어도 됨 */ }
     console.log(`카운트다운 카드 ${cards.length}장 생성`);
   } else {
