@@ -18,7 +18,7 @@ import random
 import re
 from collections import Counter
 
-from common import ROOT, db, get_logger, like_too, llm, nap, now_kst, online_slot, state_get, state_set
+from common import BLOCK_SIGNALS, ROOT, db, get_logger, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
 
@@ -32,6 +32,8 @@ COMMENTS_PER_DAY = (8, 12)
 COMMENT_MIN_LIKES = 100
 COMMENT_MIN_PLAYS = 5000
 COMMENT_MAX_AGE_DAYS = 3
+# 위 조건으로 하루 목표를 못 채우면(10/28 실측 2개) 여유 조건으로 나머지 태그를 한 번 더 본다
+COMMENT_RELAXED = (30, 1500, 7)  # 좋아요, 재생, 일수
 
 
 def _norm(s: str) -> str:
@@ -359,26 +361,56 @@ def set_profile_picture(c):
 PROFILE_LINK = "https://insta-spot-bot.vercel.app/m"
 
 
+def _profile_links(c) -> list:
+    """지금 프로필에 걸린 링크들(bio_links + external_url)."""
+    u = c.private_request(f"users/{c.user_id}/info/").get("user", {})
+    urls = [str(b.get("url") or "") for b in (u.get("bio_links") or [])] + [str(u.get("external_url") or "")]
+    return [x.rstrip("/") for x in urls if x]
+
+
 def set_profile_link(c):
-    """프로필 대표 링크를 맛디 지도로 1회 바꾼다(URL이 바뀌면 다시). 이름·소개는 현재 값 그대로 보낸다.
-    실패하면 하루 뒤 재시도. 스레드 프로필 링크는 API가 없어 사용자가 직접."""
-    if state_get(f"plink:{PROFILE_LINK}") or state_get(f"plink-try:{today()}"):
+    """프로필 대표 링크를 맛디 지도로 1회 건다(URL이 바뀌면 다시). 실패하면 30분 뒤 재시도.
+    2026-10-28 실측: edit_profile의 external_url은 성공 응답만 오고 링크가 안 생긴다 — 인스타가 프로필 링크를
+    'bio_links'(최대 5개)로 옮겼기 때문. 그래서 bio 링크 추가 → 갱신 → edit_profile 순으로 시도하고
+    매번 프로필을 다시 읽어 실제로 걸렸을 때만 완료로 남긴다. 스레드 프로필 링크는 API가 없어 사용자가 직접."""
+    import json as _j
+    import time as _t
+
+    if state_get(f"plink2:{PROFILE_LINK}") or _t.time() - float(state_get("plink2-try") or 0) < 1800:
         return
-    state_set(f"plink-try:{today()}", "1")
-    me = c.account_info()
-    if str(me.external_url or "").rstrip("/") == PROFILE_LINK:
-        state_set(f"plink:{PROFILE_LINK}", "already")
+    state_set("plink2-try", str(_t.time()))
+    if PROFILE_LINK in _profile_links(c):
+        state_set(f"plink2:{PROFILE_LINK}", "already")
+        log.info(f"🔗 프로필 링크 이미 있음: {PROFILE_LINK}")
         return
-    state_set("profile:link-before", str(me.external_url or ""))
     try:
-        c.account_edit(external_url=PROFILE_LINK, full_name=me.full_name or "", biography=me.biography or "")
-    except Exception as e:
-        if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")):
-            raise
-        log.warning(f"프로필 링크 변경 실패(내일 재시도): {str(e)[:150]}")
-        return
-    state_set(f"plink:{PROFILE_LINK}", "1")
-    log.info(f"🔗 프로필 링크: {PROFILE_LINK}")
+        from instagrapi.utils.auth import generate_signature
+    except ImportError:  # 예전 버전
+        from instagrapi.utils import generate_signature
+
+    base = {"_uid": str(c.user_id), "_uuid": c.uuid}
+    tries = [
+        ("add_bio_links", lambda: c.private_request("accounts/add_bio_links/", data=generate_signature(_j.dumps(
+            dict(base, link_data=_j.dumps({"link_type": "external", "url": PROFILE_LINK, "title": "맛디 지도"})))), with_signature=False)),
+        ("update_bio_links", lambda: c.private_request("accounts/update_bio_links/", data=generate_signature(_j.dumps(
+            dict(base, updated_links=_j.dumps([{"url": PROFILE_LINK, "title": "맛디 지도", "link_type": "external"}])))), with_signature=False)),
+        ("edit_profile", lambda: c.account_edit(external_url=PROFILE_LINK)),
+    ]
+    for name, fn in tries:
+        try:
+            fn()
+        except Exception as e:
+            if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")):
+                raise
+            log.warning(f"프로필 링크 {name} 실패: {type(e).__name__} {str(e)[:150]}")
+            continue
+        nap(4, 10)
+        if PROFILE_LINK in _profile_links(c):
+            state_set(f"plink2:{PROFILE_LINK}", name)
+            log.info(f"🔗 프로필 링크({name}): {PROFILE_LINK}")
+            return
+        log.warning(f"프로필 링크 {name}: 응답은 성공인데 프로필에 안 보임")
+    log.warning("프로필 링크 세 방법 모두 반영 안 됨 — 앱에서 직접 추가 필요(30분 뒤 재시도)")
 
 
 # ---------- 타깃 좋아요 ----------
@@ -409,8 +441,12 @@ def big_food_accounts(c) -> list:
 
 
 def targeted_likes(c):
-    if state_get(f"tlikes:{today()}"):
+    mark = state_get(f"tlikes:{today()}")
+    # 목표 하한에 못 미쳤으면(10/28 실측 0개) 하루 한 번 더 돈다
+    if mark and (int(str(mark) or 0) >= TARGET_LIKES_PER_DAY[0] or state_get(f"tlikes-retry:{today()}")):
         return
+    if mark:
+        state_set(f"tlikes-retry:{today()}", "1")
     slot = state_get(f"tlikes-at:{today()}")
     if not slot:
         slot = online_slot()
@@ -423,12 +459,27 @@ def targeted_likes(c):
         if not accs:
             state_set(f"tlikes:{today()}", "0")
             return
-        src = c.user_medias(random.choice(accs), amount=1)
-        if not src:
-            state_set(f"tlikes:{today()}", "0")
-            return
-        commenters = {str(cm.user.pk) for cm in c.media_comments(src[0].id, amount=40)} - {str(c.user_id)}
-        for uid in random.sample(sorted(commenters), min(len(commenters), goal * 2)):
+        # 큰 계정 최대 3곳 × 최근 게시물 2개에서 댓글러를 모은다. 그 큰 계정 게시물 자체에도 좋아요.
+        commenters = set()
+        for acc in random.sample(accs, min(3, len(accs))):
+            try:
+                for m in c.user_medias(acc, amount=2):
+                    if not getattr(m, "has_liked", False):
+                        c.media_like(m.id)
+                        done += 1
+                        log.info(f"🎯 큰 계정 게시물 좋아요 {m.code}")
+                        nap(20, 60)
+                    commenters |= {str(cm.user.pk) for cm in c.media_comments(m.id, amount=40)}
+                    nap(5, 15)
+            except Exception as e:
+                if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
+                    raise
+                log.warning(f"큰 계정 {acc} 건너뜀: {type(e).__name__} {str(e)[:100]}")
+            if len(commenters) >= goal * 3:
+                break
+        commenters.discard(str(c.user_id))
+        log.info(f"🎯 댓글러 후보 {len(commenters)}명")
+        for uid in random.sample(sorted(commenters), min(len(commenters), goal * 3)):
             if done >= goal:
                 break
             try:
@@ -437,9 +488,9 @@ def targeted_likes(c):
                     c.media_like(ms[0].id)
                     done += 1
             except Exception as e:
-                if "Private" in type(e).__name__ or "NotFound" in type(e).__name__:
-                    continue
-                raise
+                if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
+                    raise
+                continue  # 비공개·삭제·일시 오류는 그 사람만 건너뛴다
             nap(40, 110)
     finally:
         state_set(f"tlikes:{today()}", str(done))
@@ -504,10 +555,11 @@ def _plays(m) -> int:
     return int(getattr(m, "play_count", 0) or getattr(m, "view_count", 0) or 0)
 
 
-def popular_medias(c, tag: str) -> list:
+def popular_medias(c, tag: str, relaxed: bool = False) -> list:
     """해시태그 인기 게시물 중 반응 하한을 넘고 3일 안 된 것, 반응 큰 순.
     인기 탭이 비거나 다 걸러지면 최근 게시물에서 같은 하한으로 보충한다(하한은 낮추지 않는다 — 못 찾으면 그 태그는 건너뜀)."""
     import time as _t
+    min_likes, min_plays, max_days = COMMENT_RELAXED if relaxed else (COMMENT_MIN_LIKES, COMMENT_MIN_PLAYS, COMMENT_MAX_AGE_DAYS)
     out, seen = [], set()
     for fetch in (lambda: c.hashtag_medias_top(tag, amount=9), lambda: c.hashtag_medias_recent(tag, amount=30)):
         if len(out) >= 4:
@@ -517,9 +569,9 @@ def popular_medias(c, tag: str) -> list:
                 continue
             seen.add(m.id)
             age = _t.time() - m.taken_at.timestamp()
-            if age > COMMENT_MAX_AGE_DAYS * 86400:
+            if age > max_days * 86400:
                 continue
-            if (m.like_count or 0) >= COMMENT_MIN_LIKES or _plays(m) >= COMMENT_MIN_PLAYS:
+            if (m.like_count or 0) >= min_likes or _plays(m) >= min_plays:
                 out.append(m)
         nap(3, 8)
     out.sort(key=lambda m: (m.like_count or 0) * 50 + _plays(m), reverse=True)
@@ -527,21 +579,32 @@ def popular_medias(c, tag: str) -> list:
 
 
 def auto_comments(c):
-    if state_get(f"acom:{today()}"):
-        return
+    # 완료 표시는 'done/goal'. 예전 형식(숫자만)이거나 목표 미달이면 남은 몫만 다시 돈다(하루 최대 2번).
+    mark = state_get(f"acom:{today()}")
+    prev, goal0 = 0, None
+    if mark:
+        a, _, b = str(mark).partition("/")
+        prev = int(a or 0)
+        goal0 = int(b) if b else COMMENTS_PER_DAY[0]
+        if prev >= goal0 or state_get(f"acom-retry:{today()}"):
+            return
+        state_set(f"acom-retry:{today()}", "1")
     slot = state_get(f"acom-at:{today()}")
     if not slot:
         slot = online_slot()
         state_set(f"acom-at:{today()}", slot)
     if f"{now_kst():%H:%M}" < slot:
         return
-    goal, done = random.randint(*COMMENTS_PER_DAY), 0
+    goal = goal0 or random.randint(*COMMENTS_PER_DAY)
+    done = prev
     me = str(c.user_id)
+    tags = random.sample(COMMENT_TAGS, len(COMMENT_TAGS))
+    passes = [(t, False) for t in tags[:3]] + [(t, True) for t in tags]
     try:
-        for tag in random.sample(COMMENT_TAGS, 3):
+        for tag, relaxed in passes:
             if done >= goal:
                 break
-            medias = popular_medias(c, tag)
+            medias = popular_medias(c, tag, relaxed)
             for m in medias[:8]:
                 if done >= goal:
                     break
@@ -563,14 +626,14 @@ def auto_comments(c):
                     like_too(c, m.id, getattr(m, "has_liked", False))
                     done += 1
                     db("INSERT OR REPLACE INTO private_log (key, value, updated_at) VALUES (?, ?, datetime('now', '+30 days'))", [f"acom-u:{uid}", "1"])
-                    log.info(f"🗨 댓글(#{tag} ❤{m.like_count} ▶{_plays(m)}): {text}")
+                    log.info(f"🗨 댓글(#{tag}{' 여유' if relaxed else ''} ❤{m.like_count} ▶{_plays(m)}): {text}")
                 except Exception as e:
                     log.warning(f"댓글 실패: {str(e)[:100]}")
                     raise
                 nap(180, 480)
             nap(60, 180)
     finally:
-        state_set(f"acom:{today()}", str(done))
+        state_set(f"acom:{today()}", f"{done}/{goal}")
         log.info(f"🗨 오늘 남의 게시물 댓글 {done}개")
 
 
