@@ -1,0 +1,36 @@
+name: 스레드 맛집 추천 답글
+
+# 2026-10-28 사용자 결정(계정 노출): 스레드 "○○ 맛집 추천" 글에 우리가 소개한 맛집 2~3곳 + 맛디 지도 링크 답글.
+# 공식 Threads API(키워드 검색·답글) — 메타 앱에서 threads_keyword_search·threads_manage_replies를 켜고
+# /api/threads/connect로 다시 연결해야 동작한다. 하루 8개 상한은 스크립트에.
+on:
+  schedule:
+    - cron: "20 0,3,6,9,12 * * *" # KST 09:20 · 12:20 · 15:20 · 18:20 · 21:20
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "답글 없이 후보만 로그로"
+        type: boolean
+        default: true
+
+concurrency:
+  group: threads-replies
+  cancel-in-progress: false
+
+jobs:
+  reply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        run: npm ci
+      - name: 검색·답글
+        run: npx tsx scripts/threads-replies.mjs
+        env:
+          THREADS_REPLY_DRY: ${{ inputs.dry && '1' || '' }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
