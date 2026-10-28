@@ -330,6 +330,31 @@ def _handle_done(handle: str):
         log.warning(f".env IG_USERNAME 갱신 실패 — 직접 고쳐야 다음 로그인이 된다: {e}")
 
 
+# ---------- 프로필 사진(2026-10-28 사용자: 맛디깅 캐릭터로 바꿔줘) ----------
+PROFILE_PIC = ROOT.parent / "assets" / "profile" / "matdigging.jpg"
+
+
+def set_profile_picture(c):
+    """assets/profile/matdigging.jpg로 인스타 프로필 사진을 바꾼다. 파일 내용 해시로 1회만 — 이미지를 바꿔 커밋하면 다시 적용된다.
+    실패하면 하루 뒤 재시도. 스레드 프로필 사진은 API가 없어 사용자가 직접 바꾼다."""
+    import hashlib
+    if not PROFILE_PIC.exists():
+        return
+    h = hashlib.sha1(PROFILE_PIC.read_bytes()).hexdigest()[:12]
+    if state_get(f"pfp:{h}") or state_get(f"pfp-try:{h}:{today()}"):
+        return
+    state_set(f"pfp-try:{h}:{today()}", "1")
+    try:
+        c.account_change_picture(PROFILE_PIC)
+    except Exception as e:
+        if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")):
+            raise
+        log.warning(f"프로필 사진 변경 실패(내일 재시도): {str(e)[:150]}")
+        return
+    state_set(f"pfp:{h}", "1")
+    log.info(f"🖼 프로필 사진 변경: {PROFILE_PIC.name} ({h})")
+
+
 # ---------- 타깃 좋아요 ----------
 def big_food_accounts(c) -> list:
     """맛집 태그 인기 게시물 작성자 중 팔로워 5만+ 계정(주 1회 갱신)."""
