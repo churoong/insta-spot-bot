@@ -81,6 +81,11 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **국경선 → 다음 날 모음집**(2026-10-28 사용자 결정): 국경선 발행 성공 시 시도×종류 중 전국 대비 가장 도드라진 조합(종류 10곳+, 시도 30곳+, 실측 국밥 = 부산 돼지국밥 3.9배)을 config `next_roundup_theme`(내일 날짜)에 예약 → 다음 날 make-roundup이 맨 앞에서 시도, 제목 수식어 `fixedTop` "○○ 국경선이 고른"(예: "국밥 국경선이 고른 부산 돼지국밥 6대 맛집"). 수집 부족이면 평소 순서. 읽으면 지운다.
 - **국경선 연재**: `make-border.mjs`의 `SERIES`(gukbap·naengmyeon·kalguksu·sundae — 음식마다 5종, 상호·카테고리 이름 일치로 셈). 수동 `-f series=키`. 집계가 300곳 미만이면 그 시리즈를 건너뛰고 다음 순서로.
 
+### ▶ 2026-10-28 계정 노출
+- **스레드 추천 답글**(`scripts/threads-replies.mjs`, `threads-replies.yml` 3시간마다): 공식 Threads API 키워드 검색 → 지역이 적힌 "맛집 추천" 글에 그 지역 소개 맛집 2~3곳 + 맛디 지도 링크 답글. 하루 8, 같은 사람 7일 1회, 지역 못 찾으면 안 단다. 기록 `threads_replies` 테이블. 권한 `threads_keyword_search`·`threads_manage_replies` — 메타 앱에서 켜고 `/api/threads/connect` 재연결 필요. 고급 접근 승인 전엔 검색 결과가 제한될 수 있다.
+- **검색엔진**: 루트 레이아웃이 Vercel 환경변수 `NAVER_SITE_VERIFICATION`·`GOOGLE_SITE_VERIFICATION`을 메타 태그로 낸다. `/rss.xml`(최근 30편) — 네이버 서치어드바이저에 사이트맵과 함께 제출.
+- 인스타 "검색 엔진에 게시물 표시" 설정은 사용자가 앱에서 켠다(프로페셔널 계정).
+
 ### ▶ 2026-10-27 국밥 국경선 지도 릴스 (`scripts/make-border.mjs`, `border.yml` 수동 실행)
 - 시군구(통계청 2013 경계 `data/geo/`)마다 돼지국밥·순대국·해장국·콩나물국밥·소머리국밥 가게 수를 카카오 로컬로 세서(경계 상자 키워드 검색 → 경계 안 비율 × total_count) **특화 지수**(전국 비율 대비, 평활 K=6) 1위로 칠한다. 가게 8곳 미만 시군구는 시도 1위를 옅게. 단순 개수 1위로 칠하면 해장국이 전국을 덮어 경계가 안 생긴다.
 - 8초 단일컷 + CC BGM, 캡션 = 시도별 1위 목록 + 긍정형 질문, 첫 댓글 해시태그, 표지 스토리, 스레드. `posts.content_id = border-gukbap-<날짜>`, `reel_format = map8`.

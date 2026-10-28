@@ -14,7 +14,7 @@ export async function GET() {
   const url = new URL("https://threads.com/oauth/authorize");
   url.searchParams.set("client_id", process.env.THREADS_APP_ID);
   url.searchParams.set("redirect_uri", threadsRedirectUri());
-  url.searchParams.set("scope", "threads_basic,threads_content_publish,threads_manage_insights");
+  url.searchParams.set("scope", "threads_basic,threads_content_publish,threads_manage_insights,threads_keyword_search,threads_manage_replies");
   url.searchParams.set("response_type", "code");
   url.searchParams.set("state", state);
   const res = NextResponse.redirect(url.toString());

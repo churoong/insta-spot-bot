@@ -121,3 +121,39 @@ export async function publishThreads(opts: { text: string; videoUrl?: string; im
   }
   throw last;
 }
+
+// ---------- 키워드 검색 + 답글(2026-10-28 사용자 결정 — "맛집 추천" 글에 소개 맛집 답글) ----------
+// 권한: threads_keyword_search, threads_manage_replies (connect 스코프에 포함, 메타 앱에서도 켜야 한다).
+export interface ThreadsHit { id: string; text: string; username: string; timestamp: string; permalink: string; is_reply?: boolean }
+
+/** 최근 공개 글 키워드 검색. 미연결이면 []. 권한이 없으면 throw(호출부가 사유를 남긴다). */
+export async function threadsKeywordSearch(q: string, limit = 25): Promise<ThreadsHit[]> {
+  const auth = await getAuth();
+  if (!auth) return [];
+  const u = new URL(`${THREADS_GRAPH}/keyword_search`);
+  u.searchParams.set("q", q);
+  u.searchParams.set("search_type", "RECENT");
+  u.searchParams.set("fields", "id,text,username,timestamp,permalink,is_reply");
+  u.searchParams.set("limit", String(limit));
+  u.searchParams.set("access_token", auth.token);
+  const j = await (await fetch(u, { signal: AbortSignal.timeout(20000) })).json();
+  if (j.error) throw new Error(`Threads keyword_search: ${j.error.message ?? JSON.stringify(j.error)}`);
+  return (j.data ?? []) as ThreadsHit[];
+}
+
+/** 남의 글에 텍스트 답글. 발행된 답글 id. */
+export async function threadsReply(replyToId: string, text: string): Promise<string> {
+  const auth = await getAuth();
+  if (!auth) throw new Error("Threads 미연결");
+  const c = await post(`${auth.userId}/threads`, { media_type: "TEXT", text, reply_to_id: replyToId }, auth.token);
+  await waitContainer(String(c.id), auth.token, 60000);
+  const pub = await post(`${auth.userId}/threads_publish`, { creation_id: String(c.id) }, auth.token);
+  return String(pub.id);
+}
+
+export async function threadsMe(): Promise<string | null> {
+  const auth = await getAuth();
+  if (!auth) return null;
+  const j = await (await fetch(`${THREADS_GRAPH}/me?fields=username&access_token=${encodeURIComponent(auth.token)}`)).json();
+  return j.username ?? null;
+}
