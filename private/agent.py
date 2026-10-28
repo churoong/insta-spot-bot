@@ -670,7 +670,15 @@ def _watchdog():
 
 def main():
     global _loop_at
-    ensure_tables()
+    # 인터넷이 끊긴 채 켜지면(로그온 직후·감시 재시작) DB 연결이 DNS 오류로 실패한다 — 예전엔 여기서
+    # 프로세스가 죽어 사용자가 손으로 재시작해야 했다(2026-10-28). 연결될 때까지 1분마다 다시 시도한다.
+    while True:
+        try:
+            ensure_tables()
+            break
+        except Exception as e:
+            log.warning(f"DB 연결 대기(인터넷 확인): {type(e).__name__}")
+            time.sleep(60)
     once = "--once" in sys.argv
     log.info("에이전트 시작" + (" (한 바퀴)" if once else ""))
     if not once:
