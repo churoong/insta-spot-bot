@@ -87,6 +87,18 @@ def find_restaurant_account(c, name: str, region: str = "", address: str = ""):
     return found
 
 
+def add_mentions(c, caption: str, places: list) -> str:
+    """캡션의 1~3위 줄("N. 상호")에 확신 있게 찾은 식당 계정 @멘션을 붙인다(2026-10-28 사용자 결정).
+    places는 1위부터 순서. 이미 붙어 있으면 그대로."""
+    for p in places[:3]:
+        acc = find_restaurant_account(c, p.get("name", ""), p.get("region", ""), p.get("address", ""))
+        if not acc or f"@{acc['username']}" in caption:
+            continue
+        pat = re.compile(r"(^|\n)(\d+\.\s*" + re.escape(p.get("name", "")) + r")(?!\s*@)")
+        caption = pat.sub(lambda m: f"{m[1]}{m[2]} @{acc['username']}", caption, count=1)
+    return caption
+
+
 def usertags_for(c, places: list) -> list:
     """그리드 표지 칸 위치(2열×3행)에 맞춰 태그 좌표를 둔다."""
     from instagrapi.types import UserShort, Usertag
