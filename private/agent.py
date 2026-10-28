@@ -645,15 +645,18 @@ _loop_at = time.time()
 
 
 def _watchdog():
-    """한 바퀴가 45분 넘게 안 끝나면(인터넷이 끊긴 채 응답 없는 요청에 걸린 경우 등) 스스로 재시작한다.
-    2026-10-28 실측: 점심 오프라인 뒤 agent:alive가 2시간 넘게 멈춰 사용자가 손으로 재개해야 했다."""
+    """45분 동안 아무 진전이 없으면(인터넷이 끊긴 채 응답 없는 요청에 걸린 경우 등) 스스로 재시작한다.
+    진전 = 바퀴 시작 또는 nap()(활동 사이 쉬기 — 가장 긴 게 8분). 바퀴 전체 길이로 재면 안 된다:
+    growth_round 한 바퀴는 쉬는 시간 때문에 원래 한두 시간 걸려서 멀쩡한 작업을 죽이게 된다."""
     import threading
+
+    import common
 
     def run():
         while True:
             time.sleep(60)
-            if time.time() - _loop_at > 45 * 60:
-                log.error("🐕 한 바퀴가 45분 넘게 멈춤 — 재시작")
+            if time.time() - max(_loop_at, common.PROGRESS[0]) > 45 * 60:
+                log.error("🐕 45분 동안 진전 없음 — 재시작")
                 os.execv(sys.executable, [sys.executable, *sys.argv])
 
     threading.Thread(target=run, daemon=True).start()
