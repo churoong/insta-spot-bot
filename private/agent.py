@@ -35,7 +35,7 @@ import growth
 log = get_logger("agent")
 START_DATE = "2026-10-27"  # 이 날짜 이후 발행분만 사후 처리(과거 게시물은 건드리지 않는다)
 LIKE_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", "해장국", "짬뽕맛집", "맛집추천", "전국맛집", "노포맛집", "가성비맛집"]
-LIKES_PER_DAY = (18, 26)
+LIKES_PER_DAY = (35, 50)  # 2026-10-28 사용자: 확대(18~26 → 35~50)
 UNFOLLOW_PER_DAY = 40
 UNFOLLOW_PER_RUN = 14
 
@@ -353,9 +353,14 @@ def likes_daily():
     c = cl()
     goal = random.randint(*LIKES_PER_DAY)
     done = 0
-    for tag in random.sample(LIKE_TAGS, 3):
+    for tag in random.sample(LIKE_TAGS, 5):
+        if done >= goal:
+            break
         try:
-            medias = c.hashtag_medias_recent(tag, amount=20)
+            # 인기 탭을 앞에(노출 큰 글), 모자라면 최근 탭(2026-10-28 확대)
+            top = c.hashtag_medias_top(tag, amount=9)
+            nap(3, 8)
+            medias = top + random.sample(c.hashtag_medias_recent(tag, amount=20), 6)
         except Exception as e:
             log.warning(f"태그 조회 실패(#{tag}): {str(e)[:120]}")
             if is_block(e):
@@ -363,7 +368,7 @@ def likes_daily():
                 pause(12, "좋아요 중 차단 신호")
                 return
             continue
-        for m in random.sample(medias, min(len(medias), 10)):
+        for m in medias[:12]:
             if done >= goal:
                 break
             if str(m.user.pk) == str(c.user_id) or getattr(m, "has_liked", False):

@@ -23,10 +23,12 @@ from common import BLOCK_SIGNALS, ROOT, db, get_logger, like_too, llm, nap, now_
 log = get_logger("agent")
 
 FOOD_TAGS = ["맛집", "맛집추천", "국밥맛집", "먹스타그램", "노포맛집", "전국맛집"]
-COMMENT_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", "해장국", "노포맛집", "서울맛집", "부산맛집"]
+COMMENT_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", "해장국", "노포맛집", "서울맛집", "부산맛집",
+                "돼지국밥", "짬뽕맛집", "막국수", "맛집추천", "전국맛집", "대구맛집", "제주맛집", "밀면"]  # 10/28 확대로 태그도 늘림
 REPLIES_PER_DAY = 30
-TARGET_LIKES_PER_DAY = (12, 18)
-COMMENTS_PER_DAY = (8, 12)
+# 2026-10-28 사용자: 확대(타깃 좋아요 12~18 → 25~35, 남의 게시물 댓글 8~12 → 16~22)
+TARGET_LIKES_PER_DAY = (25, 35)
+COMMENTS_PER_DAY = (16, 22)
 # 남의 게시물 댓글 대상 = 노출이 큰 게시물(2026-10-27 사용자: "너무 비주류 계정 위주") — 최근 게시물 탭은
 # 방금 올라온 작은 계정 글이라 우리 댓글을 볼 사람이 거의 없다. 인기 게시물 탭 + 반응 하한 + 3일 이내.
 COMMENT_MIN_LIKES = 100
@@ -461,7 +463,7 @@ def targeted_likes(c):
             return
         # 큰 계정 최대 3곳 × 최근 게시물 2개에서 댓글러를 모은다. 그 큰 계정 게시물 자체에도 좋아요.
         commenters = set()
-        for acc in random.sample(accs, min(3, len(accs))):
+        for acc in random.sample(accs, min(5, len(accs))):
             try:
                 for m in c.user_medias(acc, amount=2):
                     if not getattr(m, "has_liked", False):
@@ -498,7 +500,7 @@ def targeted_likes(c):
 
 
 # ---------- 큰 맛집 계정 새 게시물에 빠른 첫 댓글(2026-10-27 사용자 결정) ----------
-FAST_PER_DAY = 5
+FAST_PER_DAY = 8  # 2026-10-28 확대(5 → 8)
 FAST_WINDOW_MIN = 20
 
 
