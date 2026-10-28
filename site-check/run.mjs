@@ -22,11 +22,16 @@ const errs = [];
 pg.on("console", (m) => m.type() === "error" && errs.push(m.text()));
 await pg.goto(SITE + "/m", { waitUntil: "networkidle" });
 await pg.waitForTimeout(3000);
+report.push(`initial: dots ${await pg.locator("path.leaflet-interactive").count()} icons ${await pg.locator("img.leaflet-marker-icon").count()}`);
 await pg.screenshot({ path: `${out}/m.png` });
 const btn = pg.getByText("국밥 국경선");
 if (await btn.count()) { await btn.first().click(); await pg.waitForTimeout(3000); }
 await pg.screenshot({ path: `${out}/m-border.png` });
 await pg.screenshot({ path: `${out}/m-full.png`, fullPage: true });
+for (let i = 0; i < 4; i++) { await pg.locator(".leaflet-control-zoom-in").click(); await pg.waitForTimeout(500); }
+await pg.waitForTimeout(1500);
+report.push(`zoomed: dots ${await pg.locator("path.leaflet-interactive").count()} icons ${await pg.locator("img.leaflet-marker-icon").count()}`);
+await pg.screenshot({ path: `${out}/m-zoom.png` });
 if (firstPin) { await pg.goto(`${SITE}/m/${firstPin}`, { waitUntil: "networkidle" }); await pg.screenshot({ path: `${out}/pin.png` }); report.push("pin title: " + (await pg.title())); report.push("pin jsonld: " + ((await pg.locator('script[type="application/ld+json"]').first().textContent().catch(() => "")) || "").slice(0, 300)); }
 if (firstEd) { await pg.goto(`${SITE}/e/${firstEd}`, { waitUntil: "networkidle" }); await pg.screenshot({ path: `${out}/edition.png` }); report.push("ed title: " + (await pg.title())); }
 await b.close();
