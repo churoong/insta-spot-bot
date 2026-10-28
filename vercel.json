@@ -4,6 +4,7 @@
     { "path": "/api/cron/trigger/roundup", "schedule": "45 7 * * *" },
     { "path": "/api/cron/trigger/morning", "schedule": "30 22 * * *" },
     { "path": "/api/cron/trigger/border", "schedule": "30 2 * * 0" },
+    { "path": "/api/cron/trigger/threadsq", "schedule": "30 11 * * *" },
     { "path": "/api/cron/metrics", "schedule": "0 22 * * *" },
     { "path": "/api/cron/metrics", "schedule": "0 10 * * *" }
   ]
