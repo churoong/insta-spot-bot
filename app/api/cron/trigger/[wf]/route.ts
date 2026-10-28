@@ -22,6 +22,7 @@ const WORKFLOWS: Record<string, string> = {
   carousel: "carousel.yml",
   morning: "morning.yml", // 07:30 "오늘 점심 뭐 먹지?" 스토리(2026-10-27)
   border: "border.yml", // 일요일 11:30 국경선 지도 연재(2026-10-28)
+  threadsq: "threads-question.yml", // 매일 20:30 스레드 동네 질문 글 — GitHub 예약이 10/28 6시간 늦게 와 창 밖에서 스킵됨
   // story(정답 공개)는 2026-09-02 사용자 지시로 발행 중단 — 퀴즈형 게시물 시절의
   // 잔재였다(현재 릴스는 상호명 공개형이라 "정답"이 성립하지 않음)
 };

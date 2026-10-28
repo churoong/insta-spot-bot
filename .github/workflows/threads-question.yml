@@ -1,6 +1,8 @@
 name: 스레드 동네 질문 글
 
 # 2026-10-28 사용자 결정(계정 노출): 매일 저녁 "○○구 사시는 분들, 단골 ○○집 어디세요?" 한 편.
+# 주 경로는 Vercel 크론(vercel.json /api/cron/trigger/threadsq, 입력 없는 workflow_dispatch = 실제 발행).
+# 아래 schedule은 폴백 — 10/28 첫날 GitHub 예약이 02:13·03:26에 도착해 창 밖에서 스킵됐다.
 # 팔로워 접속 최다 KST 20~22시(10/27 실측)에 맞춰 20:30 출발, 게이트는 19:30~23:30 도착분만. 하루 1회 가드는 스크립트.
 on:
   schedule:
@@ -11,7 +13,7 @@ on:
       dry:
         description: "올리지 않고 문구만 로그로"
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: threads-question
