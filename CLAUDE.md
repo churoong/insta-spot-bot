@@ -76,6 +76,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 ### ▶ 2026-10-27 AI 검색 노출용 공개 맛집 페이지 (GEO)
 - 목적: ChatGPT·퍼플렉시티·구글 AI 요약이 "○○ 국밥 맛집" 답변에 우리를 인용하게. 인스타 알고리즘과 무관한 유입.
 - `/m`(시도별 전체) · `/m/[map_pins.id]`(식당: 어느 편 몇 위, 주소, 카카오맵 링크, 근처 소개 맛집, JSON-LD Restaurant) · `/e/[content_id]`(편: JSON-LD ItemList) · `/sitemap.xml` · `/robots.txt` · `/llms.txt`. 데이터는 `map_pins` JOIN `posts`(published)뿐 — `lib/publicmap.ts`.
+- **접속 수**(2026-10-28 사용자 요청): 공개 페이지 공통 틀(`app/m/Shell.tsx`)의 `VisitBeacon`이 브라우저에서 한 번 `/api/visit`에 보낸다 → `map_visits`(KST 날짜 × map/pin/edition, 페이지뷰 + 기기별 하루 1회 순방문자 — localStorage라 대략치). 검색 로봇 UA는 제외. 관리 페이지(`/`)에 오늘·최근 7일·누적 + 최근 7일 일별.
 - **평점·리뷰 수를 구조화 데이터에 넣지 말 것**(없는 사실). 문구는 "○○ 편 N위로 소개한 집"까지.
 - 브랜드명은 `BRAND` 상수 한 곳(조사 이/가는 `BRAND_SUBJ`가 자동). 관리 대시보드(`/`)는 noindex.
 - 발행 직후 `make-roundup`이 IndexNow(`lib/indexnow.ts`, 키 파일 `public/<key>.txt` — 공개용)로 새 페이지를 Bing 등에 알린다(ChatGPT 검색 = Bing 색인). 구글은 사이트맵으로 — 서치 콘솔 등록은 사용자 몫(선택).

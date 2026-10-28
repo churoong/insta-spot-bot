@@ -145,6 +145,24 @@ async function loadData() {
       };
     } catch { /* 데이터 부족 */ }
 
+    // 맛디 지도 접속 수(일별·주간·누적) — app/api/visit이 기록
+    let visits: any = null;
+    try {
+      const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+      const week0 = new Date(Date.now() + 9 * 3600e3 - 6 * 86400e3).toISOString().slice(0, 10);
+      const sum = async (where: string, args: any[]) =>
+        (await db.execute({ sql: `SELECT COALESCE(SUM(views),0) v, COALESCE(SUM(visitors),0) u FROM map_visits ${where}`, args })).rows[0] as any;
+      const days = (await db.execute(
+        "SELECT day, SUM(views) v, SUM(visitors) u FROM map_visits GROUP BY day ORDER BY day DESC LIMIT 7"
+      )).rows as any[];
+      visits = {
+        today: await sum("WHERE day = ?", [today]),
+        week: await sum("WHERE day >= ?", [week0]),
+        total: await sum("WHERE 1 = ?", [1]),
+        days,
+      };
+    } catch { /* 테이블 없음 */ }
+
     // 팔로워 추천 댓글 모음 (모음집 후보 발굴용)
     let suggestions: any[] = [];
     try {
@@ -166,6 +184,7 @@ async function loadData() {
       cooldownMin,
       cronLog,
       report,
+      visits,
       suggestions,
       live,
     };
@@ -377,6 +396,44 @@ export default async function Home() {
                         {Number(r.best.reach || 0).toLocaleString()} · 저장 {Number(r.best.saved) || 0})
                       </>
                     )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {(data as any).visits && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                🗺 맛디 지도 접속{" "}
+                <a href="/m" style={{ color: "#9aa0ae", fontWeight: 400, fontSize: 12 }}>/m 열기</a>
+              </div>
+              {(() => {
+                const v = (data as any).visits;
+                const n = (x: any) => Number(x || 0).toLocaleString();
+                return (
+                  <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>
+                    오늘 <b>{n(v.today.u)}</b>명 · {n(v.today.v)}회
+                    <span style={{ color: "#555" }}> | </span>
+                    최근 7일 <b>{n(v.week.u)}</b>명 · {n(v.week.v)}회
+                    <span style={{ color: "#555" }}> | </span>
+                    누적 <b>{n(v.total.u)}</b>명 · {n(v.total.v)}회
+                    {v.days.length > 0 && (
+                      <div style={{ color: "#9aa0ae", fontSize: 12.5 }}>
+                        {v.days.map((d: any) => `${String(d.day).slice(5).replace("-", "/")} ${n(d.u)}명·${n(d.v)}회`).join("  ·  ")}
+                      </div>
+                    )}
+                    <div style={{ color: "#6b7180", fontSize: 11.5 }}>
+                      명 = 기기별 하루 1회(대략치) · 회 = 페이지 열람(지도·식당·편 페이지 합계) · 검색 로봇 제외
+                    </div>
                   </div>
                 );
               })()}

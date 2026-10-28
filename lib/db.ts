@@ -80,6 +80,14 @@ export async function initDb() {
         created_at TEXT DEFAULT (datetime('now')),
         UNIQUE(name, address)
       )`,
+      // 맛디 지도 접속 수(2026-10-28 사용자 요청) — KST 날짜 × 페이지 종류(map·pin·edition)
+      `CREATE TABLE IF NOT EXISTS map_visits (
+        day TEXT,
+        kind TEXT,
+        views INTEGER DEFAULT 0,
+        visitors INTEGER DEFAULT 0,
+        PRIMARY KEY (day, kind)
+      )`,
       `CREATE TABLE IF NOT EXISTS comment_suggestions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         comment_id TEXT UNIQUE,
