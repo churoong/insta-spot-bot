@@ -641,20 +641,44 @@ def self_update():
         log.warning(f"자동 업데이트 실패(무시): {str(e)[:160]}")
 
 
+_loop_at = time.time()
+
+
+def _watchdog():
+    """한 바퀴가 45분 넘게 안 끝나면(인터넷이 끊긴 채 응답 없는 요청에 걸린 경우 등) 스스로 재시작한다.
+    2026-10-28 실측: 점심 오프라인 뒤 agent:alive가 2시간 넘게 멈춰 사용자가 손으로 재개해야 했다."""
+    import threading
+
+    def run():
+        while True:
+            time.sleep(60)
+            if time.time() - _loop_at > 45 * 60:
+                log.error("🐕 한 바퀴가 45분 넘게 멈춤 — 재시작")
+                os.execv(sys.executable, [sys.executable, *sys.argv])
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def main():
+    global _loop_at
     ensure_tables()
     once = "--once" in sys.argv
     log.info("에이전트 시작" + (" (한 바퀴)" if once else ""))
+    if not once:
+        _watchdog()
     last_update = 0.0
     while True:
+        _loop_at = time.time()
         if not once and time.time() - last_update > 600:
             last_update = time.time()
             self_update()
         try:
+            # 생존 신호는 바퀴 시작에 남긴다 — 예전엔 tick() 뒤라 하위 작업 하나가 예외를 내면
+            # 에이전트는 멀쩡해도 신호가 끊겨 GitHub가 '꺼짐'으로 보고 핸드오프를 건너뛰었다.
+            state_set("agent:alive", f"{now_kst():%m-%d %H:%M:%S}")
             if not SESSION.exists():
                 log.info("세션 없음 — private/login.py로 로그인할 때까지 대기")
             tick()
-            state_set("agent:alive", f"{now_kst():%m-%d %H:%M:%S}")
         except Exception as e:
             log.error(f"루프 오류: {type(e).__name__} {str(e)[:200]}\n{traceback.format_exc()[-600:]}")
             if is_block(e):
