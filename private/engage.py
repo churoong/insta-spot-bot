@@ -18,6 +18,7 @@ import math
 import random
 import re
 import time
+from datetime import timedelta
 from urllib.parse import quote
 
 import requests
@@ -25,7 +26,7 @@ import requests
 from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
-VISITED_LIKES, VISITED_COMMENTS = 25, 8  # 2026-10-28 확대(15·5 → 25·8)
+VISITED_LIKES, VISITED_COMMENTS = 40, 12  # 2026-10-28 확대(15·5 → 25·8 → 40·12, 사용자: 식당 좋아요·댓글이 너무 적다)
 STORY_USERS_PER_DAY, STORY_LIKES_PER_DAY, STORY_USERS_PER_ROUND = 150, 10, 30
 WELCOME_PER_DAY = 20
 COMMENTER_DM_PER_DAY = 10
@@ -143,15 +144,21 @@ def visited_engage(c, find_location):
         return
     if not _slot_passed("visited"):
         return
-    rows = db("""SELECT m.name, m.address, m.x, m.y, p.place_name AS title FROM map_pins m
-                 LEFT JOIN posts p ON p.content_id = m.content_id ORDER BY m.id DESC LIMIT 120""")["rows"]
+    # 2026-10-28 사용자: "식당 좋아요·댓글이 너무 적다" — 예전엔 최근 핀 120곳 중 무작위 6곳만 봤고, 위치를 못 찾은
+    # 식당(빈 값)도 6자리 중 하나를 차지했다. → 전체 핀, 위치를 아는 식당 먼저 12곳 + 모르는 식당 4곳 조회.
+    rows = db("""SELECT m.name, m.address, m.x, m.y, p.place_name AS title, l.value AS pk, l.updated_at AS pk_at
+                 FROM map_pins m LEFT JOIN posts p ON p.content_id = m.content_id
+                 LEFT JOIN private_log l ON l.key = 'locpk:' || m.name""")["rows"]
+    known = [r for r in rows if r.get("pk")]
+    # 못 찾은 식당은 14일 뒤 다시 찾아본다(예전엔 빈 값이 영구 저장됐다)
+    unknown = [r for r in rows if r.get("pk") is None or (not r.get("pk") and str(r.get("pk_at") or "") < f"{now_kst() - timedelta(days=14):%Y-%m-%d}")]
     me = str(c.user_id)
-    for r in random.sample(rows, min(6, len(rows))):
+    for r in random.sample(known, min(12, len(known))) + random.sample(unknown, min(4, len(unknown))):
         if _count("visited-like") >= VISITED_LIKES and _count("visited-cmt") >= VISITED_COMMENTS:
             break
         key = f"locpk:{r['name']}"
-        pk = state_get(key)
-        if pk is None:
+        pk = r.get("pk")
+        if not pk:
             loc = find_location(c, {"query": r["name"], "address": r["address"], "lat": r["y"], "lng": r["x"]})
             pk = str(getattr(loc, "pk", "") or "") if loc else ""
             state_set(key, pk)
@@ -166,7 +173,7 @@ def visited_engage(c, find_location):
             continue
         for m in medias:
             uid = str(m.user.pk)
-            if uid == me or (time.time() - m.taken_at.timestamp()) > 14 * 86400:
+            if uid == me or (time.time() - m.taken_at.timestamp()) > 30 * 86400:  # 작은 식당은 글이 드물어 14 → 30일
                 continue
             liked = bool(getattr(m, "has_liked", False))
             if _count("visited-like") < VISITED_LIKES and not liked:
