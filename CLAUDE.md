@@ -78,6 +78,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 ### ▶ 2026-10-28 캐릭터 "맛디" 에셋 · 맛디 지도 · 국경선 연재
 - `scripts/make-mascot.mjs` → `public/mascot.png`(투명, 지도 핀) · `assets/stickers/matti-{pop,hi,tag}.gif`(GIPHY 스티커, 투명 480px — 업로드는 사용자 GIPHY 계정). 그림을 바꾸면 이 스크립트 하나만 고친다(프로필 사진 `assets/profile/matdigging.jpg`와 같은 그림).
 - **맛디 지도** `/m`: Leaflet(CDN unpkg 1.9.4) + OSM 타일(출처 표기 필수) + 맛디 핀 + "내 주변 맛집"(브라우저 위치, 반경 5km 개수) + 국경선 층 토글(`public/geo/sigungu.json` + `public/border/<시리즈>.json`, make-border가 집계 때 쓰고 워크플로가 커밋). 프로필 링크로 쓸 페이지.
+- **국경선 → 다음 날 모음집**(2026-10-28 사용자 결정): 국경선 발행 성공 시 시도×종류 중 전국 대비 가장 도드라진 조합(종류 10곳+, 시도 30곳+, 실측 국밥 = 부산 돼지국밥 3.9배)을 config `next_roundup_theme`(내일 날짜)에 예약 → 다음 날 make-roundup이 맨 앞에서 시도, 제목 수식어 `fixedTop` "○○ 국경선이 고른"(예: "국밥 국경선이 고른 부산 돼지국밥 6대 맛집"). 수집 부족이면 평소 순서. 읽으면 지운다.
 - **국경선 연재**: `make-border.mjs`의 `SERIES`(gukbap·naengmyeon·kalguksu·sundae — 음식마다 5종, 상호·카테고리 이름 일치로 셈). 수동 `-f series=키`. 집계가 300곳 미만이면 그 시리즈를 건너뛰고 다음 순서로.
 
 ### ▶ 2026-10-27 국밥 국경선 지도 릴스 (`scripts/make-border.mjs`, `border.yml` 수동 실행)
