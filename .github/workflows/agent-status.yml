@@ -10,6 +10,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: node agent-status/run.mjs
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
