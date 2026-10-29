@@ -2093,10 +2093,12 @@ function buildPunchyTitle(theme, n) {
     //   "TOP N" 40건 0.56x < "N대 맛집" 쪽 → TOP N 제거하고 N대 맛집으로 통일
     const tops = [`죽기 전에 꼭 먹어야 할`, `아는 사람만 간다는`, `놓치면 후회하는`, `요즘 난리 난`];
     const top = tops[Math.floor(Math.random() * tops.length)];
-    const sub = `${n}대 맛집`;
-    // 캡션·검색 노출용 text는 지역명을 뒤로 뺀다 — 같은 실측에서 지역명이 앞 6글자 안이면
-    // 0.50x, 뒤쪽이면 1.96x였다. 표지 시각(초대형 지역명)은 지역편 정체성이라 그대로 둔다.
-    return { text: `${top} ${sub} · ${theme.keyword}`, top, main: theme.keyword, sub };
+    // 지역·역 편은 "N대 맛집" 대신 "부근 맛집"(2026-10-30 사용자 결정 — "건대역 6대 맛집"은 어색하고
+    // "건대역 부근 맛집"이 자연스럽다). 표지는 큰 지역명 + "부근 맛집".
+    const sub = `부근 맛집`;
+    // 캡션·검색 노출용 text에서 지역명이 맨 앞(앞 6글자)에 오면 실측 0.50x — 수식어 뒤에 둔다
+    // ("죽기 전에 꼭 먹어야 할 건대입구역 부근 맛집"). 표지 시각(초대형 지역명)은 그대로.
+    return { text: `${top} ${theme.keyword} 부근 맛집`, top, main: theme.keyword, sub };
   }
   const r = theme.region || "전국";
   const f = theme.food || theme.keyword;
@@ -2585,7 +2587,7 @@ function josa(word, withBatchim, without) {
 
 /** 댓글 참여 유도 문구 (전부 "추천 맛집 댓글로" 뉘앙스, 랜덤 회전) */
 function engagementLine(theme, count) {
-  const spot = theme.keyword === "카페" ? "카페" : `${theme.keyword} 맛집`;
+  const spot = theme.keyword === "카페" ? "카페" : theme.mode === "area" ? `${theme.keyword} 부근 맛집` : `${theme.keyword} 맛집`;
   const pool = [
     `여러분의 인생 ${spot}${josa(spot, "은", "는")} 어디인가요? 추천 맛집을 댓글로 남겨주세요 🙌`,
     `우리 동네 ${spot}${josa(spot, "이", "가")} 최고다! 하시는 분들, 그 집을 댓글로 추천해 주세요 🔥`,
@@ -2680,6 +2682,13 @@ async function main() {
     const { theme, places } = JSON.parse(
       fs.readFileSync(new URL("../data/dry-sample.json", import.meta.url), "utf8")
     );
+    // 지역·역 편 표지 시안: ROUNDUP_OFFLINE_AREA="건대입구역"
+    if (process.env.ROUNDUP_OFFLINE_AREA) {
+      Object.assign(theme, { mode: "area", keyword: process.env.ROUNDUP_OFFLINE_AREA, food: undefined, region: undefined });
+      theme.coverParts = buildPunchyTitle(theme, places.length);
+      theme.titleResolved = theme.coverParts.text;
+      console.log("지역편 시안 제목:", theme.titleResolved);
+    }
     const sharpMod = (await import("sharp")).default;
     if (process.env.COVER_TFONT) TFONT = process.env.COVER_TFONT;
     fs.copyFileSync(await composeReelCover(theme, places, false, null), "roundup-reel-preview.jpg");
