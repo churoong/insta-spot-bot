@@ -327,6 +327,7 @@ NOPHOTO_DEMO=1 ROUNDUP_OFFLINE=1 npx tsx scripts/make-roundup.mjs  # 무사진 �
 - **클라우드 세션(claude.ai/code) 네트워크**: npm·apt는 되지만 `tong.visitkorea.or.kr` 등 사진 호스트는 403(허용 목록 밖). 오프라인 렌더는 `data/dry-sample-photos/` 캐시(샘플 6장 커밋돼 있음) → 네트워크 → 색 플레이스홀더 순으로 폴백하므로 클라우드에서도 샘플 실사진으로 검증된다. 샘플(data/dry-sample.json)을 바꾸면 로컬에서 `ROUNDUP_OFFLINE=1`을 한 번 돌려 캐시를 다시 채우고 커밋. `apt-get update`는 이미지의 무관한 PPA 때문에 실패하지만 install은 된다.
 
 ## 작업 방식
+- ⚠️ **Vercel 무료 배포 횟수 한도**(2026-10-29 실측: "Deployment rate limited — retry in 24 hours", PR #71·#72가 배포 안 됨) — 브랜치 push마다 미리보기 배포가 생긴다. 클라우드 세션의 DB 조회용 `agent-status`·사이트 점검용 `site-check` 브랜치는 `vercel.json` `git.deploymentEnabled`로 배포 제외. 잦은 확인 push는 이 브랜치에서만.
 - 브랜치 → PR(사용자가 폰에서 머지). main 머지 시 Vercel 자동 배포, Actions는 다음 발행부터 반영.
 - 실발행·DB 변경·트리거 호출은 시크릿이 있을 때만 가능하며, 사용자가 명시적으로 요청했을 때만 한다.
 - 새 아이디어 제안보다 **사용자가 정한 것을 정확히 구현**하는 게 우선. 위 재제안 금지 목록을 지킬 것.
