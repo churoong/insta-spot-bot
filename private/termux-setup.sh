@@ -17,7 +17,11 @@ if [ "$1" = "import" ]; then
   exit 0
 fi
 
-pkg update -y && pkg upgrade -y
+# 처음 설치한 Termux에서 curl만 먼저 올라가면 openssl과 어긋나 curl이 죽는다(2026-11-02 실측
+# "CANNOT LINK EXECUTABLE curl ... SSL_set_quic_tls_early_data_enabled") — apt로 전체를 먼저 맞춘다.
+apt update && apt full-upgrade -y
+# pydantic-core(Rust) 빌드가 안드로이드 API 버전을 요구한다(2026-11-02 실측 "Please set the ANDROID_API_LEVEL")
+export ANDROID_API_LEVEL="${ANDROID_API_LEVEL:-$(getprop ro.build.version.sdk)}"
 # rust·clang: instagrapi가 쓰는 pydantic-core·pycryptodomex를 폰에서 직접 빌드한다(10~20분 걸릴 수 있음)
 pkg install -y python git ffmpeg rust clang binutils make python-pillow python-numpy openssl libjpeg-turbo unzip termux-api
 pip install --upgrade pip wheel
