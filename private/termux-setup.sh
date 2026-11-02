@@ -10,7 +10,10 @@ if [ "$1" = "import" ]; then
   sleep 2
   Z=~/storage/downloads/insta-agent-transfer.zip
   [ -f "$Z" ] || { echo "다운로드 폴더에 insta-agent-transfer.zip이 없습니다"; exit 1; }
-  unzip -o "$Z" -d ~/insta-spot-bot
+  # 윈도 PowerShell이 만든 zip은 경로 구분자가 \\ 라 unzip이 경고와 함께 종료 코드 1을 낸다(파일은 정상) —
+  # set -e에 걸려 아래 단계가 안 돌던 것(2026-11-02 실측)을 막는다. 대신 핵심 파일이 풀렸는지 직접 확인.
+  unzip -o "$Z" -d ~/insta-spot-bot || true
+  [ -f ~/insta-spot-bot/.env ] && [ -f ~/insta-spot-bot/private/state/session.json ] || { echo "압축 풀기 실패 — .env 또는 session.json 없음"; exit 1; }
   grep -q '^AGENT_ONLINE=' ~/insta-spot-bot/.env || echo 'AGENT_ONLINE=08:30-22:30' >> ~/insta-spot-bot/.env
   rm -f "$Z"   # 비밀이 든 파일이라 옮긴 뒤 바로 지운다
   echo "가져오기 완료 — 폰을 재부팅하거나: bash ~/.termux/boot/insta-agent.sh"
