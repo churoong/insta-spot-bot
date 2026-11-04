@@ -51,7 +51,7 @@ export default async function Page({ params }: { params: Promise<{ cid: string }
           <div style={{ color: "#666", fontSize: 14 }}>{regionOf(p.address).short || p.address}</div>
         </div>
       ))}
-      <p style={{ marginTop: 20 }}><a href={IG_URL} style={{ color: "#e02020", fontWeight: 700 }}>영상으로 보기 — 인스타 @{h}</a></p>
+      <p style={{ marginTop: 20 }}><a href={e.permalink ?? IG_URL} style={{ color: "#e02020", fontWeight: 700 }}>{e.permalink ? "▶ 이 편 릴스 바로 보기" : `영상으로 보기 — 인스타 @${h}`}</a></p>
     </Shell>
   );
 }

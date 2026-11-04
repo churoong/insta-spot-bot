@@ -25,7 +25,7 @@ export default async function Page() {
         <img src="/mascot.png" alt="" width={48} height={48} /> 맛디 지도
       </h1>
       <p style={{ color: "#666", marginTop: 0 }}>{BRAND_SUBJ} 소개한 맛집 {pins.length}곳 · {eds.length}편</p>
-      <MapView pins={pins.map((p) => ({ id: p.id, name: p.name, x: p.x, y: p.y, food: foodOf(p.title), title: p.title }))} />
+      <MapView pins={pins.map((p) => ({ id: p.id, name: p.name, x: p.x, y: p.y, food: foodOf(p.title), title: p.title, reel: p.permalink }))} />
       <h2 style={{ fontSize: 20, marginTop: 24 }}>최근 편</h2>
       {eds.slice(0, 12).map((e) => (
         <div key={e.contentId} style={card}><a href={`/e/${encodeURIComponent(e.contentId)}`} style={link}>{e.title}</a></div>

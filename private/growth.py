@@ -18,6 +18,7 @@ import random
 import re
 from collections import Counter
 
+import conversion
 from common import BLOCK_SIGNALS, ROOT, db, get_logger, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
@@ -501,6 +502,7 @@ def targeted_likes(c):
                 if ms and not getattr(ms[0], "has_liked", False):
                     c.media_like(ms[0].id)
                     done += 1
+                    conversion.mark("tlike", uid)
             except Exception as e:
                 if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
                     raise
@@ -641,6 +643,7 @@ def auto_comments(c):
                     done += 1
                     db("INSERT OR REPLACE INTO private_log (key, value, updated_at) VALUES (?, ?, datetime('now', '+30 days'))", [f"acom-u:{uid}", "1"])
                     log.info(f"🗨 댓글(#{tag}{' 여유' if relaxed else ''} ❤{m.like_count} ▶{_plays(m)}): {text}")
+                    conversion.mark("acom", uid)
                 except Exception as e:
                     log.warning(f"댓글 실패: {str(e)[:100]}")
                     raise

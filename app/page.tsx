@@ -180,6 +180,21 @@ async function loadData() {
       if (byKind.length) threads = { byKind, byTag, replied };
     } catch { /* 테이블 없음 */ }
 
+    // 활동별 팔로우 전환율(2026-11-04) — 에이전트 private/conversion.py가 src:·newf: 기록을 남긴다
+    let conv: any = null;
+    try {
+      const rows = (await db.execute(`
+        SELECT kind, COUNT(*) AS acted, SUM(CASE WHEN n.key IS NOT NULL THEN 1 ELSE 0 END) AS conv FROM (
+          SELECT substr(key, 5, instr(substr(key, 5), ':') - 1) AS kind,
+                 substr(key, 5 + instr(substr(key, 5), ':')) AS uid, updated_at AS t
+          FROM private_log WHERE key LIKE 'src:%' AND updated_at > datetime('now', '-21 days')
+        ) s LEFT JOIN private_log n ON n.key = 'newf:' || s.uid AND n.updated_at >= s.t AND n.updated_at <= datetime(s.t, '+14 days')
+        GROUP BY kind ORDER BY acted DESC`)).rows as any[];
+      const m = (await db.execute("SELECT value FROM private_log WHERE key = 'quota-mult'")).rows[0];
+      const newf = Number((await db.execute("SELECT COUNT(*) n FROM private_log WHERE key LIKE 'newf:%' AND updated_at > datetime('now','-21 days')")).rows[0].n);
+      if (rows.length) conv = { rows, mults: m ? JSON.parse(String(m.value)) : {}, newf };
+    } catch { /* 에이전트 기록 없음 */ }
+
     // 팔로워 추천 댓글 모음 (모음집 후보 발굴용)
     let suggestions: any[] = [];
     try {
@@ -203,6 +218,7 @@ async function loadData() {
       report,
       visits,
       threads,
+      conv,
       suggestions,
       live,
     };
@@ -451,6 +467,45 @@ export default async function Home() {
                     )}
                     <div style={{ color: "#6b7180", fontSize: 11.5 }}>
                       명 = 기기별 하루 1회(대략치) · 회 = 페이지 열람(지도·식당·편 페이지 합계) · 검색 로봇 제외
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {(data as any).conv && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>🎯 활동별 팔로우 전환 (최근 21일)</div>
+              {(() => {
+                const c = (data as any).conv;
+                const NAME: Record<string, string> = {
+                  hlike: "해시태그 좋아요", tlike: "큰 계정 댓글러 좋아요", acom: "인기 게시물 댓글", vlike: "소개 식당 위치 좋아요",
+                  vcmt: "소개 식당 위치 댓글", fplike: "맛집 글 좋아요", fpcmt: "맛집 글 댓글", fpfollow: "맛집 글 작성자 팔로우",
+                  peerlike: "비슷한 계정 팔로워 좋아요", likerfollow: "좋아요 누른 사람 팔로우",
+                };
+                return (
+                  <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>
+                    {c.rows.map((r: any) => {
+                      const a = Number(r.acted), v = Number(r.conv || 0);
+                      const mult = c.mults?.[r.kind];
+                      return (
+                        <div key={r.kind}>
+                          {NAME[r.kind] ?? r.kind}: {a}명 → 팔로우 <b>{v}</b> ({a ? ((v / a) * 100).toFixed(1) : "0"}%)
+                          {mult !== undefined && <span style={{ color: mult >= 1 ? "#7ee0a8" : "#e08080", fontSize: 12 }}> · 배분 ×{mult}</span>}
+                        </div>
+                      );
+                    })}
+                    <div style={{ color: "#6b7180", fontSize: 11.5 }}>
+                      전환 = 활동 후 14일 안에 우리를 팔로우 · 새 팔로워 {c.newf}명 기준 · 표본 150명 이상 활동만 매주 월요일 배분 조정(×0.5~1.5)
                     </div>
                   </div>
                 );

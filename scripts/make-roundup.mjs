@@ -262,11 +262,31 @@ async function themeWeights(db, all) {
     const j = r.rows[0] ? JSON.parse(String(r.rows[0].value)) : null;
     if (j?._at && Date.now() - new Date(j._at).getTime() < 3 * 86400e3) trend = j;
   } catch { /* 없으면 배수 없이 */ }
+  // 네이버 검색 상승 배수(2026-11-04 사용자 결정) — 음식별 "최근 1주 ÷ 이전 4주" 검색량(데이터랩, 무료).
+  // 오르는 음식만 1.0~1.6배(내려가는 음식은 깎지 않는다). 하루 한 번 계산해 config 'naver_trend'에 캐시.
+  let naver = null;
+  try {
+    const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    const row = (await db.execute("SELECT value FROM config WHERE key = 'naver_trend'")).rows[0];
+    naver = row ? JSON.parse(String(row.value)) : null;
+    if (naver?._day !== today) {
+      const foods = [...new Set(all.filter((t) => t.food && t.mode !== "area").map((t) => t.food))];
+      const { searchGrowth } = await import("../lib/datalab.ts");
+      const g = await searchGrowth(foods);
+      if (g) {
+        naver = { _day: today };
+        for (const [f, r] of Object.entries(g)) naver[f] = Math.round(Math.min(1.6, Math.max(1, 1 + (r - 1) * 1.5)) * 100) / 100;
+        if (!DRY) await db.execute({ sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES ('naver_trend', ?, datetime('now'))", args: [JSON.stringify(naver)] });
+      }
+    }
+  } catch (e) { console.error("네이버 검색 상승 배수 실패(무시):", String(e).slice(0, 100)); naver = null; }
+  if (naver) console.log("네이버 검색 상승:", Object.entries(naver).filter(([k, v]) => k !== "_day" && v > 1.05).map(([k, v]) => `${k}×${v}`).join(" ") || "(오른 음식 없음)");
   const weights = all.map((t) =>
     (byKey[t.key] === undefined
       ? prior?.[t.key] ?? soupPrior(t) // 실측 조회수가 없을 때만 사전 가중치
       : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))) *
-    (trend?.[t.food || t.keyword] ?? 1)
+    (trend?.[t.food || t.keyword] ?? 1) *
+    (t.food ? naver?.[t.food] ?? 1 : 1)
   );
   if (trend) console.log("검색 수요 배수 적용:", Object.entries(trend).filter(([k, v]) => k !== "_at" && v >= 1.6).map(([k, v]) => `${k}×${v}`).join(" ") || "(1.6 이상 없음)");
   console.log(

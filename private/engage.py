@@ -23,6 +23,8 @@ from urllib.parse import quote
 
 import requests
 
+import conversion
+
 from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
@@ -180,6 +182,7 @@ def visited_engage(c, find_location):
                 c.media_like(m.id)
                 liked = True
                 _bump("visited-like")
+                conversion.mark("vlike", uid)
                 nap(25, 70)
             cap = (m.caption_text or "").strip()
             if _count("visited-cmt") < VISITED_COMMENTS and len(cap) >= 10 and not _user_recent(uid):
@@ -192,6 +195,7 @@ def visited_engage(c, find_location):
                     like_too(c, m.id, liked)
                     _touch(uid)
                     _bump("visited-cmt")
+                    conversion.mark("vcmt", uid)
                     log.info(f"🍽 소개 식당 방문자 댓글({r['name']}): {text}")
                     nap(120, 300)
         nap(30, 90)
@@ -248,6 +252,7 @@ def food_posts_engage(c):
                 c.media_like(m.id)
                 liked = True
                 _bump("fp-like")
+                conversion.mark("fplike", uid)
                 nap(20, 60)
             if _count("fp-cmt") < FOOD_POST_COMMENTS and not getattr(m, "comments_disabled", False) and not _user_recent(uid):
                 text = llm(
@@ -259,6 +264,7 @@ def food_posts_engage(c):
                     c.media_comment(m.id, text)
                     _touch(uid)
                     _bump("fp-cmt")
+                    conversion.mark("fpcmt", uid)
                     log.info(f"🍜 맛집 글 댓글(#{tag}): {text}")
                     nap(150, 360)
             if _count("fp-follow") < FOOD_FOLLOWS and uid not in skip_follow and not state_get(f"fbat:{uid}") \
@@ -270,6 +276,7 @@ def food_posts_engage(c):
                         c.user_follow(uid)
                         state_set(f"fbat:{uid}", str(time.time()))
                         _bump("fp-follow")
+                        conversion.mark("fpfollow", uid)
                         log.info(f"➕ 맛집 글 작성자 팔로우: @{info.username} ({info.follower_count})")
                         nap(40, 120)
                 except Exception as e:
@@ -476,6 +483,7 @@ def peer_follower_likes(c):
             if ms and not getattr(ms[0], "has_liked", False):
                 c.media_like(ms[0].id)
                 _bump("peer-like")
+                conversion.mark("peerlike", uid)
         except Exception as e:
             if _blocked(e):
                 raise
