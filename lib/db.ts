@@ -124,6 +124,7 @@ export async function initDb() {
   // 기존 테이블 마이그레이션: 없는 컬럼 추가 (이미 있으면 에러 무시)
   const migrations = [
     "ALTER TABLE posts ADD COLUMN image_urls TEXT",
+    "ALTER TABLE posts ADD COLUMN permalink TEXT", // 릴스 주소(2026-11-04) — 공개 지도 페이지 "이 편 릴스 보기"
     "ALTER TABLE posts ADD COLUMN mapx TEXT",
     "ALTER TABLE posts ADD COLUMN mapy TEXT",
     "ALTER TABLE posts ADD COLUMN like_count INTEGER DEFAULT 0",

@@ -468,6 +468,19 @@ export async function fetchInsights(
   }
 }
 
+/** 게시물 공개 주소(https://www.instagram.com/reel/…) — 공개 지도 페이지에서 그 편 릴스로 바로 보내는 데 쓴다 */
+export async function fetchPermalink(mediaId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${GRAPH}/${mediaId}?fields=permalink&access_token=${encodeURIComponent(await getToken())}`, {
+      signal: AbortSignal.timeout(15000),
+    });
+    const j = await res.json();
+    return typeof j.permalink === "string" ? j.permalink : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 게시물 반응 수 조회 (좋아요·댓글) — 인기 랭킹·주간 베스트용 */
 export async function fetchEngagement(
   mediaId: string

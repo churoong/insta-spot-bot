@@ -28,6 +28,7 @@ import requests
 from common import (GRAPH, REPO, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
                     graph_id_for_code, graph_token, nap, next_weekday_at, now_kst, online_slot,
                     state_get, state_set)
+import conversion
 import engage
 import follows
 import growth
@@ -383,6 +384,7 @@ def likes_daily():
             try:
                 c.media_like(m.id)
                 done += 1
+                conversion.mark("hlike", m.user.pk)
             except Exception as e:
                 log.warning(f"좋아요 실패: {str(e)[:120]}")
                 if is_block(e):
@@ -557,6 +559,12 @@ def media_pk_of(graph_id: str):
 def growth_round():
     """하루 단위 활성화 작업 — 각자 하루 1회 상한·시각이 있어 10분마다 불려도 대부분 바로 끝난다."""
     c = cl()
+    # 활동별 전환율로 정한 배수를 상한에 반영(월요일 갱신) — conversion.py
+    try:
+        conversion.update_mults()
+        conversion.apply()
+    except Exception as e:
+        log.warning(f"활동 배분 실패: {str(e)[:120]}")
     for name, fn in (
         ("계정 이름 변경", lambda: growth.rename_profile(c)),
         ("아이디 변경", lambda: growth.rename_handle(c)),

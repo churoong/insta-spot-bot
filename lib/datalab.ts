@@ -81,3 +81,43 @@ export async function rankBySearchVolume<T extends { name: string; region?: stri
   withScore.sort((a, b) => b.s - a.s);
   return { ranked: withScore.map((x) => x.p), scored: true };
 }
+
+/**
+ * 주간 검색 상승률(2026-11-04) — 최근 1주 검색량 ÷ 그 전 4주 평균. 1보다 크면 요즘 더 찾는 음식.
+ * 같은 키워드끼리 나누므로 데이터랩의 요청별 정규화(최댓값 100)가 상쇄된다. 실패한 묶음은 빠진다.
+ */
+export async function searchGrowth(keywords: string[]): Promise<Record<string, number> | null> {
+  const id = process.env.NAVER_CLIENT_ID;
+  const secret = process.env.NAVER_CLIENT_SECRET;
+  if (!id || !secret || keywords.length === 0) return null;
+  const end = new Date(Date.now() - 864e5); // 오늘 치는 덜 쌓여 있다
+  const start = new Date(end.getTime() - 41 * 864e5); // 6주
+  const out: Record<string, number> = {};
+  for (let i = 0; i < keywords.length; i += 5) {
+    const chunk = keywords.slice(i, i + 5);
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: { "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          startDate: ymd(start), endDate: ymd(end), timeUnit: "week",
+          keywordGroups: chunk.map((k) => ({ groupName: k, keywords: [k, `${k} 맛집`] })),
+        }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!res.ok) { console.error("[datalab] HTTP", res.status, (await res.text()).slice(0, 120)); continue; }
+      const json = await res.json();
+      for (const r of json?.results ?? []) {
+        const v = (r?.data ?? []).map((d: any) => Number(d.ratio) || 0);
+        if (v.length < 5) continue;
+        const last = v[v.length - 1];
+        const prev = v.slice(-5, -1);
+        const base = prev.reduce((a: number, b: number) => a + b, 0) / prev.length;
+        if (base > 0) out[String(r.title)] = Math.round((last / base) * 100) / 100;
+      }
+    } catch (e) {
+      console.error("[datalab] 실패:", String(e).slice(0, 100));
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}

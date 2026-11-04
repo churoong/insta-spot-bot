@@ -14,6 +14,7 @@ import json
 import re
 import time
 
+import conversion
 from common import STATE, db, get_logger, nap, now_kst, state_get, state_set
 
 log = get_logger("agent")
@@ -53,6 +54,7 @@ def follow_back(c):
     new = [uid for uid in followers if uid not in known]
     if not new:
         return
+    conversion.new_followers(new)  # 활동별 전환율 계산용(conversion.py)
     today = f"{now_kst():%Y-%m-%d}"
     used = int(state_get(f"fb:{today}") or 0)
     skip = _done_set() | _approved_ids()
@@ -157,6 +159,7 @@ def follow_likers(c, own_media: list):
                 continue  # 이름에 한글이 없는 계정은 정리 기준과 맞추려고 건너뛴다
             c.user_follow(uid)
             state_set(f"fbat:{uid}", str(time.time()))
+            conversion.mark("likerfollow", uid)
             skip.add(uid)
             n += 1
             log.info(f"💛 좋아요 누른 사람 팔로우: @{u.username}")
