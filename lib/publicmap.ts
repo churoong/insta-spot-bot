@@ -70,10 +70,11 @@ function rankIn(lines: string, name: string): number | null {
   return null;
 }
 
-/** 편 제목에서 음식명 추정 — "전국 돼지국밥 6대 맛집" → "돼지국밥" */
+/** 편 제목에서 음식명 추정 — "전국 돼지국밥 6대 맛집"·"국밥 원픽 6곳"·"국밥 찐맛집 모음"·"국밥 맛집 리스트" → 음식.
+ *  지역·역 편("○○ 부근 맛집")은 음식이 없어 "맛집" */
 export function foodOf(title: string): string {
-  const t = String(title ?? "").replace(/\d+대\s*맛집.*$/, "").trim().split(/\s+/);
-  return t[t.length - 1] ?? "";
+  const m = String(title ?? "").match(/(\S+)\s+(?:\d+대\s*맛집|원픽\s*\d+곳|찐\S*\s*모음|맛집\s*리스트)/);
+  return m?.[1] ?? "맛집";
 }
 
 const PIN_SQL = `SELECT m.id, m.name, m.address, m.x, m.y, m.content_id, m.created_at,

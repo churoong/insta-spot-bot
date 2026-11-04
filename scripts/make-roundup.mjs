@@ -2094,17 +2094,29 @@ function buildHookTitle(theme, n) {
   return { text: `${main} ${sub}`, top: "", main, sub };
 }
 
+/**
+ * 제목 꼬리 — "N대 맛집"을 빼고(2026-11-04 사용자 결정 "트렌드에서 벗어났고 오그라든다") 세 가지를 번갈아 쓴다:
+ * "원픽 N곳" / "찐맛집 모음" / "맛집 리스트". KST 날짜로 돌려 같은 편 안에서는 표지·캡션이 같고,
+ * 큐레이션(11시)과 저녁 모음집은 같은 날 서로 다른 꼬리가 나온다. 효과 비교는 캡션 제목의 꼬리로.
+ */
+function titleTail(n, sfx = "맛집") {
+  const day = Math.floor((Date.now() + 9 * 3600e3) / 864e5);
+  const k = process.env.TITLE_TAIL ? Number(process.env.TITLE_TAIL) % 3 // 시안용 강제(0·1·2)
+    : (day + (process.env.ROUNDUP_STYLE === "countdown" ? 1 : 0)) % 3;
+  return [`원픽 ${n}곳`, `찐${sfx} 모음`, `${sfx} 리스트`][k];
+}
+
 function buildPunchyTitle(theme, n) {
   if (theme.mode === "route") {
     const top = `${theme.routeLabel} 역마다`;
-    const sub = `${n}대 맛집`;
+    const sub = titleTail(n);
     return { text: `${top} ${theme.food} ${sub}`, top, main: theme.food, sub };
   }
   if (theme.mode === "density") {
     const max = Math.max(...(theme.areas ?? []).map((a) => a.n), 0);
     const top = `반경 500m에 ${theme.food}집 ${max}곳`;
-    const sub = `${n}대 골목`;
-    return { text: `${top} · ${theme.food} 골목 ${n}대 서열`, top, main: `${theme.food} 골목`, sub };
+    const sub = `동네 ${n}곳`;
+    return { text: `${top} · ${theme.food} 골목 동네 ${n}곳`, top, main: `${theme.food} 골목`, sub };
   }
   if (theme.mode === "area") {
     // 지역편: 대형 타이포 = 동네 이름 ("성수동" / "강릉"), 수식어는 무지역형만.
@@ -2145,11 +2157,8 @@ function buildPunchyTitle(theme, n) {
     : theme.nopoTop ? "오래된 노포"
     : pool[Math.floor(Math.random() * pool.length)];
   const main = regional ? `${r} ${f}` : f;
-  // "N선"은 사용자 피드백으로 제외 — 역대 최고 성과작("전국 짬뽕 8대 맛집")의
-  // "N대 맛집"을 기본으로 하고 "TOP N"을 섞는다.
-  // TOP N은 실측 0.56x(N대 맛집 대비 약함)라 뺐다 — 사용자 규칙상 둘 다 허용된 형태 중 선택
-  const subs = [`${n}대 ${sfx}`];
-  const sub = subs[Math.floor(Math.random() * subs.length)];
+  // "N선"·"TOP N"(실측 0.56x)에 이어 "N대 맛집"도 뺐다(2026-11-04 사용자 결정) — titleTail 참고
+  const sub = titleTail(n, sfx);
   return { text: `${top} ${main} ${sub}`, top, main, sub };
 }
 
@@ -2705,10 +2714,11 @@ async function main() {
     // 지역·역 편 표지 시안: ROUNDUP_OFFLINE_AREA="건대입구역"
     if (process.env.ROUNDUP_OFFLINE_AREA) {
       Object.assign(theme, { mode: "area", keyword: process.env.ROUNDUP_OFFLINE_AREA, food: undefined, region: undefined });
-      theme.coverParts = buildPunchyTitle(theme, places.length);
-      theme.titleResolved = theme.coverParts.text;
-      console.log("지역편 시안 제목:", theme.titleResolved);
     }
+    // 샘플에 저장된 옛 제목 대신 지금 제목 규칙으로 다시 만든다(꼬리 문구가 바뀌어도 시안이 따라가게)
+    theme.coverParts = buildPunchyTitle(theme, places.length);
+    theme.titleResolved = theme.coverParts.text;
+    console.log("시안 제목:", theme.titleResolved);
     const sharpMod = (await import("sharp")).default;
     if (process.env.COVER_TFONT) TFONT = process.env.COVER_TFONT;
     fs.copyFileSync(await composeReelCover(theme, places, false, null), "roundup-reel-preview.jpg");
@@ -3135,11 +3145,11 @@ async function main() {
     // 5초 가까이 걸린다("넘어가는 시간이 너무 길다" 피드백). 제목은 인트로 카드가
     // 이미 보여주므로 음성은 짧게 치고 바로 순위로 들어간다.
     // 오프닝 = 친구한테 알려주듯 들뜬 반말(2026-10-28 사용자 결정 — 뉴스 브리핑 톤 "맛집 브리핑, ○○ 톱N" 대체).
-    // 제목 공식대로 "N대 맛집"(톱N 금지), 반문형 훅(물음표 2.02x).
+    // "N대 맛집"·"톱N" 없이(2026-11-04), 반문형 훅(물음표 2.02x).
     const F = theme.food || theme.keyword;
     const n = ranked.length;
     const opens = [
-      `${F} ${n}대 맛집, 1위 어딘지 맞혀볼래?`,
+      `${F} 맛집 ${n}곳, 1위 어딘지 맞혀볼래?`,
       `${F} 좋아하면 여기 ${n}곳은 알고 가자`,
       `${F} 진짜 잘하는 집 ${n}곳, 바로 간다`,
     ];

@@ -19,9 +19,11 @@ const cfg = async (k) => (await db.execute({ sql: "SELECT value FROM config WHER
 const setCfg = (k, v) => db.execute({ sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))", args: [k, v] });
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+// 제목 꼬리 앞 단어가 음식 — 옛 "6대 맛집"과 2026-11-04부터의 "원픽 6곳"·"찐맛집 모음"·"맛집 리스트" 모두
+const TITLE_FOOD_RE = /(\S+)\s+(?:\d+대\s*맛집|원픽\s*\d+곳|찐\S*\s*모음|맛집\s*리스트)/;
 /** 편 제목에서 음식명("요즘 난리 난 냉면 6대 맛집" → 냉면). 지역·역 편이면 null */
 function foodOf(title) {
-  const t = String(title ?? "").match(/(\S+)\s+\d+대\s*맛집/)?.[1] ?? "";
+  const t = String(title ?? "").match(TITLE_FOOD_RE)?.[1] ?? "";
   return /^[가-힣]{1,6}$/.test(t) && !/(는|한|운|은|난|할|던|의)$/.test(t) ? t : null;
 }
 
