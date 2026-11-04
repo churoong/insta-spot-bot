@@ -80,6 +80,35 @@ export async function initDb() {
         created_at TEXT DEFAULT (datetime('now')),
         UNIQUE(name, address)
       )`,
+      // 스레드 글 기록·조회수(2026-11-04) — kind: question·dish·poll·recap·crosspost, tag는 토픽 태그 A/B용
+      `CREATE TABLE IF NOT EXISTS threads_posts (
+        id TEXT PRIMARY KEY,
+        kind TEXT,
+        label TEXT,
+        region TEXT,
+        food TEXT,
+        tag TEXT,
+        posted_at TEXT DEFAULT (datetime('now')),
+        views INTEGER, likes INTEGER, replies INTEGER, reposts INTEGER, shares INTEGER,
+        metrics_at TEXT,
+        recap_id TEXT
+      )`,
+      // 내 글 답글에 단 우리 답글 기록(같은 답글에 두 번 안 답하게)
+      `CREATE TABLE IF NOT EXISTS threads_reply_log (
+        reply_id TEXT PRIMARY KEY,
+        post_id TEXT,
+        username TEXT,
+        our_id TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`,
+      // 맛디 지도 접속 수(2026-10-28 사용자 요청) — KST 날짜 × 페이지 종류(map·pin·edition)
+      `CREATE TABLE IF NOT EXISTS map_visits (
+        day TEXT,
+        kind TEXT,
+        views INTEGER DEFAULT 0,
+        visitors INTEGER DEFAULT 0,
+        PRIMARY KEY (day, kind)
+      )`,
       `CREATE TABLE IF NOT EXISTS comment_suggestions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         comment_id TEXT UNIQUE,
@@ -95,6 +124,7 @@ export async function initDb() {
   // 기존 테이블 마이그레이션: 없는 컬럼 추가 (이미 있으면 에러 무시)
   const migrations = [
     "ALTER TABLE posts ADD COLUMN image_urls TEXT",
+    "ALTER TABLE posts ADD COLUMN permalink TEXT", // 릴스 주소(2026-11-04) — 공개 지도 페이지 "이 편 릴스 보기"
     "ALTER TABLE posts ADD COLUMN mapx TEXT",
     "ALTER TABLE posts ADD COLUMN mapy TEXT",
     "ALTER TABLE posts ADD COLUMN like_count INTEGER DEFAULT 0",

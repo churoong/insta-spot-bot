@@ -145,6 +145,56 @@ async function loadData() {
       };
     } catch { /* 데이터 부족 */ }
 
+    // 맛디 지도 접속 수(일별·주간·누적) — app/api/visit이 기록
+    let visits: any = null;
+    try {
+      const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+      const week0 = new Date(Date.now() + 9 * 3600e3 - 6 * 86400e3).toISOString().slice(0, 10);
+      const sum = async (where: string, args: any[]) =>
+        (await db.execute({ sql: `SELECT COALESCE(SUM(views),0) v, COALESCE(SUM(visitors),0) u FROM map_visits ${where}`, args })).rows[0] as any;
+      const days = (await db.execute(
+        "SELECT day, SUM(views) v, SUM(visitors) u FROM map_visits GROUP BY day ORDER BY day DESC LIMIT 7"
+      )).rows as any[];
+      visits = {
+        today: await sum("WHERE day = ?", [today]),
+        week: await sum("WHERE day >= ?", [week0]),
+        total: await sum("WHERE 1 = ?", [1]),
+        days,
+      };
+    } catch { /* 테이블 없음 */ }
+
+    // 스레드 성과(2026-11-04) — scripts/threads-engage.mjs가 threads_posts에 모은다
+    let threads: any = null;
+    try {
+      const byKind = (await db.execute(
+        `SELECT kind, COUNT(*) n, ROUND(AVG(views)) v, SUM(COALESCE(replies,0)) r, SUM(COALESCE(likes,0)) l
+         FROM threads_posts WHERE posted_at > datetime('now','-14 days') GROUP BY kind ORDER BY v DESC`
+      )).rows as any[];
+      const byTag = (await db.execute(
+        `SELECT tag, COUNT(*) n, ROUND(AVG(views)) v FROM threads_posts
+         WHERE kind = 'question' AND tag IS NOT NULL AND posted_at > datetime('now','-30 days') GROUP BY tag ORDER BY v DESC`
+      )).rows as any[];
+      const replied = Number((await db.execute(
+        "SELECT COUNT(*) n FROM threads_reply_log WHERE our_id IS NOT NULL AND created_at > datetime('now','-7 days')"
+      )).rows[0].n);
+      if (byKind.length) threads = { byKind, byTag, replied };
+    } catch { /* 테이블 없음 */ }
+
+    // 활동별 팔로우 전환율(2026-11-04) — 에이전트 private/conversion.py가 src:·newf: 기록을 남긴다
+    let conv: any = null;
+    try {
+      const rows = (await db.execute(`
+        SELECT kind, COUNT(*) AS acted, SUM(CASE WHEN n.key IS NOT NULL THEN 1 ELSE 0 END) AS conv FROM (
+          SELECT substr(key, 5, instr(substr(key, 5), ':') - 1) AS kind,
+                 substr(key, 5 + instr(substr(key, 5), ':')) AS uid, updated_at AS t
+          FROM private_log WHERE key LIKE 'src:%' AND updated_at > datetime('now', '-21 days')
+        ) s LEFT JOIN private_log n ON n.key = 'newf:' || s.uid AND n.updated_at >= s.t AND n.updated_at <= datetime(s.t, '+14 days')
+        GROUP BY kind ORDER BY acted DESC`)).rows as any[];
+      const m = (await db.execute("SELECT value FROM private_log WHERE key = 'quota-mult'")).rows[0];
+      const newf = Number((await db.execute("SELECT COUNT(*) n FROM private_log WHERE key LIKE 'newf:%' AND updated_at > datetime('now','-21 days')")).rows[0].n);
+      if (rows.length) conv = { rows, mults: m ? JSON.parse(String(m.value)) : {}, newf };
+    } catch { /* 에이전트 기록 없음 */ }
+
     // 팔로워 추천 댓글 모음 (모음집 후보 발굴용)
     let suggestions: any[] = [];
     try {
@@ -166,6 +216,9 @@ async function loadData() {
       cooldownMin,
       cronLog,
       report,
+      visits,
+      threads,
+      conv,
       suggestions,
       live,
     };
@@ -377,6 +430,117 @@ export default async function Home() {
                         {Number(r.best.reach || 0).toLocaleString()} · 저장 {Number(r.best.saved) || 0})
                       </>
                     )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {(data as any).visits && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>
+                🗺 맛디 지도 접속{" "}
+                <a href="/m" style={{ color: "#9aa0ae", fontWeight: 400, fontSize: 12 }}>/m 열기</a>
+              </div>
+              {(() => {
+                const v = (data as any).visits;
+                const n = (x: any) => Number(x || 0).toLocaleString();
+                return (
+                  <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>
+                    오늘 <b>{n(v.today.u)}</b>명 · {n(v.today.v)}회
+                    <span style={{ color: "#555" }}> | </span>
+                    최근 7일 <b>{n(v.week.u)}</b>명 · {n(v.week.v)}회
+                    <span style={{ color: "#555" }}> | </span>
+                    누적 <b>{n(v.total.u)}</b>명 · {n(v.total.v)}회
+                    {v.days.length > 0 && (
+                      <div style={{ color: "#9aa0ae", fontSize: 12.5 }}>
+                        {v.days.map((d: any) => `${String(d.day).slice(5).replace("-", "/")} ${n(d.u)}명·${n(d.v)}회`).join("  ·  ")}
+                      </div>
+                    )}
+                    <div style={{ color: "#6b7180", fontSize: 11.5 }}>
+                      명 = 기기별 하루 1회(대략치) · 회 = 페이지 열람(지도·식당·편 페이지 합계) · 검색 로봇 제외
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {(data as any).conv && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>🎯 활동별 팔로우 전환 (최근 21일)</div>
+              {(() => {
+                const c = (data as any).conv;
+                const NAME: Record<string, string> = {
+                  hlike: "해시태그 좋아요", tlike: "큰 계정 댓글러 좋아요", acom: "인기 게시물 댓글", vlike: "소개 식당 위치 좋아요",
+                  vcmt: "소개 식당 위치 댓글", fplike: "맛집 글 좋아요", fpcmt: "맛집 글 댓글", fpfollow: "맛집 글 작성자 팔로우",
+                  peerlike: "비슷한 계정 팔로워 좋아요", likerfollow: "좋아요 누른 사람 팔로우",
+                };
+                return (
+                  <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>
+                    {c.rows.map((r: any) => {
+                      const a = Number(r.acted), v = Number(r.conv || 0);
+                      const mult = c.mults?.[r.kind];
+                      return (
+                        <div key={r.kind}>
+                          {NAME[r.kind] ?? r.kind}: {a}명 → 팔로우 <b>{v}</b> ({a ? ((v / a) * 100).toFixed(1) : "0"}%)
+                          {mult !== undefined && <span style={{ color: mult >= 1 ? "#7ee0a8" : "#e08080", fontSize: 12 }}> · 배분 ×{mult}</span>}
+                        </div>
+                      );
+                    })}
+                    <div style={{ color: "#6b7180", fontSize: 11.5 }}>
+                      전환 = 활동 후 14일 안에 우리를 팔로우 · 새 팔로워 {c.newf}명 기준 · 표본 150명 이상 활동만 매주 월요일 배분 조정(×0.5~1.5)
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {(data as any).threads && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>🧵 스레드 성과 (최근 14일)</div>
+              {(() => {
+                const t = (data as any).threads;
+                const KIND: Record<string, string> = { crosspost: "영상 동시 발행", question: "동네 질문", dish: "오늘의 한 그릇", poll: "음식 투표", recap: "이웃 추천 모음" };
+                const n = (x: any) => Number(x || 0).toLocaleString();
+                return (
+                  <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>
+                    {t.byKind.map((k: any) => (
+                      <div key={k.kind}>
+                        {KIND[k.kind] ?? k.kind} {k.n}건 · 평균 👁 <b>{n(k.v)}</b> · 답글 {n(k.r)} · ❤️ {n(k.l)}
+                      </div>
+                    ))}
+                    {t.byTag.length > 0 && (
+                      <div style={{ color: "#9aa0ae", fontSize: 12.5 }}>
+                        질문 글 태그 비교(30일): {t.byTag.map((g: any) => `#${g.tag} ${g.n}건 평균 ${n(g.v)}`).join("  ·  ")}
+                      </div>
+                    )}
+                    <div style={{ color: "#6b7180", fontSize: 11.5 }}>최근 7일 답글 응대 {t.replied}개 · 조회수는 2시간마다 갱신</div>
                   </div>
                 );
               })()}

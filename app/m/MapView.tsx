@@ -3,7 +3,7 @@
 // Leaflet은 CDN에서 불러온다(번들·의존성 추가 없음). 타일은 OpenStreetMap — 출처 표기 필수, 가벼운 사용만.
 import { useEffect, useRef, useState } from "react";
 
-export interface MapPin { id: number; name: string; x: number; y: number; food: string; title: string }
+export interface MapPin { id: number; name: string; x: number; y: number; food: string; title: string; reel?: string | null }
 interface BorderSeries { key: string; food: string }
 interface BorderData { food: string; types: { key: string; color: string }[]; winners: Record<string, string> }
 
@@ -50,7 +50,7 @@ export default function MapView({ pins }: { pins: MapPin[] }) {
       // 전국 보기에서 맛디 아이콘 450개는 서로 덮여 지도가 안 보인다(2026-10-28 실사이트 점검) —
       // 멀리서는 작은 빨간 점, 확대(10 이상)하면 맛디 아이콘으로 바꾼다.
       const icon = L.icon({ iconUrl: "/mascot.png", iconSize: [38, 38], iconAnchor: [19, 34], popupAnchor: [0, -30] });
-      const popup = (p: MapPin) => `<b>${p.name.replace(/</g, "&lt;")}</b><br>${p.food} · ${p.title.replace(/</g, "&lt;")}<br><a href="/m/${p.id}">자세히 보기 →</a>`;
+      const popup = (p: MapPin) => `<b>${p.name.replace(/</g, "&lt;")}</b><br>${p.food} · ${p.title.replace(/</g, "&lt;")}<br><a href="/m/${p.id}">자세히 보기 →</a>${p.reel ? ` · <a href="${p.reel}">▶ 릴스</a>` : ""}`;
       const dots = L.layerGroup(pins.map((p) => L.circleMarker([p.y, p.x], { radius: 4, color: "#fff", weight: 1, fillColor: "#e02020", fillOpacity: 0.9 }).bindPopup(popup(p))));
       const icons = L.layerGroup(pins.map((p) => L.marker([p.y, p.x], { icon, title: p.name }).bindPopup(popup(p))));
       const sync = () => {

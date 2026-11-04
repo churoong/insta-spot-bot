@@ -56,7 +56,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <p style={{ margin: "8px 0 0" }}>
           <a href={kakaoMapLink(p)} style={{ color: "#e02020", fontWeight: 700 }}>카카오맵에서 길찾기</a>
           <span style={{ color: "#999" }}> · </span>
-          <a href={IG_URL} style={{ color: "#555" }}>소개 영상은 인스타에서</a>
+          <a href={p.permalink ?? IG_URL} style={{ color: "#555" }}>{p.permalink ? "▶ 이 집이 나온 릴스 보기" : "소개 영상은 인스타에서"}</a>
         </p>
       </div>
       {near.length ? (

@@ -42,12 +42,14 @@ export interface Pin {
   title: string; // 소개한 편 제목
   rank: number | null; // 그 편에서 몇 번째
   postedAt: string;
+  permalink: string | null; // 그 편 릴스 주소(없으면 프로필로)
 }
 
 export interface Edition {
   contentId: string;
   title: string;
   postedAt: string;
+  permalink: string | null;
   places: { rank: number; name: string; address: string; pinId: number | null }[];
 }
 
@@ -68,14 +70,15 @@ function rankIn(lines: string, name: string): number | null {
   return null;
 }
 
-/** 편 제목에서 음식명 추정 — "전국 돼지국밥 6대 맛집" → "돼지국밥" */
+/** 편 제목에서 음식명 추정 — "전국 돼지국밥 6대 맛집"·"국밥 원픽 6곳"·"국밥 찐맛집 모음"·"국밥 맛집 리스트" → 음식.
+ *  지역·역 편("○○ 부근 맛집")은 음식이 없어 "맛집" */
 export function foodOf(title: string): string {
-  const t = String(title ?? "").replace(/\d+대\s*맛집.*$/, "").trim().split(/\s+/);
-  return t[t.length - 1] ?? "";
+  const m = String(title ?? "").match(/(\S+)\s+(?:\d+대\s*맛집|원픽\s*\d+곳|찐\S*\s*모음|맛집\s*리스트)/);
+  return m?.[1] ?? "맛집";
 }
 
 const PIN_SQL = `SELECT m.id, m.name, m.address, m.x, m.y, m.content_id, m.created_at,
-  p.place_name AS title, p.address AS lines, p.created_at AS posted_at
+  p.place_name AS title, p.address AS lines, p.created_at AS posted_at, p.permalink
   FROM map_pins m JOIN posts p ON p.content_id = m.content_id
   WHERE p.status = 'published'`;
 
@@ -91,6 +94,7 @@ function toPin(r: any): Pin {
     title: String(r.title ?? ""),
     rank: rankIn(String(r.lines ?? ""), String(r.name)),
     postedAt: String(r.posted_at ?? ""),
+    permalink: r.permalink ? String(r.permalink) : null,
   };
 }
 
@@ -119,7 +123,7 @@ export async function nearbyPins(p: Pin, n = 5, maxKm = 15): Promise<(Pin & { km
 export async function editionById(cid: string): Promise<Edition | null> {
   await initDb();
   const r = await db.execute({
-    sql: "SELECT content_id, place_name, address, created_at FROM posts WHERE content_id = ? AND status = 'published'",
+    sql: "SELECT content_id, place_name, address, created_at, permalink FROM posts WHERE content_id = ? AND status = 'published'",
     args: [cid],
   });
   const row = r.rows[0];
@@ -130,7 +134,7 @@ export async function editionById(cid: string): Promise<Edition | null> {
     const m = l.match(/^(\d+)\.\s*(.+?)\s+—\s+(.*)$/);
     return m ? [{ rank: Number(m[1]), name: m[2].trim(), address: m[3].trim(), pinId: byName.get(m[2].trim()) ?? null }] : [];
   });
-  return { contentId: cid, title: String(row.place_name), postedAt: String(row.created_at ?? ""), places };
+  return { contentId: cid, title: String(row.place_name), postedAt: String(row.created_at ?? ""), permalink: row.permalink ? String(row.permalink) : null, places };
 }
 
 /** 지도 핀이 있는(=식당 목록이 있는) 공개 편들 */
