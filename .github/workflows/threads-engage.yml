@@ -1,0 +1,38 @@
+name: 스레드 답글·모음·투표·성과
+
+# 2026-11-04 사용자 결정(스레드 아이디어 1·2·4·5) — scripts/threads-engage.mjs 머리말 참고.
+# 시각이 중요하지 않아(2시간마다 할 일만 처리) GitHub 예약만 쓴다. 하루 상한·중복 방지는 스크립트.
+on:
+  schedule:
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "쓰기 없이 할 일만 로그로"
+        type: boolean
+        default: false
+
+concurrency:
+  group: threads-engage
+  cancel-in-progress: false
+
+jobs:
+  engage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: 스레드 답글·모음·투표·성과
+        run: npx tsx scripts/threads-engage.mjs
+        env:
+          THREADS_ENGAGE_DRY: ${{ inputs.dry && '1' || '' }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+          GROQ_KEY: ${{ secrets.GROQ_KEY }}
+          GROQ_MODEL: ${{ secrets.GROQ_MODEL }}

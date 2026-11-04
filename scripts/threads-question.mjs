@@ -63,12 +63,18 @@ async function main() {
     `${region}에서 ${food ?? "밥"} 생각날 때 꼭 가는 곳 있으세요? 🍲\n${n1}, ${n2} 말고 숨은 단골집도 듣고 싶어요`,
   ];
   const text = variants[Math.floor(Math.random() * variants.length)];
-  const topicTag = `${region.split(" ")[0]}맛집`;
+  // 토픽 태그 A/B(2026-11-04): 날짜 짝·홀로 "<시도>맛집"·"맛집추천"을 번갈아 — threads_posts.tag로 조회수 비교
+  const dayNo = Math.floor((Date.now() + 9 * 3600e3) / 864e5);
+  const topicTag = dayNo % 2 === 0 ? `${region.split(" ")[0]}맛집` : "맛집추천";
   console.log(`동네: ${region} / 음식: ${food ?? "-"} / 태그: ${topicTag}\n${text}`);
   if (DRY) return;
   const id = await publishThreads({ text, topicTag });
   if (!id) return console.log("Threads 미연결 — 건너뜀");
   await setCfg("threads_q_day", today);
+  await db.execute({
+    sql: "INSERT OR REPLACE INTO threads_posts (id, kind, label, region, food, tag) VALUES (?, 'question', ?, ?, ?, ?)",
+    args: [id, text.split("\n")[0].slice(0, 80), region, food ?? null, topicTag],
+  });
   await setCfg("threads_q_used", JSON.stringify([...used.filter((u) => Date.now() - Date.parse(u.at) < 60 * 864e5), { region, at: new Date().toISOString(), id }]));
   console.log("🧵 동네 질문 글:", id);
 }

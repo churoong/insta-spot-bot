@@ -163,6 +163,23 @@ async function loadData() {
       };
     } catch { /* 테이블 없음 */ }
 
+    // 스레드 성과(2026-11-04) — scripts/threads-engage.mjs가 threads_posts에 모은다
+    let threads: any = null;
+    try {
+      const byKind = (await db.execute(
+        `SELECT kind, COUNT(*) n, ROUND(AVG(views)) v, SUM(COALESCE(replies,0)) r, SUM(COALESCE(likes,0)) l
+         FROM threads_posts WHERE posted_at > datetime('now','-14 days') GROUP BY kind ORDER BY v DESC`
+      )).rows as any[];
+      const byTag = (await db.execute(
+        `SELECT tag, COUNT(*) n, ROUND(AVG(views)) v FROM threads_posts
+         WHERE kind = 'question' AND tag IS NOT NULL AND posted_at > datetime('now','-30 days') GROUP BY tag ORDER BY v DESC`
+      )).rows as any[];
+      const replied = Number((await db.execute(
+        "SELECT COUNT(*) n FROM threads_reply_log WHERE our_id IS NOT NULL AND created_at > datetime('now','-7 days')"
+      )).rows[0].n);
+      if (byKind.length) threads = { byKind, byTag, replied };
+    } catch { /* 테이블 없음 */ }
+
     // 팔로워 추천 댓글 모음 (모음집 후보 발굴용)
     let suggestions: any[] = [];
     try {
@@ -185,6 +202,7 @@ async function loadData() {
       cronLog,
       report,
       visits,
+      threads,
       suggestions,
       live,
     };
@@ -434,6 +452,40 @@ export default async function Home() {
                     <div style={{ color: "#6b7180", fontSize: 11.5 }}>
                       명 = 기기별 하루 1회(대략치) · 회 = 페이지 열람(지도·식당·편 페이지 합계) · 검색 로봇 제외
                     </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {(data as any).threads && (
+            <div
+              style={{
+                background: "#1a1d24",
+                border: "1px solid #2a2e38",
+                borderRadius: 12,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 8 }}>🧵 스레드 성과 (최근 14일)</div>
+              {(() => {
+                const t = (data as any).threads;
+                const KIND: Record<string, string> = { crosspost: "영상 동시 발행", question: "동네 질문", dish: "오늘의 한 그릇", poll: "음식 투표", recap: "이웃 추천 모음" };
+                const n = (x: any) => Number(x || 0).toLocaleString();
+                return (
+                  <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>
+                    {t.byKind.map((k: any) => (
+                      <div key={k.kind}>
+                        {KIND[k.kind] ?? k.kind} {k.n}건 · 평균 👁 <b>{n(k.v)}</b> · 답글 {n(k.r)} · ❤️ {n(k.l)}
+                      </div>
+                    ))}
+                    {t.byTag.length > 0 && (
+                      <div style={{ color: "#9aa0ae", fontSize: 12.5 }}>
+                        질문 글 태그 비교(30일): {t.byTag.map((g: any) => `#${g.tag} ${g.n}건 평균 ${n(g.v)}`).join("  ·  ")}
+                      </div>
+                    )}
+                    <div style={{ color: "#6b7180", fontSize: 11.5 }}>최근 7일 답글 응대 {t.replied}개 · 조회수는 2시간마다 갱신</div>
                   </div>
                 );
               })()}

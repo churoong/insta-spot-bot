@@ -17,6 +17,10 @@
       "schedule": "30 2 * * 0"
     },
     {
+      "path": "/api/cron/trigger/threadsdish",
+      "schedule": "30 3 * * *"
+    },
+    {
       "path": "/api/cron/trigger/threadsq",
       "schedule": "30 11 * * *"
     },
