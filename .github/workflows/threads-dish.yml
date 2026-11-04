@@ -1,0 +1,50 @@
+name: 스레드 오늘의 한 그릇
+
+# 2026-11-04 사용자 결정(스레드 아이디어 3): 매일 낮 소개했던 식당 한 곳을 3~4줄 글로.
+# 주 경로는 Vercel 크론(vercel.json /api/cron/trigger/threadsdish, KST 12:30), 아래 schedule은 폴백.
+# 게이트는 11:30~16:00 도착분만. 하루 1회 가드는 스크립트.
+on:
+  schedule:
+    - cron: "30 3 * * *" # UTC 03:30 = KST 12:30
+    - cron: "30 4 * * *" # 폴백
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "올리지 않고 문구만 로그로"
+        type: boolean
+        default: false
+
+concurrency:
+  group: threads-dish
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 시간 창 게이트 (KST 11:30~16:00, 수동 실행은 통과)
+        id: gate
+        run: |
+          T=$((10#$(TZ=Asia/Seoul date +%H%M)))
+          if [ "${{ github.event_name }}" != "schedule" ] || { [ "$T" -ge 1130 ] && [ "$T" -lt 1600 ]; }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "시간 창 밖(KST $T) — 스킵"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
+        run: npm ci
+      - name: 한 그릇 글 발행
+        if: steps.gate.outputs.go == '1'
+        run: npx tsx scripts/threads-dish.mjs
+        env:
+          THREADS_DISH_DRY: ${{ inputs.dry && '1' || '' }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

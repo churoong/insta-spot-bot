@@ -80,6 +80,27 @@ export async function initDb() {
         created_at TEXT DEFAULT (datetime('now')),
         UNIQUE(name, address)
       )`,
+      // 스레드 글 기록·조회수(2026-11-04) — kind: question·dish·poll·recap·crosspost, tag는 토픽 태그 A/B용
+      `CREATE TABLE IF NOT EXISTS threads_posts (
+        id TEXT PRIMARY KEY,
+        kind TEXT,
+        label TEXT,
+        region TEXT,
+        food TEXT,
+        tag TEXT,
+        posted_at TEXT DEFAULT (datetime('now')),
+        views INTEGER, likes INTEGER, replies INTEGER, reposts INTEGER, shares INTEGER,
+        metrics_at TEXT,
+        recap_id TEXT
+      )`,
+      // 내 글 답글에 단 우리 답글 기록(같은 답글에 두 번 안 답하게)
+      `CREATE TABLE IF NOT EXISTS threads_reply_log (
+        reply_id TEXT PRIMARY KEY,
+        post_id TEXT,
+        username TEXT,
+        our_id TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      )`,
       // 맛디 지도 접속 수(2026-10-28 사용자 요청) — KST 날짜 × 페이지 종류(map·pin·edition)
       `CREATE TABLE IF NOT EXISTS map_visits (
         day TEXT,

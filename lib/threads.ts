@@ -96,13 +96,24 @@ async function waitContainer(id: string, token: string, maxMs: number) {
  * 스레드 글 발행. 영상이 있으면 영상, 실패하면 이미지로 한 번 더. 연결 전이면 null.
  * text는 500자 한도(이모지는 바이트 수로 센다) — 호출부가 짧게 만든다.
  */
-export async function publishThreads(opts: { text: string; videoUrl?: string; imageUrl?: string; topicTag?: string }): Promise<string | null> {
+export async function publishThreads(opts: {
+  text: string; videoUrl?: string; imageUrl?: string; topicTag?: string;
+  replyToId?: string; // 내 글 아래 이어 쓰기(답글)
+  poll?: { a: string; b: string; c?: string; d?: string }; // 투표 첨부(텍스트 글만)
+}): Promise<string | null> {
   const auth = await getAuth();
   if (!auth) return null;
   try { await refreshThreadsToken(); } catch (e) { console.error(String(e).slice(0, 160)); }
   const { token, userId } = (await getAuth())!;
   const base: Record<string, string> = { text: opts.text };
   if (opts.topicTag) base.topic_tag = opts.topicTag;
+  if (opts.replyToId) base.reply_to_id = opts.replyToId;
+  if (opts.poll) {
+    const o: Record<string, string> = { option_a: opts.poll.a, option_b: opts.poll.b };
+    if (opts.poll.c) o.option_c = opts.poll.c;
+    if (opts.poll.d) o.option_d = opts.poll.d;
+    base.poll_attachment = JSON.stringify(o);
+  }
   const tries: Record<string, string>[] = [];
   if (opts.videoUrl) tries.push({ ...base, media_type: "VIDEO", video_url: opts.videoUrl });
   if (opts.imageUrl) tries.push({ ...base, media_type: "IMAGE", image_url: opts.imageUrl });
@@ -156,4 +167,45 @@ export async function threadsMe(): Promise<string | null> {
   if (!auth) return null;
   const j = await (await fetch(`${THREADS_GRAPH}/me?fields=username&access_token=${encodeURIComponent(auth.token)}`)).json();
   return j.username ?? null;
+}
+
+// ---------- 내 글 답글 읽기 · 조회수 · 투표 결과(2026-11-04 사용자 결정 — 스레드 아이디어 5종) ----------
+// 권한: threads_read_replies(답글 읽기), threads_manage_insights(조회수). connect 스코프에 포함.
+export interface ThreadsReplyItem { id: string; text?: string; username?: string; timestamp?: string; is_reply_owned_by_me?: boolean }
+
+async function get(path: string, params: Record<string, string>) {
+  const auth = await getAuth();
+  if (!auth) return null;
+  const u = new URL(`${THREADS_GRAPH}/${path}`);
+  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+  u.searchParams.set("access_token", auth.token);
+  const j = await (await fetch(u, { signal: AbortSignal.timeout(20000) })).json();
+  if (j.error) throw new Error(`Threads ${path}: ${j.error.message ?? JSON.stringify(j.error)}`);
+  return j;
+}
+
+/** 내 글에 바로 달린 답글(최상위). 미연결이면 [] */
+export async function threadsReplies(mediaId: string): Promise<ThreadsReplyItem[]> {
+  const j = await get(`${mediaId}/replies`, { fields: "id,text,username,timestamp,is_reply_owned_by_me" });
+  return (j?.data ?? []) as ThreadsReplyItem[];
+}
+
+/** 글 하나의 반응 수 — views·likes·replies·reposts·quotes·shares */
+export async function threadsInsights(mediaId: string): Promise<Record<string, number> | null> {
+  const j = await get(`${mediaId}/insights`, { metric: "views,likes,replies,reposts,quotes,shares" });
+  if (!j) return null;
+  const out: Record<string, number> = {};
+  for (const m of j.data ?? []) out[m.name] = Number(m.total_value?.value ?? m.values?.[0]?.value ?? 0);
+  return out;
+}
+
+/** 투표 결과 — 선택지별 득표율(0~1)과 총 투표 수. 투표가 없거나 못 읽으면 null */
+export async function threadsPollResult(mediaId: string): Promise<{ pct: Record<string, number>; total: number } | null> {
+  const f = "option_a,option_b,option_c,option_d,option_a_votes_percentage,option_b_votes_percentage,option_c_votes_percentage,option_d_votes_percentage,total_votes";
+  const j = await get(mediaId, { fields: `poll_attachment{${f}}` });
+  const p = j?.poll_attachment;
+  if (!p) return null;
+  const pct: Record<string, number> = {};
+  for (const k of ["a", "b", "c", "d"]) if (p[`option_${k}`]) pct[k] = Number(p[`option_${k}_votes_percentage`] ?? 0);
+  return { pct, total: Number(p.total_votes ?? 0) };
 }
