@@ -70,6 +70,12 @@ function buildEngagementGuide(posts: any[]) {
   return { tags, timeSlots };
 }
 
+// 이모지 반쪽(외톨이 서로게이트)이 섞이면 encodeURIComponent가 URIError로 페이지 전체를 500으로 만든다(2026-11-04).
+function safeUri(x: unknown): string {
+  try { return encodeURIComponent(String(x ?? "")); }
+  catch { return encodeURIComponent(String(x ?? "").replace(/[\uD800-\uDFFF]/g, "")); }
+}
+
 async function loadData() {
   try {
     await initDb();
@@ -328,7 +334,7 @@ export default async function Home() {
                   {guide.tags.map((t) => (
                     <a
                       key={t}
-                      href={`https://www.instagram.com/explore/tags/${encodeURIComponent(t)}/`}
+                      href={`https://www.instagram.com/explore/tags/${safeUri(t)}/`}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{
@@ -564,7 +570,7 @@ export default async function Home() {
                 제보 가게가 TourAPI에 있으면 바로 게시 가능)
               </div>
               {(data as any).suggestions.map((s: any, i: number) => {
-                const q = encodeURIComponent(String(s.text).replace(/[#@]/g, "").slice(0, 40));
+                const q = safeUri(Array.from(String(s.text).replace(/[#@]/g, "")).slice(0, 40).join(""));
                 return (
                   <div key={i} style={{ borderTop: "1px solid #23262e", padding: "8px 0", fontSize: 13 }}>
                     <div>
@@ -675,7 +681,7 @@ export default async function Home() {
                       // 썸네일을 탭하면 우리 서버 프록시로 개별 저장 (모바일 대응)
                       <a
                         key={i}
-                        href={`/api/image?url=${encodeURIComponent(src)}&name=photo-${i + 1}`}
+                        href={`/api/image?url=${safeUri(src)}&name=photo-${i + 1}`}
                         download={`photo-${i + 1}.jpg`}
                         title="탭하면 저장돼요"
                         style={{ flexShrink: 0, lineHeight: 0 }}
