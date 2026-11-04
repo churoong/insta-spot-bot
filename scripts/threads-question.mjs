@@ -20,9 +20,9 @@ const kstDay = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10
 const cfg = async (k) => (await db.execute({ sql: "SELECT value FROM config WHERE key = ?", args: [k] })).rows[0]?.value ?? null;
 const setCfg = (k, v) => db.execute({ sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))", args: [k, v] });
 
-/** 편 제목에서 음식명 — "전국 돼지국밥 6대 맛집" → "돼지국밥". 지역편("놓치면 후회하는 6대 맛집 · 성수동")이면 null */
+/** 편 제목에서 음식명 — "전국 돼지국밥 6대 맛집" → "돼지국밥". 지역·역 편("○○ 부근 맛집", 옛 "6대 맛집 · 성수동")이면 null */
 function foodOf(title) {
-  const t = String(title ?? "").replace(/\d+대\s*맛집.*$/, "").trim().split(/\s+/).pop() ?? "";
+  const t = String(title ?? "").match(/(\S+)\s+\d+대\s*맛집/)?.[1] ?? "";
   return /^[가-힣]{1,6}$/.test(t) && !/(는|한|운|은|난|할|던|의)$/.test(t) ? t : null;
 }
 
@@ -36,25 +36,26 @@ async function main() {
 
   const rows = (await db.execute(`SELECT m.name, m.address, p.place_name AS title FROM map_pins m
     JOIN posts p ON p.content_id = m.content_id WHERE p.status = 'published'`)).rows;
-  const byRegion = new Map();
+  // 동네 × 음식으로 묶는다(2026-11-04 사용자: "강남구 냉면집을 묻는데 소개한 곳이 브루하우스·호족반이면 쌩뚱맞다").
+  // 질문하는 음식과 같이 적는 두 곳이 반드시 같은 음식 편에서 나오게 하고, 음식 없는 지역·역 편 식당은
+  // "단골 맛집" 질문에만 쓴다.
+  const groups = new Map();
   for (const r of rows) {
     const [a, b] = String(r.address ?? "").trim().split(/\s+/);
     if (!SIDO[a] || !b || !/[시군구]$/.test(b)) continue;
     const region = `${SIDO[a]} ${b}`;
-    const g = byRegion.get(region) ?? byRegion.set(region, { names: new Set(), foods: new Map() }).get(region);
-    g.names.add(String(r.name));
-    const f = foodOf(r.title);
-    if (f) g.foods.set(f, (g.foods.get(f) || 0) + 1);
+    const food = foodOf(r.title);
+    const k = `${region}|${food ?? ""}`;
+    (groups.get(k) ?? groups.set(k, { region, food, names: new Set() }).get(k)).names.add(String(r.name));
   }
-  const cands = [...byRegion.entries()].filter(([reg, g]) => g.names.size >= 2 && !recent.has(reg));
+  const cands = [...groups.values()].filter((g) => g.names.size >= 2 && !recent.has(g.region));
   if (!cands.length) return console.log("물어볼 동네가 없다(모두 최근 30일 안에 사용)");
-  // 소개한 집이 많은 동네일수록 잘 뽑히게(√ 가중)
-  const w = cands.map(([, g]) => Math.sqrt(g.names.size));
+  // 소개한 집이 많을수록 잘 뽑히게(√ 가중), 음식이 정해진 질문이 더 구체적이라 1.5배
+  const w = cands.map((g) => Math.sqrt(g.names.size) * (g.food ? 1.5 : 1));
   let x = Math.random() * w.reduce((a, b) => a + b, 0), pick = cands[0];
   for (let i = 0; i < cands.length; i++) { x -= w[i]; if (x <= 0) { pick = cands[i]; break; } }
-  const [region, g] = pick;
-  const food = [...g.foods.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  const [n1, n2] = [...g.names].sort(() => Math.random() - 0.5);
+  const { region, food } = pick;
+  const [n1, n2] = [...pick.names].sort(() => Math.random() - 0.5);
   const thing = food ? `${food}집` : "맛집";
   const variants = [
     `${region} 사시는 분들 🙌 단골 ${thing} 어디세요?\n저희는 ${n1}, ${n2} 소개했었는데 여러분 원픽도 궁금해요!`,
