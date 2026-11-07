@@ -387,6 +387,9 @@ def answer_dms(c):
         if not msg.text:
             continue
         state_set(f"dmdone:{msg.id}", "1")
+        import permission
+        if permission.handle_reply(c, str(msg.user_id), msg.text, th.id):  # 소개 허락 요청에 대한 답
+            continue
         if peer_reply(c, str(msg.user_id), msg.text, th.id):  # 맞교환 제안에 대한 답
             continue
         if time.time() - msg.timestamp.timestamp() > 3 * 86400:
