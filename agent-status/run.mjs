@@ -2,10 +2,10 @@ import { createClient } from "@libsql/client";
 const db = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
 const q = async (s) => (await db.execute(s)).rows;
 const rows = await q(`SELECT id, content_id cid, created_at t, views v, reach r, saved s, like_count l, comment_count c, reel_format f, cover_style cs, substr(replace(caption, char(10), ' / '), 1, 70) cap
-  FROM posts WHERE status='published' AND created_at > datetime('now','-75 days') ORDER BY created_at`);
-const out = rows.map((x) => `${String(x.t).slice(5, 13)}|${x.cid}|${x.v ?? "-"}|${x.r ?? "-"}|${x.s ?? "-"}|${x.l}|${x.c}|${x.f ?? ""}|${x.cap}`);
-const chunk = 45;
-for (let i = 0; i < out.length && i / chunk < 7; i += chunk) console.log(`::notice title=p${i / chunk}::${out.slice(i, i + chunk).join(" ## ")}`);
+  FROM posts WHERE status='published' AND created_at > datetime('now','-50 days') ORDER BY created_at`);
+const out = rows.map((x) => `${String(x.t).slice(5, 13)}|${String(x.cid).replace(/-2026\d+$|-2026-[\d-]+$/, '')}|${x.v ?? '-'}|${x.r ?? '-'}|${x.s ?? '-'}|${x.l}|${x.c}|${x.f ?? ''}|${(String(x.cap).split('|')[1] || '').split(' / ')[0].trim().slice(0, 28)}`);
+const chunk = 22;
+for (let i = 0; i < out.length && i / chunk < 9; i += chunk) console.log(`::notice title=p${i / chunk}::${out.slice(i, i + chunk).join(" ## ")}`);
 const fl = await q("SELECT date, count FROM follower_log ORDER BY date DESC LIMIT 60");
 console.log(`::notice title=fol::${fl.map((r) => `${String(r.date).slice(5)}=${r.count}`).join(" ")}`);
 try { const th = await q("SELECT kind, tag, substr(posted_at,6,11) t, views, likes, replies FROM threads_posts ORDER BY posted_at DESC LIMIT 40");
