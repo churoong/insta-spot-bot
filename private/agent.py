@@ -32,6 +32,7 @@ import conversion
 import engage
 import follows
 import growth
+import permission
 
 log = get_logger("agent")
 START_DATE = "2026-10-27"  # 이 날짜 이후 발행분만 사후 처리(과거 게시물은 건드리지 않는다)
@@ -576,6 +577,8 @@ def growth_round():
         ("남의 게시물 댓글", lambda: growth.auto_comments(c)),
         ("큰 계정 첫 댓글", lambda: growth.fast_first_comments(c)),
         ("큰 계정 댓글러 팔로우", lambda: growth.targeted_follows(c)),
+        ("소개 허락 요청", lambda: permission.ask_permissions(c)),
+        ("허락받은 소개 게시", lambda: permission.publish_granted(c)),
         ("자동 맞팔", lambda: follows.follow_back(c)),
         ("주간 팔로잉 정리", lambda: follows.weekly_cleanup(c)),
         ("검색 수요 수집", lambda: growth.demand_snapshot(c)),
