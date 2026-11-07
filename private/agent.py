@@ -37,8 +37,8 @@ log = get_logger("agent")
 START_DATE = "2026-10-27"  # 이 날짜 이후 발행분만 사후 처리(과거 게시물은 건드리지 않는다)
 LIKE_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", "해장국", "짬뽕맛집", "맛집추천", "전국맛집", "노포맛집", "가성비맛집"]
 LIKES_PER_DAY = (18, 26)  # 10/28 35~50으로 늘렸다가 같은 날 되돌림(사용자: 효과 작음 → 맛집 글 활동으로)
-UNFOLLOW_PER_DAY = 40
-UNFOLLOW_PER_RUN = 14
+UNFOLLOW_PER_DAY = 120  # 2026-11-07 40 → 120(팔로우 확대에 맞춰 정리도 빠르게)
+UNFOLLOW_PER_RUN = 20
 
 _cl = None
 _paused_until = 0.0
@@ -404,7 +404,7 @@ def unfollow_batch():
     if not approved.exists() and not auto_q.exists():
         return
     last = state_get("unfollow:last")
-    if last and time.time() - float(last) < 3 * 3600:
+    if last and time.time() - float(last) < 1.5 * 3600:
         return
     today = f"{now_kst():%Y-%m-%d}"
     used = int(state_get(f"unfollow:{today}") or 0)
@@ -575,6 +575,7 @@ def growth_round():
         ("타깃 좋아요", lambda: growth.targeted_likes(c)),
         ("남의 게시물 댓글", lambda: growth.auto_comments(c)),
         ("큰 계정 첫 댓글", lambda: growth.fast_first_comments(c)),
+        ("큰 계정 댓글러 팔로우", lambda: growth.targeted_follows(c)),
         ("자동 맞팔", lambda: follows.follow_back(c)),
         ("주간 팔로잉 정리", lambda: follows.weekly_cleanup(c)),
         ("검색 수요 수집", lambda: growth.demand_snapshot(c)),

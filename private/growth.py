@@ -431,13 +431,13 @@ def set_profile_link(c):
 # ---------- 타깃 좋아요 ----------
 def big_food_accounts(c) -> list:
     """맛집 태그 인기 게시물 작성자 중 팔로워 5만+ 계정(주 1회 갱신)."""
-    k = f"bigacc:{now_kst():%G-%V}"
+    k = f"bigacc2:{now_kst():%G-%V}"  # 2026-11-07 확대: 태그 4개 × 인기 12개, 팔로워 3만+
     cached = state_get(k)
     if cached:
         return json.loads(cached)
     seen, out = set(), []
-    for tag in random.sample(FOOD_TAGS, 2):
-        for m in c.hashtag_medias_top(tag, amount=9):
+    for tag in random.sample(FOOD_TAGS, 4):
+        for m in c.hashtag_medias_top(tag, amount=12):
             uid = str(m.user.pk)
             if uid in seen:
                 continue
@@ -445,7 +445,7 @@ def big_food_accounts(c) -> list:
             nap(2, 5)
             try:
                 info = c.user_info(uid)
-                if info.follower_count >= 50000:
+                if info.follower_count >= 30000:
                     out.append(uid)
             except Exception:
                 pass
@@ -513,9 +513,77 @@ def targeted_likes(c):
         log.info(f"🎯 타깃 좋아요 {done}개")
 
 
+# ---------- 큰 맛집 계정 댓글러 팔로우(2026-11-07 사용자: "제재를 받더라도 모험") ----------
+TARGET_FOLLOWS_PER_DAY = (90, 110)
+TFOLLOW_PER_CALL = 12  # 한 번에 몰지 않고 라운드마다 조금씩
+HANGUL_RE = re.compile(r"[가-힣]")
+
+
+def targeted_follows(c):
+    """큰 맛집 계정 최근 게시물 댓글러(맛집에 관심 있는 한국 사용자)를 하루 90~110명 팔로우.
+    fbat을 남겨 주간 정리가 14일 유예 뒤 맞팔 안 한 사람을 언팔한다. 이름에 한글이 있는 계정만."""
+    import time as _t
+    from follows import FOLLOWERS_F
+    day = today()
+    goal = int(state_get(f"tfollow-goal:{day}") or 0)
+    if not goal:
+        goal = random.randint(*TARGET_FOLLOWS_PER_DAY)
+        state_set(f"tfollow-goal:{day}", str(goal))
+    used = int(state_get(f"tfollow:{day}") or 0)
+    if used >= goal:
+        return
+    pool = json.loads(state_get(f"tfpool:{day}") or "[]")
+    if not pool:
+        accs = big_food_accounts(c)
+        if not accs:
+            return
+        seen = set()
+        for acc in random.sample(accs, min(8, len(accs))):
+            try:
+                for m in c.user_medias(acc, amount=3):
+                    for cm in c.media_comments(m.id, amount=60):
+                        uid = str(cm.user.pk)
+                        if uid not in seen and HANGUL_RE.search(f"{getattr(cm.user, 'full_name', '') or ''}"):
+                            seen.add(uid)
+                            pool.append(uid)
+                    nap(5, 15)
+            except Exception as e:
+                if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
+                    raise
+                log.warning(f"댓글러 수집 {acc} 건너뜀: {type(e).__name__} {str(e)[:100]}")
+            if len(pool) >= goal * 2:
+                break
+        random.shuffle(pool)
+        state_set(f"tfpool:{day}", json.dumps(pool))
+        log.info(f"🎯 팔로우 후보 {len(pool)}명")
+    followers = set(json.loads(FOLLOWERS_F.read_text(encoding="utf-8"))) if FOLLOWERS_F.exists() else set()
+    following = set(json.loads(state_get("fb:following-cache") or "[]"))
+    me, n = str(c.user_id), 0
+    while pool and n < TFOLLOW_PER_CALL and used + n < goal:
+        uid = pool.pop()
+        if uid == me or uid in followers or uid in following or state_get(f"fbat:{uid}"):
+            continue
+        try:
+            c.user_follow(uid)
+        except Exception as e:
+            if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
+                state_set(f"tfpool:{day}", json.dumps(pool))
+                raise
+            continue
+        state_set(f"fbat:{uid}", str(_t.time()))
+        conversion.mark("tfollow", uid)
+        n += 1
+        nap(35, 100)
+    state_set(f"tfpool:{day}", json.dumps(pool))
+    state_set(f"tfollow:{day}", str(used + n))
+    if n:
+        log.info(f"➕ 큰 계정 댓글러 팔로우 {n}명 (오늘 {used + n}/{goal})")
+
+
 # ---------- 큰 맛집 계정 새 게시물에 빠른 첫 댓글(2026-10-27 사용자 결정) ----------
-FAST_PER_DAY = 8  # 2026-10-28 확대(5 → 8)
-FAST_WINDOW_MIN = 20
+FAST_PER_DAY = 25  # 2026-10-28 5 → 8, 2026-11-07 8 → 25(사용자: 위험 감수하고 확대)
+FAST_WINDOW_MIN = 30
+FAST_PER_ACCOUNT = 2
 
 
 def fast_first_comments(c):
@@ -532,7 +600,7 @@ def fast_first_comments(c):
     big = big_food_accounts(c)
     if not big:
         return
-    for uid in big[:12]:
+    for uid in big[:40]:
         if not state_get(f"followbig:{uid}"):
             c.user_follow(uid)
             state_set(f"followbig:{uid}", "1")
@@ -545,7 +613,7 @@ def fast_first_comments(c):
         uid = str((m.get("user") or {}).get("pk") or "")
         if uid not in bigset or _t.time() - int(m.get("taken_at") or 0) > FAST_WINDOW_MIN * 60:
             continue
-        if state_get(f"fast-u:{uid}:{today()}") or state_get(f"fast-m:{m.get('id')}"):
+        if int(state_get(f"fast-u:{uid}:{today()}") or 0) >= FAST_PER_ACCOUNT or state_get(f"fast-m:{m.get('id')}"):
             continue
         cap = str((m.get("caption") or {}).get("text") or "")
         if len(cap) < 15:
@@ -559,7 +627,7 @@ def fast_first_comments(c):
         nap(30, 120)  # 올라오자마자 0초 댓글은 봇 티가 난다
         c.media_comment(str(m.get("id")), text)
         like_too(c, str(m.get("id")), bool(m.get("has_liked")))
-        state_set(f"fast-u:{uid}:{today()}", "1")
+        state_set(f"fast-u:{uid}:{today()}", str(int(state_get(f"fast-u:{uid}:{today()}") or 0) + 1))
         state_set(f"fast:{today()}", str(used + 1))
         log.info(f"⚡ 큰 계정 새 게시물 첫 댓글(@{(m.get('user') or {}).get('username')}): {text}")
         return
