@@ -496,7 +496,7 @@ export default async function Home() {
                 const NAME: Record<string, string> = {
                   hlike: "해시태그 좋아요", tlike: "큰 계정 댓글러 좋아요", acom: "인기 게시물 댓글", vlike: "소개 식당 위치 좋아요",
                   vcmt: "소개 식당 위치 댓글", fplike: "맛집 글 좋아요", fpcmt: "맛집 글 댓글", fpfollow: "맛집 글 작성자 팔로우",
-                  peerlike: "비슷한 계정 팔로워 좋아요", likerfollow: "좋아요 누른 사람 팔로우",
+                  peerlike: "비슷한 계정 팔로워 좋아요", likerfollow: "좋아요 누른 사람 팔로우", tfollow: "큰 계정 댓글러 팔로우",
                 };
                 return (
                   <div style={{ color: "#c8cdd8", fontSize: 13.5, lineHeight: 1.9 }}>

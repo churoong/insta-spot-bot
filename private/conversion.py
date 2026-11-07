@@ -27,6 +27,7 @@ QUOTAS = {
     "fpfollow": ("engage", "FOOD_FOLLOWS", 25),
     "peerlike": ("engage", "PEER_LIKES_PER_DAY", 25),
     "likerfollow": ("follows", "LIKER_FOLLOW_PER_DAY", 20),
+    "tfollow": ("growth", "TARGET_FOLLOWS_PER_DAY", (90, 110)),
 }
 MIN_SAMPLE = 150
 
