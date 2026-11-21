@@ -130,7 +130,7 @@ def weekly_cleanup(c):
 
 
 # ---------- 좋아요만 누른 사람 먼저 팔로우(2026-10-27 사용자 결정) ----------
-LIKER_FOLLOW_PER_DAY = 20
+LIKER_FOLLOW_PER_DAY = 30  # 2026-11-21 20 → 30(전환 50% — 가장 높다, 대상 수가 실제 상한)
 
 
 def follow_likers(c, own_media: list):

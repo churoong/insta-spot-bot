@@ -28,11 +28,11 @@ import conversion
 from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, state_get, state_set
 
 log = get_logger("agent")
-VISITED_LIKES, VISITED_COMMENTS = 40, 12  # 2026-10-28 확대(15·5 → 25·8 → 40·12, 사용자: 식당 좋아요·댓글이 너무 적다)
+VISITED_LIKES, VISITED_COMMENTS = 40, 4  # 2026-11-21 댓글 12 → 4(전환 0/14)  # 2026-10-28 확대(15·5 → 25·8 → 40·12, 사용자: 식당 좋아요·댓글이 너무 적다)
 STORY_USERS_PER_DAY, STORY_LIKES_PER_DAY, STORY_USERS_PER_ROUND = 150, 10, 30
 WELCOME_PER_DAY = 20
 COMMENTER_DM_PER_DAY = 10
-PEER_LIKES_PER_DAY = 25  # 2026-10-28 확대(15 → 25)
+PEER_LIKES_PER_DAY = 10  # 2026-10-28 15 → 25, 2026-11-21 → 10(전환 0/22)
 REGION_HINT = re.compile(r"([가-힣]{1,6}(?:역|동|구|시|군|읍|면|시장|거리|길))|(서울|부산|대구|인천|광주|대전|울산|세종|제주|강릉|전주|경주|여수|춘천|수원|창원|포항|원주|천안|청주)")
 BLOCK = ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")
 
@@ -203,7 +203,7 @@ def visited_engage(c, find_location):
 
 
 # ---------- 맛집 소개 게시물(우리가 소개한 식당이 아니어도) 좋아요·댓글·팔로우 — 2026-10-28 사용자 결정 ----------
-FOOD_POST_LIKES, FOOD_POST_COMMENTS, FOOD_FOLLOWS = 30, 10, 25
+FOOD_POST_LIKES, FOOD_POST_COMMENTS, FOOD_FOLLOWS = 30, 5, 30  # 2026-11-21 댓글 10 → 5, 팔로우 25 → 30(전환 22%)
 FOOD_POST_TAGS = ["맛집", "맛집추천", "맛집탐방", "먹스타그램", "맛스타그램", "로컬맛집", "노포맛집", "국밥맛집",
                   "서울맛집", "부산맛집", "대구맛집", "대전맛집", "광주맛집", "제주맛집", "전주맛집", "강릉맛집"]
 # 가게를 소개하는 글의 흔적(위치·메뉴·가격·영업시간 등) — 두 가지 이상 있어야 '맛집 소개'로 본다
