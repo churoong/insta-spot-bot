@@ -19,15 +19,15 @@ log = get_logger("agent")
 QUOTAS = {
     "hlike": ("agent", "LIKES_PER_DAY", (18, 26)),
     "tlike": ("growth", "TARGET_LIKES_PER_DAY", (25, 35)),
-    "acom": ("growth", "COMMENTS_PER_DAY", (16, 22)),
+    "acom": ("growth", "COMMENTS_PER_DAY", (6, 9)),
     "vlike": ("engage", "VISITED_LIKES", 40),
-    "vcmt": ("engage", "VISITED_COMMENTS", 12),
+    "vcmt": ("engage", "VISITED_COMMENTS", 4),
     "fplike": ("engage", "FOOD_POST_LIKES", 30),
-    "fpcmt": ("engage", "FOOD_POST_COMMENTS", 10),
-    "fpfollow": ("engage", "FOOD_FOLLOWS", 25),
-    "peerlike": ("engage", "PEER_LIKES_PER_DAY", 25),
-    "likerfollow": ("follows", "LIKER_FOLLOW_PER_DAY", 20),
-    "tfollow": ("growth", "TARGET_FOLLOWS_PER_DAY", (90, 110)),
+    "fpcmt": ("engage", "FOOD_POST_COMMENTS", 5),
+    "fpfollow": ("engage", "FOOD_FOLLOWS", 30),
+    "peerlike": ("engage", "PEER_LIKES_PER_DAY", 10),
+    "likerfollow": ("follows", "LIKER_FOLLOW_PER_DAY", 30),
+    "tfollow": ("growth", "TARGET_FOLLOWS_PER_DAY", (35, 45)),
 }
 MIN_SAMPLE = 150
 

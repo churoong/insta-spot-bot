@@ -221,8 +221,10 @@ async function themeWeights(db, all) {
   const stat = {};
   // 최근 14일 안에 쓴 테마(모음집·큐레이션 통합)는 시도 순서 맨 뒤로 — 다른 테마가 다 실패할 때만 나온다.
   // 예전엔 직전 2개만 빼서 쭈꾸미가 10/16·10/21에, 장어가 3회 다시 뽑혔다(2026-10-22 사용자 결정).
-  const COOLDOWN_DAYS = 14;
-  const cutoff = new Date(Date.now() + 9 * 3600e3 - COOLDOWN_DAYS * 86400e3).toISOString().slice(0, 10).replace(/-/g, "");
+  // 핵심 국물(CORE_SOUP)은 7일 — 1,000회 이상 히트가 전부 여기서 나와 더 자주 돌린다(2026-11-21 사용자 결정).
+  const COOLDOWN_DAYS = 14, CORE_COOLDOWN_DAYS = 7;
+  const ymdAgo = (d) => new Date(Date.now() + 9 * 3600e3 - d * 86400e3).toISOString().slice(0, 10).replace(/-/g, "");
+  const cutoff = ymdAgo(COOLDOWN_DAYS), coreCutoff = ymdAgo(CORE_COOLDOWN_DAYS);
   const recent = [];
   for (const r of rows) {
     // content_id = roundup-<테마키>-<날짜> (테마키에도 하이픈이 있어 뒤 날짜를 기준으로 자름).
@@ -230,7 +232,7 @@ async function themeWeights(db, all) {
     const m = String(r.content_id).match(/^(?:roundup|countdown)-(?:reel-)?(.+)-\d{4}-?\d{2}-?\d{2}$/);
     if (!m || !known.has(m[1])) continue;
     const ymd = String(r.content_id).match(/(\d{4})-?(\d{2})-?(\d{2})$/);
-    if (ymd && ymd.slice(1).join("") >= cutoff && !recent.includes(m[1])) recent.push(m[1]);
+    if (ymd && ymd.slice(1).join("") >= (isCoreSoup(m[1]) ? coreCutoff : cutoff) && !recent.includes(m[1])) recent.push(m[1]);
     try {
       const res = await fetch(
         `https://graph.instagram.com/v23.0/${r.ig_media_id}/insights?metric=views&access_token=${token}`,
@@ -286,7 +288,8 @@ async function themeWeights(db, all) {
       ? prior?.[t.key] ?? soupPrior(t) // 실측 조회수가 없을 때만 사전 가중치
       : Math.min(6, 1 + Math.log2(1 + byKey[t.key] / median))) *
     (trend?.[t.food || t.keyword] ?? 1) *
-    (t.food ? naver?.[t.food] ?? 1 : 1)
+    (t.food ? naver?.[t.food] ?? 1 : 1) *
+    (isCoreSoup(t.key) ? CORE_SOUP_BOOST : 1)
   );
   if (trend) console.log("검색 수요 배수 적용:", Object.entries(trend).filter(([k, v]) => k !== "_at" && v >= 1.6).map(([k, v]) => `${k}×${v}`).join(" ") || "(1.6 이상 없음)");
   console.log(
@@ -296,7 +299,7 @@ async function themeWeights(db, all) {
         const tag = byKey[t.key] !== undefined
           ? `(${Math.round(byKey[t.key])}회)`
           : prior?.[t.key] !== undefined ? "(미시도·방문자)"
-          : t.mode !== "area" ? `(미시도·${SOUP_THEMES.has(baseKey(t.key)) ? "국물" : "비국물"})`
+          : t.mode !== "area" ? `(미시도·${isCoreSoup(t.key) ? "핵심국물" : SOUP_THEMES.has(baseKey(t.key)) ? "국물" : "비국물"})`
           : "(미시도)";
         return `${t.key} ${weights[i].toFixed(1)}${tag}`;
       })
@@ -324,6 +327,15 @@ const SOUP_THEMES = new Set([
   "budaejjigae", "maeuntang", "eotang", "sundubu", "baeksuk", "gogiguksu-jeju",
 ]);
 const baseKey = (key) => String(key).replace(/-(sudo|yeongnam|honam)$/, "");
+/**
+ * 핵심 국물 5종(국밥·해장국·순대국·짬뽕·냉면 + 부산 돼지국밥) — 2026-11-21 사용자 결정.
+ * 8월 이후 조회 1,000회 이상 회차가 예외 없이 이 묶음이었다(11/14 부산 돼지국밥 1,164 · 11/15 해장국 1,434 ·
+ * 11/20 순대국 1,434). 권역 변형(-sudo 등)·골목 밀집도(dens-) 변형도 포함한다.
+ * 가중치 ×1.5 + 쿨다운 7일 → 음식 슬롯(주 8회: 저녁 월·수·금·일 + 큐레이션 월·수·금·토)의 절반 안팎.
+ */
+const CORE_SOUP = new Set(["gukbap", "dwaeji-busan", "haejangguk", "sundae", "jjamppong", "naengmyeon"]);
+const CORE_SOUP_BOOST = 1.5;
+const isCoreSoup = (key) => CORE_SOUP.has(baseKey(String(key).replace(/^dens-/, "")).replace(/^dwaeji$/, "dwaeji-busan"));
 function soupPrior(t) {
   if (t.mode === "area") return 2.0;
   if (t.mode === "route" || t.mode === "density") return 3.0; // 특별 시리즈는 자주 나오게(2026-10-27)
