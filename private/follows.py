@@ -150,6 +150,8 @@ def follow_likers(c, own_media: list):
         except Exception as e:
             if any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired")):
                 raise
+            from common import record_fail
+            record_fail("좋아요 누른 사람(목록)", e)
             continue
         for u in likers:
             uid = str(u.pk)

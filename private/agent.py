@@ -27,7 +27,7 @@ import requests
 
 from common import (GRAPH, REPO, ROOT, SESSION, STATE, client, db, ensure_tables, get_logger,
                     graph_id_for_code, graph_token, nap, next_weekday_at, now_kst, online_slot,
-                    state_get, state_set)
+                    record_fail, state_get, state_set)
 import conversion
 import engage
 import follows
@@ -38,8 +38,8 @@ log = get_logger("agent")
 START_DATE = "2026-10-27"  # 이 날짜 이후 발행분만 사후 처리(과거 게시물은 건드리지 않는다)
 LIKE_TAGS = ["국밥맛집", "순대국", "칼국수맛집", "냉면맛집", "해장국", "짬뽕맛집", "맛집추천", "전국맛집", "노포맛집", "가성비맛집"]
 LIKES_PER_DAY = (18, 26)  # 10/28 35~50으로 늘렸다가 같은 날 되돌림(사용자: 효과 작음 → 맛집 글 활동으로)
-UNFOLLOW_PER_DAY = 120  # 2026-11-07 40 → 120(팔로우 확대에 맞춰 정리도 빠르게)
-UNFOLLOW_PER_RUN = 20
+UNFOLLOW_PER_DAY = 40  # 2026-11-07 40 → 120, 2026-11-22 → 40(차단 직후 하루 118명 언팔은 그 자체로 위험)
+UNFOLLOW_PER_RUN = 14
 
 _cl = None
 _paused_until = 0.0
@@ -405,7 +405,7 @@ def unfollow_batch():
     if not approved.exists() and not auto_q.exists():
         return
     last = state_get("unfollow:last")
-    if last and time.time() - float(last) < 1.5 * 3600:
+    if last and time.time() - float(last) < 3 * 3600:
         return
     today = f"{now_kst():%Y-%m-%d}"
     used = int(state_get(f"unfollow:{today}") or 0)
@@ -431,6 +431,7 @@ def unfollow_batch():
                 f.write(uid + "\n")
         except Exception as e:
             log.warning(f"언팔 실패 {uid}: {str(e)[:120]}")
+            record_fail("언팔", e)
             if is_block(e):
                 pause(24, "언팔 중 차단 신호")
                 break
@@ -606,6 +607,7 @@ def growth_round():
             fn()
         except Exception as e:
             log.warning(f"{name} 실패: {type(e).__name__} {str(e)[:140]}")
+            record_fail(name, e)
             if is_block(e):
                 pause(12, f"{name} 중 차단 신호({type(e).__name__})")
                 return
