@@ -28,4 +28,6 @@ const conv = await q(`SELECT kind, COUNT(*) a, SUM(CASE WHEN n.key IS NOT NULL T
   FROM private_log WHERE key LIKE 'src:%' AND updated_at > datetime('now','-21 days')) s
   LEFT JOIN private_log n ON n.key = 'newf:' || s.uid AND n.updated_at >= s.t AND n.updated_at <= datetime(s.t, '+14 days') GROUP BY kind ORDER BY a DESC`);
 N("conv", conv.map(r => `${r.kind} ${r.c}/${r.a}`).join(" · "));
+const fails = await q("SELECT key, value FROM private_log WHERE key LIKE 'fail:%' ORDER BY key DESC LIMIT 30");
+N("fails", fails.map(r => `${r.key.slice(5)}=${r.value}`).join(" || ") || "(없음)");
 N("now", (await q("SELECT datetime('now') t"))[0].t);
