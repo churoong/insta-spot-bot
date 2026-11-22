@@ -25,7 +25,7 @@ import requests
 
 import conversion
 
-from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, state_get, state_set
+from common import ENV, db, get_logger, ig_handle, like_too, llm, nap, now_kst, online_slot, record_fail, state_get, state_set
 
 log = get_logger("agent")
 VISITED_LIKES, VISITED_COMMENTS = 40, 4  # 2026-11-21 댓글 12 → 4(전환 0/14)  # 2026-10-28 확대(15·5 → 25·8 → 40·12, 사용자: 식당 좋아요·댓글이 너무 적다)
@@ -241,6 +241,7 @@ def food_posts_engage(c):
         except Exception as e:
             if _blocked(e):
                 raise
+            record_fail("맛집 글(태그 조회)", e)
             continue
         for m in medias:
             uid = str(m.user.pk)
@@ -282,6 +283,7 @@ def food_posts_engage(c):
                 except Exception as e:
                     if _blocked(e):
                         raise
+                    record_fail("맛집 글 작성자 팔로우", e)
                 skip_follow.add(uid)
         nap(30, 90)
     log.info(f"🍜 맛집 글: 좋아요 {_count('fp-like')} · 댓글 {_count('fp-cmt')} · 팔로우 {_count('fp-follow')}")

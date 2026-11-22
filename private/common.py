@@ -144,6 +144,18 @@ def state_set(key: str, value: str) -> None:
     db("INSERT OR REPLACE INTO private_log (key, value, updated_at) VALUES (?, ?, datetime('now'))", [key, value])
 
 
+def record_fail(kind: str, e: Exception) -> None:
+    """활동 실패 이유를 DB에 남긴다(2026-11-22) — 폰 로그 없이 클라우드에서 원인을 보려고.
+    키 fail:<KST 날짜>:<종류> = {"n": 횟수, "type": 예외 이름, "msg": 마지막 메시지, "at": 시각}."""
+    try:
+        k = f"fail:{now_kst():%Y-%m-%d}:{kind}"
+        cur = json.loads(state_get(k) or "{}")
+        cur = {"n": int(cur.get("n", 0)) + 1, "type": type(e).__name__, "msg": str(e)[:200], "at": f"{now_kst():%H:%M}"}
+        state_set(k, json.dumps(cur, ensure_ascii=False))
+    except Exception:
+        pass
+
+
 def ig_handle() -> str:
     """지금 인스타 아이디(@ 없이). 에이전트가 아이디를 바꾸면 config.ig_handle에 쓴다(2026-10-27 맛디깅 개명)."""
     try:

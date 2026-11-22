@@ -19,7 +19,7 @@ import re
 from collections import Counter
 
 import conversion
-from common import BLOCK_SIGNALS, ROOT, db, get_logger, like_too, llm, nap, now_kst, online_slot, state_get, state_set
+from common import BLOCK_SIGNALS, ROOT, db, get_logger, like_too, llm, nap, now_kst, online_slot, record_fail, state_get, state_set
 
 log = get_logger("agent")
 
@@ -490,6 +490,7 @@ def targeted_likes(c):
                 if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
                     raise
                 log.warning(f"큰 계정 {acc} 건너뜀: {type(e).__name__} {str(e)[:100]}")
+                record_fail("타깃 좋아요(큰 계정)", e)
             if len(commenters) >= goal * 3:
                 break
         commenters.discard(str(c.user_id))
@@ -506,6 +507,7 @@ def targeted_likes(c):
             except Exception as e:
                 if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
                     raise
+                record_fail("타깃 좋아요(개별)", e)
                 continue  # 비공개·삭제·일시 오류는 그 사람만 건너뛴다
             nap(40, 110)
     finally:
@@ -551,6 +553,7 @@ def targeted_follows(c):
                 if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
                     raise
                 log.warning(f"댓글러 수집 {acc} 건너뜀: {type(e).__name__} {str(e)[:100]}")
+                record_fail("댓글러 팔로우(수집)", e)
             if len(pool) >= goal * 2:
                 break
         random.shuffle(pool)
@@ -569,6 +572,7 @@ def targeted_follows(c):
             if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
                 state_set(f"tfpool:{day}", json.dumps(pool))
                 raise
+            record_fail("댓글러 팔로우(개별)", e)
             continue
         state_set(f"fbat:{uid}", str(_t.time()))
         conversion.mark("tfollow", uid)
