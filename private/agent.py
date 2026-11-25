@@ -350,8 +350,9 @@ def postprocess_recent():
 
 # ---------- 3) 자동 좋아요 ----------
 def likes_daily():
+    from common import likes_paused
     today = f"{now_kst():%Y-%m-%d}"
-    if state_get(f"likes:{today}"):
+    if state_get(f"likes:{today}") or likes_paused():
         return
     slot = state_get(f"likes-at:{today}")
     if not slot:
@@ -432,6 +433,9 @@ def unfollow_batch():
         except Exception as e:
             log.warning(f"언팔 실패 {uid}: {str(e)[:120]}")
             record_fail("언팔", e)
+            if "Invalid unfollow mutation" in str(e):  # 삭제·이미 언팔된 계정 — 다시 시도하지 않는다(2026-11-25)
+                with done_f.open("a", encoding="utf-8") as f:
+                    f.write(uid + "\n")
             if is_block(e):
                 pause(24, "언팔 중 차단 신호")
                 break
@@ -567,6 +571,8 @@ def growth_round():
         conversion.apply()
     except Exception as e:
         log.warning(f"활동 배분 실패: {str(e)[:120]}")
+    from common import likes_paused, pause_likes
+    LIKE_STEPS = {"타깃 좋아요", "소개 식당 장소 피드", "맛집 글 좋아요·댓글·팔로우", "비슷한 계정 팔로워 좋아요", "단골 관리"}
     for name, fn in (
         ("계정 이름 변경", lambda: growth.rename_profile(c)),
         ("아이디 변경", lambda: growth.rename_handle(c)),
@@ -603,11 +609,15 @@ def growth_round():
         ("지도 하이라이트", lambda: engage.weekly_map_highlight(c)),
         ("댓글 해시태그 노출 확인", lambda: engage.check_hashtag_visibility(c)),
     ):
+        if name in LIKE_STEPS and likes_paused():
+            continue
         try:
             fn()
         except Exception as e:
             log.warning(f"{name} 실패: {type(e).__name__} {str(e)[:140]}")
             record_fail(name, e)
+            if is_block(e) and name in LIKE_STEPS:
+                pause_likes(f"{name} 중 {type(e).__name__}")  # 좋아요 계열은 72시간, 전체는 아래처럼 12시간
             if is_block(e):
                 pause(12, f"{name} 중 차단 신호({type(e).__name__})")
                 return

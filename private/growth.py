@@ -433,8 +433,12 @@ def big_food_accounts(c) -> list:
     """맛집 태그 인기 게시물 작성자 중 팔로워 5만+ 계정(주 1회 갱신)."""
     k = f"bigacc2:{now_kst():%G-%V}"  # 2026-11-07 확대: 태그 4개 × 인기 12개, 팔로워 3만+
     cached = state_get(k)
-    if cached:
+    if cached and cached != "[]":  # 예전 코드가 저장한 빈 목록은 무시
         return json.loads(cached)
+    import time as _t
+    if _t.time() - float(state_get("bigacc:try") or 0) < 3 * 3600:  # 못 찾았으면 3시간 뒤에 다시(계정 조회 수십 번이라)
+        return []
+    state_set("bigacc:try", str(_t.time()))
     seen, out = set(), []
     for tag in random.sample(FOOD_TAGS, 4):
         for m in c.hashtag_medias_top(tag, amount=12):
@@ -447,10 +451,15 @@ def big_food_accounts(c) -> list:
                 info = c.user_info(uid)
                 if info.follower_count >= 30000:
                     out.append(uid)
-            except Exception:
-                pass
+            except Exception as e:
+                if any(k in type(e).__name__ for k in BLOCK_SIGNALS):
+                    raise
+                record_fail("큰 계정 찾기(계정 조회)", e)
         nap(3, 8)
-    state_set(k, json.dumps(out))
+    if out:  # 빈 목록은 저장하지 않는다 — 11/14~ 일주일 동안 빈 목록이 캐시돼 댓글러 팔로우·타깃 좋아요가 0건이었다
+        state_set(k, json.dumps(out))
+    else:
+        record_fail("큰 계정 찾기(0개)", RuntimeError("팔로워 3만+ 계정을 못 찾음 — 다음 바퀴에 다시"))
     log.info(f"큰 맛집 계정 {len(out)}개")
     return out
 
