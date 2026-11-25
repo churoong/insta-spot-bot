@@ -23,14 +23,19 @@ from common import get_logger, llm, nap, now_kst, state_get, state_set
 log = get_logger("agent")
 
 ASK_PER_DAY = 6
+REST_ASK_PER_DAY = 3  # 그중 식당 공식 계정 몫(2026-11-25 — 식당은 홍보라 수락 가능성이 높다)
 POST_PER_DAY = 1
-MIN_LIKES = 300
-MAX_AGE_DAYS = 14
+# 2026-11-25 완화: 11/7~25 요청 1건뿐(좋아요 300+·14일·위치 태그 필수가 너무 좁았다) → 좋아요 100+·30일·위치 태그 선택
+MIN_LIKES = 100
+MAX_AGE_DAYS = 30
 ASK_TAGS = ["맛집", "맛집추천", "맛집탐방", "먹스타그램", "노포맛집", "국밥맛집", "서울맛집", "부산맛집", "해장국", "순대국", "냉면맛집", "짬뽕맛집"]
 
 ASK_TEXT = ("안녕하세요! 전국 맛집을 소개하는 계정 맛디깅이에요 🙌 올려주신 {place} {kind} 너무 좋아서요. "
             "출처(@{username}) 태그하고 저희 계정에 한 번 소개해도 괜찮을까요? 괜찮으시면 '네'라고 답 주세요. "
             "어려우시면 편하게 말씀 주셔도 돼요!")
+REST_ASK_TEXT = ("안녕하세요, 사장님! 전국 맛집을 소개하는 계정 맛디깅이에요 🙌 저희 맛집 리스트에서 소개해 드린 가게라 "
+                 "연락드려요. 계정에 올려주신 {kind}이 너무 좋아서, 출처(@{username}) 태그하고 저희 계정에서 한 번 더 소개해도 "
+                 "괜찮을까요? 괜찮으시면 '네'라고 답 주세요. 어려우시면 편하게 말씀 주셔도 돼요!")
 YES = re.compile(r"^\s*(네|넵|넹|예|응|ㅇㅇ|ㅇㅋ|오케이|ok|okay|yes|좋아요|좋습니다|좋죠|괜찮아요|괜찮습니다|가능|물론|그럼요|당연|그러세요|하세요|올려주세요|써주세요|사용하셔도)", re.I)
 NO = re.compile(r"안\s?돼|안됩|어렵|어려|싫|거절|아니요|아뇨|노노|\bno\b|곤란|불가|안\s?할|사양", re.I)
 
@@ -60,11 +65,64 @@ def _blocked(e: Exception) -> bool:
     return any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint"))
 
 
+def ask_restaurants(c):
+    """우리가 소개한 식당의 공식 계정(에이전트가 찾아 둔 igacct 캐시)에 '계정 사진·영상을 소개해도 될지' 묻는다.
+    최근 120일 게시물 중 반응이 가장 큰 사진·영상 하나. 하루 3곳, 같은 계정 90일 1회."""
+    from common import db
+    if _count("permask-rest") >= REST_ASK_PER_DAY:
+        return
+    rows = db("SELECT key, value FROM private_log WHERE key LIKE 'igacct:%' AND value LIKE '%username%'")["rows"]
+    random.shuffle(rows)
+    for r in rows:
+        if _count("permask-rest") >= REST_ASK_PER_DAY or _count("permask") >= ASK_PER_DAY:
+            break
+        try:
+            acc = json.loads(r["value"])
+        except Exception:
+            continue
+        uid, username = str(acc.get("pk") or ""), acc.get("username") or ""
+        if not uid or not username:
+            continue
+        last = state_get(f"perm-u:{uid}")
+        if last and _get(last) and time.time() - float(_get(last).get("asked_at", 0)) < 90 * 86400:
+            continue
+        try:
+            medias = c.user_medias(uid, amount=8)
+        except Exception as e:
+            if _blocked(e):
+                raise
+            continue
+        cands = [m for m in medias if m.media_type in (1, 2) and time.time() - m.taken_at.timestamp() < 120 * 86400 and not _get(str(m.pk))]
+        if not cands:
+            nap(10, 30)
+            continue
+        m = max(cands, key=lambda x: (x.like_count or 0) + (getattr(x, "play_count", 0) or 0) / 50)
+        kind = "영상" if m.media_type == 2 else "사진"
+        try:
+            c.direct_send(REST_ASK_TEXT.format(kind=kind, username=username), user_ids=[int(uid)])
+        except Exception as e:
+            if _blocked(e):
+                raise
+            log.warning(f"식당 허락 요청 DM 실패 @{username}: {str(e)[:100]}")
+            continue
+        loc = getattr(m, "location", None)
+        place = str(getattr(loc, "name", "") or "") if loc else ""
+        pk = str(m.pk)
+        _put(pk, {"uid": uid, "username": username, "code": m.code, "type": m.media_type, "location": place,
+                  "caption": (m.caption_text or "")[:600], "status": "asked", "asked_at": time.time(), "restaurant": True})
+        state_set(f"perm-u:{uid}", pk)
+        _bump("permask")
+        _bump("permask-rest")
+        log.info(f"🙏 식당 계정 소개 허락 요청: @{username} ({kind}, 좋아요 {m.like_count})")
+        nap(120, 300)
+
+
 def ask_permissions(c):
     import engage
 
     if _count("permask") >= ASK_PER_DAY or not engage._slot_passed("permask"):
         return
+    ask_restaurants(c)
     me = str(c.user_id)
     for tag in random.sample(ASK_TAGS, 3):
         if _count("permask") >= ASK_PER_DAY:
@@ -85,7 +143,8 @@ def ask_permissions(c):
             if time.time() - m.taken_at.timestamp() > MAX_AGE_DAYS * 86400 or engage.AD_RE.search(cap):
                 continue
             loc = getattr(m, "location", None)
-            if not loc or not getattr(loc, "name", "") or not engage._is_food_review(cap):
+            place = str(getattr(loc, "name", "") or "") if loc else ""
+            if not engage._is_food_review(cap):
                 continue
             if not re.search(r"[가-힣]", f"{m.user.full_name or ''}") or _get(pk):
                 continue
@@ -94,17 +153,17 @@ def ask_permissions(c):
                 continue
             kind = "영상" if m.media_type == 2 else "사진"
             try:
-                c.direct_send(ASK_TEXT.format(place=loc.name, kind=kind + "이", username=m.user.username), user_ids=[int(uid)])
+                c.direct_send(ASK_TEXT.format(place=place or "맛집", kind=kind + "이", username=m.user.username), user_ids=[int(uid)])
             except Exception as e:
                 if _blocked(e):
                     raise
                 log.warning(f"허락 요청 DM 실패 @{m.user.username}: {str(e)[:100]}")
                 continue
             _put(pk, {"uid": uid, "username": m.user.username, "code": m.code, "type": m.media_type,
-                      "location": loc.name, "caption": cap[:600], "status": "asked", "asked_at": time.time()})
+                      "location": place, "caption": cap[:600], "status": "asked", "asked_at": time.time()})
             state_set(f"perm-u:{uid}", pk)
             _bump("permask")
-            log.info(f"🙏 소개 허락 요청: @{m.user.username} · {loc.name} ({kind}, 좋아요 {m.like_count})")
+            log.info(f"🙏 소개 허락 요청: @{m.user.username} · {place or '위치 없음'} ({kind}, 좋아요 {m.like_count})")
             nap(120, 300)
         nap(20, 60)
 
@@ -138,10 +197,12 @@ def _caption(rec: dict) -> str:
         "원문에 있는 사실(메뉴·분위기·위치)만 쓰고 지어내지 말 것. 우리가 직접 가 봤다고 말하지 말 것. "
         "식당·음식은 긍정적으로만(단점·비교·호불호 금지). 해시태그·링크·팔로우 요청 금지. 본문만 출력.\n원문: " + rec.get("caption", ""), 220) or ""
     body = re.sub(r"#\S+|https?://\S+", "", body).strip()
-    region = re.sub(r"\s.*", "", rec["location"])[:8]
+    loc = rec.get("location") or ""
+    region = re.sub(r"\s.*", "", loc)[:8]
+    tags = "#맛집추천 " + (f"#{region}맛집 " if region else "") + "#맛디깅"
     return (f"📸 @{rec['username']} 님이 흔쾌히 허락해 주셔서 소개해요\n\n"
-            f"📍 {rec['location']}\n{body}\n\n"
-            f"원본은 @{rec['username']} 님 계정에서 확인해 보세요 🙏\n\n#맛집추천 #{region}맛집 #맛디깅")
+            + (f"📍 {loc}\n" if loc else "") + f"{body}\n\n"
+            f"원본은 @{rec['username']} 님 계정에서 확인해 보세요 🙏\n\n{tags}")
 
 
 def publish_granted(c):

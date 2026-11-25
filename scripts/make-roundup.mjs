@@ -2241,6 +2241,68 @@ async function composePageFrame(sharp, cardBuf, outPath) {
  * stills: [{ path, sec }] 순서대로. 정지컷 → 개별 클립(같은 인코딩) → concat → 오디오 믹스.
  * ⚠️ "-t"는 출력 옵션 위치에 — 입력 사이에 두면 무한 루프 BGM과 -shortest가 만나 안 끝난다.
  */
+/**
+ * 스톡 음식 영상 인트로(2026-11-25 사용자 결정) — 무료 스톡(Pexels·Pixabay, lib/stockclip.ts)의 '그 음식' 분위기
+ * 영상 2초 위에 반문형 훅 문구(buildHookTitle)를 얹는다. 특정 가게 영상이 아니므로 상호는 쓰지 않는다(사칭 방지).
+ * 키가 없거나 영상을 못 받으면 null → 기존 grid8. 시안: CLIP_FILE=<로컬 mp4>로 내려받기를 건너뛴다.
+ */
+const CLIP_SEC = 2;
+const ffRun = (args) =>
+  new Promise((resolve, reject) => {
+    const p = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "inherit"] });
+    p.on("error", reject);
+    p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("ffmpeg exit " + c))));
+  });
+async function buildClipIntro(theme, places) {
+  try {
+    let raw = process.env.CLIP_FILE || "";
+    let credit = "local";
+    if (!raw) {
+      const { fetchStockClip } = await import("../lib/stockclip.ts");
+      const clip = await fetchStockClip(String(theme.food || theme.keyword || ""));
+      if (!clip) { console.log("스톡 영상 없음 — grid8로"); return null; }
+      const r = await fetch(clip.url, { signal: AbortSignal.timeout(60000) });
+      if (!r.ok) return null;
+      raw = path.join(TMP, "clip_raw.mp4");
+      fs.writeFileSync(raw, Buffer.from(await r.arrayBuffer()));
+      credit = `${clip.credit} #${clip.id}`;
+    }
+    const sharp = (await import("sharp")).default;
+    const t = buildHookTitle(theme, places.length);
+    const main = String(t.main || "").slice(0, 10), sub = String(t.sub || "");
+    const ms = main.length <= 4 ? 150 : main.length <= 6 ? 124 : 100;
+    const svg = `<svg width="1080" height="1920" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000" stop-opacity="0.62"/><stop offset="100%" stop-color="#000" stop-opacity="0"/></linearGradient></defs>
+      <rect x="0" y="0" width="1080" height="760" fill="url(#g)"/>
+      <rect x="76" y="${300 - ms * 0.8}" width="10" height="${ms + 96}" fill="#e02020"/>
+      <text x="110" y="300" font-family="${TFONT}" font-size="${ms}" font-weight="900" fill="#fff" letter-spacing="-3">${esc(main)}</text>
+      <text x="114" y="${300 + 96}" font-family="${TFONT}" font-size="72" font-weight="800" fill="#fff">${esc(sub)}</text>
+    </svg>`;
+    const png = path.join(TMP, "clip_ov.png");
+    await sharp(Buffer.from(svg)).png().toFile(png);
+    const out = path.join(TMP, "clip_intro.mp4");
+    await ffRun(["-y", "-i", raw, "-loop", "1", "-i", png, "-filter_complex",
+      "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,setsar=1[b];[b][1:v]overlay=0:0,format=yuv420p[v]",
+      "-map", "[v]", "-an", "-t", String(CLIP_SEC), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", out]);
+    console.log(`스톡 영상 인트로 ${CLIP_SEC}초: ${credit}`);
+    return { path: out, credit };
+  } catch (e) {
+    console.error("스톡 영상 인트로 실패(grid8로):", String(e).slice(0, 120));
+    return null;
+  }
+}
+
+/** 스톡 영상 2초 + 그리드 표지 6초 = 8초(장면 전환 1회). BGM은 grid8과 같게. */
+async function renderClipReel(clipPath, coverJpg, bgm, outMp4) {
+  const audio = bgm ? ["-stream_loop", "-1", "-i", bgm.path] : ["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"];
+  await ffRun(["-y", "-i", clipPath, "-loop", "1", "-framerate", "30", "-t", String(8 - CLIP_SEC), "-i", coverJpg, ...audio,
+    "-filter_complex",
+    `[0:v]fps=30,format=yuv420p,setsar=1[v0];[1:v]scale=1080:1920,fps=30,format=yuv420p,setsar=1[v1];[v0][v1]concat=n=2:v=1:a=0[v]${bgm ? ";[2:a]volume=0.35,afade=t=out:st=7.2:d=0.8[a]" : ""}`,
+    "-map", "[v]", "-map", bgm ? "[a]" : "2:a", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-c:a", "aac",
+    "-t", "8", "-movflags", "+faststart", outMp4]);
+}
+
 async function renderPagesReel(stills, bgm, outMp4) {
   const ff = (args) =>
     new Promise((resolve, reject) => {
@@ -2814,6 +2876,11 @@ async function main() {
         "roundup-reel-preview.mp4"
       );
       console.log(`오프라인 릴스 렌더 — roundup-reel-preview.mp4 (${total}초)`);
+    }
+    // 스톡 영상 인트로 시안 — CLIP_FILE=<로컬 mp4> OFFLINE_RENDER=1
+    if (process.env.CLIP_FILE && process.env.OFFLINE_RENDER === "1") {
+      const ci = await buildClipIntro(theme, places);
+      if (ci) { await renderClipReel(ci.path, "roundup-reel-preview.jpg", null, "roundup-clip-preview.mp4"); console.log("오프라인 — roundup-clip-preview.mp4 (영상 2초 + 표지 6초)"); }
     }
     console.log(`오프라인 렌더 완료 (${theme.titleResolved}) — roundup-hook-preview.jpg, roundup-reel-preview.jpg, carousel-preview-01~${pad(places.length + 1)}.jpg, countdown-card-preview.jpg`);
     return;
@@ -3443,8 +3510,20 @@ async function main() {
   const hookApplies = hookEligible && hookOn;
   const hookCut = hookApplies ? await buildHookCut(theme, places, pkBg?.url) : null;
   if (hookApplies && !hookCut) console.error("⚠️ 훅 컷 없이 발행합니다 — 표지 8초 단일컷(reel_format=grid8)");
+  // 스톡 음식 영상 2초 + 표지 6초(2026-11-25 사용자 결정) — 정지 사진만 나가던 그리드 릴스에 움직임을 넣는다.
+  // grid8로 나갈 회차의 절반(clip_idx 교대 — grid8과 같은 기간에 나란히 비교, CLIP_INTRO=1/0 강제)에만.
+  // 키(PEXELS_KEY·PIXABAY_KEY)가 없거나 영상을 못 받으면 grid8 그대로.
+  const clipEligible = !cdMode && coverStyle !== "pages" && !hookCut && Boolean(process.env.PEXELS_KEY || process.env.PIXABAY_KEY);
+  const clipForced = process.env.CLIP_INTRO === "1" || process.env.CLIP_INTRO === "0";
+  let clipIntro = null;
+  if (clipEligible) {
+    const ci = await db.execute("SELECT value FROM config WHERE key = 'clip_idx'");
+    const clipOn = clipForced ? process.env.CLIP_INTRO === "1" : (ci.rows.length ? Number(ci.rows[0].value) : 0) % 2 === 1;
+    console.log(`스톡 영상 A/B: ${clipOn ? "clip2+grid6" : "grid8"}${clipForced ? " — CLIP_INTRO 강제" : ""}`);
+    if (clipOn) clipIntro = await buildClipIntro(theme, places);
+  }
   // 성과 비교용으로 '무엇이 실제로 나갔는가'를 남긴다 (cover-report가 이 값으로 표본을 가른다)
-  const reelFormat = cdMode ? "countdown" : coverStyle === "pages" ? "pages" : hookCut ? "hook3+grid5" : "grid8";
+  const reelFormat = cdMode ? "countdown" : coverStyle === "pages" ? "pages" : hookCut ? "hook3+grid5" : clipIntro ? "clip2+grid6" : "grid8";
 
   if (cdMode) {
     // 카드들을 순서대로 이어붙임 (인트로 3초, 순위 카드 2.6초, 아웃트로 2.6초)
@@ -3553,6 +3632,9 @@ async function main() {
       reelMp4
     );
     console.log(`그리드 릴스 렌더 완료 (훅 ${HOOK_SEC}초 + 표지 ${8 - HOOK_SEC}초, ${total}초)`);
+  } else if (clipIntro) {
+    await renderClipReel(clipIntro.path, reelCover, bgm, reelMp4);
+    console.log(`그리드 릴스 렌더 완료 (스톡 영상 ${CLIP_SEC}초 + 표지 ${8 - CLIP_SEC}초)`);
   } else {
     // 훅 컷 실패 폴백 — 기존 표지 8초 고정 단일컷.
     // 줌인을 뺀 이유: 정보 카드가 천천히 움직이면 읽는 중에 글자가 흔들려 거슬린다.
@@ -3585,7 +3667,7 @@ ${bgm.attribution}`;
     : null;
   // 프로필 그리드 썸네일 — 훅 컷을 붙인 회차는 0프레임이 음식 풀샷이라, 정보가 담긴
   // 그리드 표지 구간(훅 다음 1초 지점)을 커버로 지정한다.
-  const thumbMs = hookCut ? (HOOK_SEC + 1) * 1000 : 0;
+  const thumbMs = hookCut ? (HOOK_SEC + 1) * 1000 : clipIntro ? (CLIP_SEC + 1) * 1000 : 0;
   let mediaId;
   // 비공식 API 핸드오프(2026-10-27 사용자 결정): 영상까지 만든 뒤 사용자 PC의 에이전트
   // (private/agent.py)에 발행을 넘긴다 — 인스타 음원·위치 태그·스토리 스티커·첫 댓글 고정은
@@ -3679,6 +3761,15 @@ ${bgm.attribution}`;
     await db.execute({
       sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
       args: ["hook_idx", String(((hi.rows.length ? Number(hi.rows[0].value) : 0) + 1) % 2)],
+    });
+  }
+
+  // 스톡 영상 A/B 포인터 — 영상이 붙을 수 있었던 회차만 센다(훅 포인터와 같은 원칙)
+  if (clipEligible && !clipForced) {
+    const ci = await db.execute("SELECT value FROM config WHERE key = 'clip_idx'");
+    await db.execute({
+      sql: "INSERT OR REPLACE INTO config (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+      args: ["clip_idx", String(((ci.rows.length ? Number(ci.rows[0].value) : 0) + 1) % 2)],
     });
   }
 
