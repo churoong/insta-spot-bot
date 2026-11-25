@@ -9,7 +9,7 @@ for (const r of perm) { try { const v = JSON.parse(r.value); st[v.status] = (st[
 const asks = await q("SELECT key, value FROM private_log WHERE key LIKE 'permask:%' ORDER BY key");
 N("perm", `총 ${perm.length} ${JSON.stringify(st)} | 일별요청 ${asks.map(r => r.key.slice(13) + "=" + r.value).join(" ")} | 게시 ${posted.join(", ")}`);
 // 2) 팔로우·첫댓글·언팔·차단
-const daily = await q("SELECT key, value FROM private_log WHERE (key LIKE 'tfollow:2026%' OR key LIKE 'acom:2026%' OR key LIKE 'tlikes:2026%' OR key LIKE 'fp-like:2026%' OR key LIKE 'permask:2026%' OR key LIKE 'fast:2026%' OR key LIKE 'unfollow:2026%' OR key LIKE 'likerfollow:2026%' OR key LIKE 'fp-follow:2026%') AND key >= ? ORDER BY key", ["fast:2026-11-20"]);
+const daily = await q("SELECT key, value FROM private_log WHERE (key LIKE 'tfollow:2026%' OR key LIKE 'acom:2026%' OR key LIKE 'tlikes:2026%' OR key LIKE 'fp-like:2026%' OR key LIKE 'permask:2026%' OR key LIKE 'fast:2026%' OR key LIKE 'unfollow:2026%' OR key LIKE 'likerfollow:2026%' OR key LIKE 'fp-follow:2026%') AND key >= ? ORDER BY key", ["fast:2026-11-21"]);
 N("daily", daily.map(r => `${r.key}=${r.value}`).join(" "));
 const alive = await q("SELECT key, value, updated_at FROM private_log WHERE key IN ('agent:alive','agent:paused','quota-mult') OR key LIKE 'pause%' ORDER BY updated_at DESC LIMIT 8");
 N("agent", alive.map(r => `${r.key}=${String(r.value).slice(0, 120)} @${r.updated_at}`).join(" || "));
@@ -19,7 +19,7 @@ N("blocks", blocks.map(r => `${r.key}=${String(r.value).slice(0, 80)} @${r.updat
 const fl = await q("SELECT date, count FROM follower_log WHERE date >= '2026-11-14' ORDER BY date");
 N("fol", fl.map(r => `${String(r.date).slice(5)}=${r.count}`).join(" "));
 // 4) 게시물
-const rows = await q("SELECT created_at t, content_id cid, views v, saved s, like_count l, comment_count c, reel_format f FROM posts WHERE status='published' AND created_at > '2026-11-17' ORDER BY created_at");
+const rows = await q("SELECT created_at t, content_id cid, views v, saved s, like_count l, comment_count c, reel_format f FROM posts WHERE status='published' AND created_at > '2026-11-19' ORDER BY created_at");
 const out = rows.map(x => `${String(x.t).slice(5, 13)}|${String(x.cid).replace(/-2026[\d-]+$/, '')}|${x.v ?? '-'}|${x.s ?? '-'}|${x.l}|${x.c}|${x.f ?? ''}`);
 for (let i = 0; i < out.length; i += 25) N(`posts${i / 25}`, out.slice(i, i + 25).join(" ## "));
 // 5) 전환
