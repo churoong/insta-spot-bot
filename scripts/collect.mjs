@@ -66,14 +66,15 @@ async function collectKind(kind) {
 }
 
 // 인기도 — 네이버 블로그 후기 수(랭킹 lib/ranking.ts와 같은 신호). 키가 없으면 건너뛴다.
-// 검색어 v2(2026-11-25): "시군구 이름 카페" — v1(시군구 이름)은 "오던"·"율"·"바다다"처럼 짧고 흔한 상호가
-// 엉뚱한 글까지 세어 92만 건이 나왔다. 종류 단어(카페)를 붙여 그 가게 글만 남긴다.
-const BUZZ_V = 2;
-function cafeQuery(r, kind) {
+// 검색어 v3(2026-11-25): "상호"(따옴표) + 시군구 — 정확히 그 이름이 들어간 글만 센다.
+// v1(시군구 상호)·v2(시군구 상호 카페)는 "오던"·"바다다"·"카페 여주"처럼 흔한 단어 조합이
+// 그 동네 카페 글 전체로 잡혀 17만~32만 건이 나왔다.
+const BUZZ_V = 3;
+function cafeQuery(r) {
   const t = String(r.addr || "").split(/\s+/);
   const sigungu = t[1] || t[0] || r.sido || "";
-  const clean = String(r.name).replace(/\[[^\]]*\]/g, "").trim();
-  return `${sigungu} ${clean} ${kind.buzzWord || ""}`.trim();
+  const clean = String(r.name).replace(/\[[^\]]*\]/g, "").replace(/"/g, "").trim();
+  return `"${clean}" ${sigungu}`.trim();
 }
 
 async function addBuzz(rows, prev, kind) {
@@ -85,7 +86,7 @@ async function addBuzz(rows, prev, kind) {
     // 30일 안에 같은 검색어 버전으로 잰 값은 재사용(네이버 하루 한도 아끼기)
     if (o?.buzz != null && o.buzzV === BUZZ_V && o.buzzAt && Date.now() - new Date(o.buzzAt).getTime() < 30 * 86400e3) { r.buzz = o.buzz; r.buzzAt = o.buzzAt; r.buzzV = BUZZ_V; continue; }
     if (n >= 1500) continue;
-    const b = await blogBuzz(cafeQuery(r, kind));
+    const b = await blogBuzz(cafeQuery(r));
     n++;
     if (b != null) { r.buzz = b; r.buzzAt = new Date().toISOString().slice(0, 10); r.buzzV = BUZZ_V; }
     await sleep(120);
