@@ -889,7 +889,9 @@ async function pickFoodImage(place, food) {
     // (썸네일로 재면 TourAPI 후보가 전부 150px로 걸러진다 — 9/3 DRY 실측).
     const wideEnough = async (buf, url) => {
       const meta = await sharp(buf).metadata();
-      if ((meta.width ?? 0) >= MIN_PHOTO_W) return true;
+      // 카페 사진(관광공사 카페 대표 사진)은 거의 700px이라 900 기준이면 전멸한다(2026-11-25 평창 DRY 실측 16곳 전원).
+      // 카페 편은 그리드 칸(약 520px)으로만 쓰므로 640까지 허용한다.
+      if ((meta.width ?? 0) >= (place.cafe ? 640 : MIN_PHOTO_W)) return true;
       console.log(`  저해상도 제외(${meta.width}px): ${url.slice(-48)}`);
       return false;
     };
