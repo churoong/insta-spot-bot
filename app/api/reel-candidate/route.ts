@@ -35,7 +35,7 @@ async function fetchFocusCandidates(): Promise<any[]> {
   const rows = (await db.execute(
     `SELECT content_id, caption, views FROM posts
       WHERE status = 'published' AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
-        AND content_id NOT LIKE 'roundup-area-%' AND content_id NOT LIKE 'roundup-stn-%'
+        AND content_id NOT LIKE 'roundup-area-%' AND content_id NOT LIKE 'roundup-stn-%' AND content_id NOT LIKE 'roundup-cafe-%'
         AND views IS NOT NULL AND created_at > datetime('now', '-180 days')
       ORDER BY views DESC LIMIT 30`
   )).rows as any[];

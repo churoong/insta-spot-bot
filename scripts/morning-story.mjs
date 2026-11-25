@@ -146,7 +146,7 @@ async function main() {
   try { used = JSON.parse((await cfg("morning_used")) || "[]"); } catch { /* 처음 */ }
 
   const rows = (await db.execute(`SELECT content_id, address, image_url, views FROM posts
-    WHERE status = 'published' AND content_id LIKE 'roundup-%' AND image_url IS NOT NULL AND address LIKE '1. %'
+    WHERE status = 'published' AND content_id LIKE 'roundup-%' AND content_id NOT LIKE 'roundup-cafe-%' AND image_url IS NOT NULL AND address LIKE '1. %'
     ORDER BY views DESC LIMIT 80`)).rows.filter((r) => !used.includes(String(r.content_id)));
   if (!rows.length) throw new Error("고를 지난 편이 없다");
 
