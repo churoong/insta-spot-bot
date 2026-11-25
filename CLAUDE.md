@@ -19,7 +19,8 @@ Next.js 15(App Router) + Turso(libSQL) + Vercel + GitHub Actions. **전부 무�
 | 무엇 | 언제 | 워크플로 | 스크립트 |
 |---|---|---|---|
 | 일반 릴스(트라이얼) | **예약 발행 중단**(2026-10-22, 수동 실행만) — 78건 중앙 134·저장 평균 0 | reels.yml | scripts/make-reel.mjs |
-| 모음집 릴스 + 표지 스토리 | 매일 **16:45 출발 → 17시 전후 발행** (창 16:30~22:00, 2026-10-27 앞당김) — 화 상권 / **목·토 지하철역**(2026-10-27) / **월·수·금·일 전국 음식**(2026-09-15) | roundup.yml | scripts/make-roundup.mjs |
+| 모음집 릴스 + 표지 스토리 | 매일 **16:45 출발 → 17시 전후 발행** (창 16:30~22:00, 2026-10-27 앞당김) — 화 상권 / **토 지하철역** / **월·수·금·일 전국 음식**(2026-09-15) — **목요일은 아래 한 집 집중** | roundup.yml | scripts/make-roundup.mjs |
+| **한 집 집중 릴스**(2026-11-25) | **목 16:45**(모음집 슬롯) — 조회 높은 지난 음식 편의 **1위 식당** 한 곳(`/api/reel-candidate?focus=1`, 캡션 "1. 상호 (지역)" 파싱 → 관광공사 같은 집), 사진 여러 장 + 반말 아닌 나레이션·자막, 캡션 첫 줄 "🥇 맛디깅 ○○ 편 1위로 소개한 집", 정식 발행(트라이얼 아님), `posts.content_id = focus-<contentId>`·category `집중`·reel_format `focus`. 후보 없음(종료 코드 3)·실패면 지하철역 모음집으로 대신 | roundup.yml | scripts/make-reel.mjs (`FOCUS=1`) |
 | 큐레이션(카운트다운) | **월·수·금·토** **10:30 출발 → 11시 전후 발행** (창 10~16, 2026-10-27 — 에이전트 PC가 11:20~13:00 오프라인) — 2026-10-22 캐러셀 슬롯 흡수 | countdown.yml | make-roundup (ROUNDUP_STYLE=countdown) |
 | 아침 스토리 "오늘 점심 뭐 먹지?" | 매일 **07:30** (창 07~11, 2026-10-27) — 지난 모음집 1위 식당 사진·상호·지역, 공식 API라 노트북과 무관. √조회 가중, 최근 40회 재사용 안 함(config `morning_used`), 하루 1회 가드 `morning_story` | morning.yml | scripts/morning-story.mjs |
 | 국경선 지도 릴스 연재 | **일요일 11:30 출발**(창 일 11~18시, 2026-10-28) — 국밥(10/28 발행) → 냉면 → 칼국수 → 순대 순서(config `border_idx`), 새 시리즈는 그날 카카오 집계(1시간 안팎) | border.yml | scripts/make-border.mjs |
@@ -77,6 +78,12 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **2026-11-22 실패 기록·언팔 감속**: 11/14 이후 좋아요·팔로우가 차단 신호 없이 0건(타깃 좋아요 0/0, 댓글러 팔로우 0)인데 언팔만 하루 118명 → 언팔 120 → **40**(1회 14명, 3시간 간격)으로 되돌림. 활동 실패 이유를 `common.record_fail`이 `private_log` `fail:<KST 날짜>:<활동>`(JSON n·type·msg·at)에 남긴다 — growth_round 각 단계·언팔·타깃 좋아요/댓글러 팔로우 개별 실패·맛집 글 태그 조회/작성자 팔로우·좋아요 누른 사람 목록. 클라우드에서 `agent-status` 프로브로 `fail:%`를 읽으면 폰 로그 없이 원인을 본다.
 - **2026-11-25 실패 기록으로 찾은 4건 수정**: ① 좋아요 계열(타깃 좋아요·장소 피드·맛집 글·비슷한 계정 팔로워·단골, 해시태그 좋아요, `like_too`)은 차단되면 `common.pause_likes`로 **72시간** 쉰다(`likepause:until`) — 11/23·24 장소 피드 좋아요가 12시간 뒤 재개해 연속 차단. 전체 12시간 정지는 그대로 ② `big_food_accounts`가 빈 목록을 주간 캐시에 저장해 11/14~ 댓글러 팔로우·타깃 좋아요·첫 댓글이 0건 → 빈 목록은 저장 안 함, 재시도 3시간 간격(`bigacc:try`), 계정 조회 실패 기록 ③ 언팔 "Invalid unfollow mutation"(삭제·이미 언팔)은 완료 처리 ④ Termux에 tzdata가 없어 `ZoneInfo('America/Los_Angeles')` 실패 → 고정 시차(-8/+9) 폴백. 새 pip 패키지 없음.
 - 차단 신호(Challenge·PleaseWait·Feedback 등)를 받으면 6~24시간 비공식 호출을 전부 멈춘다. 상태는 DB `private_log` 테이블(`agent:alive`, `agent:paused`, `pp:<content_id>`, `likes:<날짜>`).
+
+### ▶ 2026-11-25 한 집 집중 릴스 메모
+- 옛 일반 릴스(무작위 식당, 78건 중앙 134·저장 0)와 다른 점: 대상이 **이미 히트한 편의 1위 집**(핵심 국물 편이 조회 상위라 자연히 그쪽). 같은 집은 한 번만(`focus-` 행 또는 같은 상호). 렌더는 make-reel 그대로(훅 카드 → 사진+자막 컷 → 정보 카드, 모션·TTS·BGM).
+- 시안: `REEL_PREVIEW=1 npx tsx scripts/make-reel.mjs` → `reel-focus-preview-0~3.jpg`(시크릿 불필요).
+- publish-check: 목요일은 `focus-` 또는 대체된 `roundup-`이면 정상(`alt`).
+- **자료 수집 카페 검색어 v2**: 블로그 후기 수를 "시군구 상호 카페"로 센다(`buzzV: 2`, v1 값은 다시 잰다) — v1은 짧은 상호가 92만 건씩 잡혔다.
 
 ### ▶ 2026-11-25 자료 수집 에이전트 (`scripts/collect.mjs`, `collect.yml`)
 - 사용자: "너무 모음집만 있다, 카페도 추가하자 — 일단 자료를 수집할 수 있는 에이전트를 추가하자". **발행하지 않는다** — 새 콘텐츠 재료를 `data/collect/<종류>.json`에 쌓는다(`items`: contentId·name·sido·addr·x·y·img·img2·license·buzz).

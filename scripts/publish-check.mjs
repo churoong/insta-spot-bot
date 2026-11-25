@@ -21,7 +21,8 @@ const OUT_DIR = process.env.OUT_DIR || ".";
 const EXPECTED = [
   // 일반 릴스는 2026-09-15부터 화·목·토만 (69건 중앙값 134·시청 2.3s·히트 0 — 주 7 → 3회)
   { key: "reel", prefix: "reel-", label: "일반 릴스", dows: [], workflow: "reels.yml" }, // 2026-10-22 예약 발행 중단(수동만)
-  { key: "roundup", prefix: "roundup-", label: "모음집", dows: [0, 1, 2, 3, 4, 5, 6], workflow: "roundup.yml" },
+  { key: "roundup", prefix: "roundup-", label: "모음집", dows: [0, 1, 2, 3, 5, 6], workflow: "roundup.yml" }, // 목요일은 한 집 집중(아래)
+  { key: "focus", prefix: "focus-", label: "한 집 집중 릴스", dows: [4], workflow: "roundup.yml", alt: "roundup-" }, // 2026-11-25 — 실패 시 지하철역 모음집으로 대신하므로 roundup-도 인정
   { key: "countdown", prefix: "countdown-", label: "큐레이션", dows: [1, 3, 5, 6], workflow: "countdown.yml" }, // 2026-10-22 수·토 캐러셀 슬롯 흡수
   { key: "carousel", prefix: "carousel-", label: "캐러셀", dows: [], workflow: "carousel.yml" }, // 2026-10-22 예약 발행 중단(수동만)
   { key: "border", prefix: "border-", label: "국경선 지도", dows: [0], workflow: "border.yml" }, // 2026-10-28 일요일 연재
@@ -103,7 +104,7 @@ async function main() {
   for (const { day, dow } of days) {
     const got = rows.filter((r) => String(r.kst_day) === day).map((r) => String(r.content_id));
     const due = EXPECTED.filter((e) => e.dows.includes(dow));
-    const missing = due.filter((e) => !got.some((cid) => cid.startsWith(e.prefix)));
+    const missing = due.filter((e) => !got.some((cid) => cid.startsWith(e.prefix) || (e.alt && cid.startsWith(e.alt))));
     console.log(
       `${day}(${"일월화수목금토"[dow]}) 예정 ${due.map((e) => e.label).join("·")} / ` +
         `발행 ${got.length}건${missing.length ? ` / ❌ 누락 ${missing.map((e) => e.label).join("·")}` : " / ✅"}`
