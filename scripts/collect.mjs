@@ -66,15 +66,55 @@ async function collectKind(kind) {
 }
 
 // 인기도 — 네이버 블로그 후기 수(랭킹 lib/ranking.ts와 같은 신호). 키가 없으면 건너뛴다.
-// 검색어 v3(2026-11-25): "상호"(따옴표) + 시군구 — 정확히 그 이름이 들어간 글만 센다.
-// v1(시군구 상호)·v2(시군구 상호 카페)는 "오던"·"바다다"·"카페 여주"처럼 흔한 단어 조합이
-// 그 동네 카페 글 전체로 잡혀 17만~32만 건이 나왔다.
-const BUZZ_V = 3;
-function cafeQuery(r) {
+// 검색어 v4(2026-11-25) = v2 방식 "시군구 상호 카페"로 되돌림. v3(상호 따옴표)는 네이버 블로그 API가 따옴표를
+// 무시해 v1과 같은 값(오던 92만)이 나왔다. 흔한 이름으로 튀는 값은 아래 verifyAndFlag가 걸러 낸다.
+const BUZZ_V = 4;
+function sigunguOf(r) {
   const t = String(r.addr || "").split(/\s+/);
-  const sigungu = t[1] || t[0] || r.sido || "";
+  return t[1] || t[0] || r.sido || "";
+}
+function cafeQuery(r, kind) {
   const clean = String(r.name).replace(/\[[^\]]*\]/g, "").replace(/"/g, "").trim();
-  return `"${clean}" ${sigungu}`.trim();
+  return `${sigunguOf(r)} ${clean} ${kind.buzzWord || ""}`.trim();
+}
+
+// 실제 가게 확인(네이버 지역 검색) + 튀는 후기 수 표시 — 2026-11-25 사용자 결정.
+//   verified: 지역 검색에 같은 상호·같은 시군구가 나오면 true, 못 찾으면 false(키 없음·실패는 null)
+//   buzzSuspect: 후기 수가 BUZZ_CAP 이상이거나 같은 시도 중앙값의 30배 이상 — 이름이 흔해 엉뚱한 글이 섞인 것으로 본다
+//   rankScore: 정렬용(확인된 집 > 미확인, 튀는 값은 시도 중앙값으로 대체)
+const BUZZ_CAP = 100000;
+const normName = (s) => String(s).replace(/<[^>]*>/g, "").replace(/\[[^\]]*\]|\s|\(.*?\)/g, "").toLowerCase();
+async function verifyAndFlag(rows, prev) {
+  const { searchLocal } = await import("../lib/naver.ts");
+  const old = new Map((prev?.items || []).map((r) => [r.contentId, r]));
+  let n = 0;
+  for (const r of rows) {
+    const o = old.get(r.contentId);
+    if (o?.verified != null && o.verifiedAt && Date.now() - new Date(o.verifiedAt).getTime() < 30 * 86400e3) { r.verified = o.verified; r.verifiedAt = o.verifiedAt; continue; }
+    if (n >= 1500) continue;
+    const sg = sigunguOf(r);
+    const res = await searchLocal(`${sg} ${String(r.name).replace(/\[[^\]]*\]/g, "").trim()}`, 5);
+    n++;
+    if (res) {
+      const nm = normName(r.name);
+      r.verified = res.some((p) => {
+        const pn = normName(p.name);
+        return (pn.includes(nm) || nm.includes(pn)) && `${p.address} ${p.roadAddress}`.includes(sg.replace(/(시|군|구)$/, ""));
+      });
+      r.verifiedAt = new Date().toISOString().slice(0, 10);
+    } else r.verified = null;
+    await sleep(120);
+  }
+  const bySido = {};
+  for (const r of rows) if (r.buzz != null) (bySido[r.sido] ??= []).push(r.buzz);
+  const med = Object.fromEntries(Object.entries(bySido).map(([k, v]) => [k, v.sort((a, b) => a - b)[Math.floor(v.length / 2)] || 0]));
+  for (const r of rows) {
+    const m = med[r.sido] || 0;
+    r.buzzSuspect = r.buzz != null && (r.buzz >= BUZZ_CAP || (m > 0 && r.buzz >= m * 30));
+    const base = r.buzzSuspect ? m : r.buzz ?? 0;
+    r.rankScore = (r.verified === false ? 0.2 : 1) * base;
+  }
+  return n;
 }
 
 async function addBuzz(rows, prev, kind) {
@@ -86,7 +126,7 @@ async function addBuzz(rows, prev, kind) {
     // 30일 안에 같은 검색어 버전으로 잰 값은 재사용(네이버 하루 한도 아끼기)
     if (o?.buzz != null && o.buzzV === BUZZ_V && o.buzzAt && Date.now() - new Date(o.buzzAt).getTime() < 30 * 86400e3) { r.buzz = o.buzz; r.buzzAt = o.buzzAt; r.buzzV = BUZZ_V; continue; }
     if (n >= 1500) continue;
-    const b = await blogBuzz(cafeQuery(r));
+    const b = await blogBuzz(cafeQuery(r, kind));
     n++;
     if (b != null) { r.buzz = b; r.buzzAt = new Date().toISOString().slice(0, 10); r.buzzV = BUZZ_V; }
     await sleep(120);
@@ -112,12 +152,15 @@ for (const kind of KINDS.filter((k) => !only || k.key === only)) {
     continue;
   }
   const measured = await addBuzz(rows, prev, kind).catch((e) => { console.log("블로그 후기 수 실패(무시):", String(e).slice(0, 80)); return 0; });
-  rows.sort((a, b) => (b.buzz ?? -1) - (a.buzz ?? -1));
+  const checked = await verifyAndFlag(rows, prev).catch((e) => { console.log("실제 가게 확인 실패(무시):", String(e).slice(0, 80)); return 0; });
+  rows.sort((a, b) => (b.rankScore ?? b.buzz ?? -1) - (a.rankScore ?? a.buzz ?? -1));
+  const suspect = rows.filter((r) => r.buzzSuspect).length, unverified = rows.filter((r) => r.verified === false).length;
+  console.log(`   실제 가게 확인 새로 ${checked}곳 · 지도에서 못 찾음 ${unverified}곳 · 튀는 후기 수 ${suspect}곳(${rows.filter((r) => r.buzzSuspect).slice(0, 6).map((r) => r.name).join(", ")})`);
   const bySido = {};
   for (const r of rows) bySido[r.sido] = (bySido[r.sido] || 0) + 1;
   fs.writeFileSync(file, JSON.stringify({ kind: kind.key, label: kind.label, collectedAt: new Date().toISOString(), count: rows.length, bySido, items: rows }, null, 1));
   mark[kind.key] = new Date().toISOString();
   console.log(`✅ ${kind.label} ${rows.length}곳 저장(${file}) · 후기 수 새로 잰 곳 ${measured} · 시도별 ${JSON.stringify(bySido)}`);
-  console.log(`   후기 많은 순 상위: ${rows.slice(0, 8).map((r) => `${r.name}(${r.sido} ${r.buzz ?? "?"})`).join(" · ")}`);
+  console.log(`   순위 상위: ${rows.slice(0, 10).map((r) => `${r.name}(${r.sido} ${r.buzz ?? "?"}${r.verified === false ? " 미확인" : ""})`).join(" · ")}`);
 }
 fs.writeFileSync(MARK, JSON.stringify(mark, null, 1));
