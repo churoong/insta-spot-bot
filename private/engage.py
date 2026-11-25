@@ -810,18 +810,21 @@ def refresh_online_hours():
     common.online_slot이 이 가중치로 하루 1회 활동 시각을 고른다(노트북 온라인 시간 안에서)."""
     if state_get(f"onlinehours:{now_kst():%G-%V}"):
         return
-    from datetime import datetime, timezone
-    from zoneinfo import ZoneInfo
+    from datetime import datetime, timedelta, timezone
     from common import GRAPH, graph_token
+    try:
+        from zoneinfo import ZoneInfo
+        pt, seoul = ZoneInfo("America/Los_Angeles"), ZoneInfo("Asia/Seoul")
+    except Exception:  # Termux에 tzdata가 없다(2026-11-25 실측) — 고정 시차로 대신(겨울 PST -8, 여름엔 1시간 어긋남)
+        pt, seoul = timezone(timedelta(hours=-8)), timezone(timedelta(hours=9))
     j = requests.get(f"{GRAPH}/me/insights", params={"metric": "online_followers", "period": "lifetime", "access_token": graph_token()}, timeout=20).json()
     vals = next((v["value"] for v in (j.get("data") or [{}])[0].get("values", []) if v.get("value")), None)
     if not vals:
         return
-    pt = ZoneInfo("America/Los_Angeles")
     base = datetime.now(pt).replace(minute=0, second=0, microsecond=0)
     kst = {}
     for h, n in vals.items():
-        t = base.replace(hour=int(h)).astimezone(ZoneInfo("Asia/Seoul"))
+        t = base.replace(hour=int(h)).astimezone(seoul)
         kst[str(t.hour)] = int(n)
     state_set("online_hours", json.dumps(kst))
     state_set(f"onlinehours:{now_kst():%G-%V}", "1")

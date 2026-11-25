@@ -79,10 +79,23 @@ def nap(lo: float, hi: float) -> None:
 BLOCK_SIGNALS = ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint")
 
 
+LIKE_PAUSE_HOURS = 72
+
+
+def likes_paused() -> bool:
+    """좋아요 계열이 인스타에 막혔을 때 72시간 쉰다(2026-11-25 — 12시간 뒤 바로 다시 눌러 11/23·24 연속 차단)."""
+    return time.time() < float(state_get("likepause:until") or 0)
+
+
+def pause_likes(why: str) -> None:
+    state_set("likepause:until", str(time.time() + LIKE_PAUSE_HOURS * 3600))
+    state_set("likepause:why", f"{now_kst():%m-%d %H:%M} {why}")
+
+
 def like_too(c, media_id, already: bool = False) -> None:
     """남의 게시물에 댓글을 달면 좋아요도 누른다(2026-10-27 사용자 결정) — 댓글만 있고 하트가 없으면 어색하다.
     댓글은 이미 달렸으니 좋아요 실패는 넘긴다. 차단 신호만 올려 호출부가 멈추게 한다."""
-    if already:
+    if already or likes_paused():
         return
     try:
         nap(4, 15)
