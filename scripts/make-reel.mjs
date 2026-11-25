@@ -312,7 +312,29 @@ function sh(cmd, args) {
   });
 }
 
+// 시안(시크릿·네트워크 불필요): REEL_PREVIEW=1 npx tsx scripts/make-reel.mjs → reel-focus-preview-*.jpg
+// 한 집 집중 릴스의 첫 화면(훅 카드)·사진+자막 컷·정보 카드를 샘플(data/dry-sample.json 1위 집)으로 그린다.
+async function preview() {
+  const sharp = (await import("sharp")).default;
+  const sample = JSON.parse(fs.readFileSync("data/dry-sample.json", "utf8"));
+  const p = sample.places[0];
+  const dir = "data/dry-sample-photos";
+  const photos = fs.readdirSync(dir).map((f) => path.join(dir, f));
+  const mine = photos.find((f) => String(p.imageUrl).includes(path.basename(f).split("_")[0])) || photos[0];
+  const region = String(p.address).split(/\s+/).slice(0, 2).join(" ");
+  const sub = `${p.name} · ${region}`.slice(0, 28);
+  const outs = [
+    await composeHookCard(sharp, mine, "국밥 편 1위 집, 여기야?", sub),
+    await withSubtitle(sharp, await verticalFrameBuffer(sharp, mine), "부산역 바로 앞, 밀면이랑 돼지국밥을 같이 파는 집"),
+    await withSubtitle(sharp, await verticalFrameBuffer(sharp, photos[1]), "진한 국물에 순대국밥까지 든든하게"),
+    await designCardBuffer(sharp, { eyebrow: region, title: p.name, sub: "맛디깅 국밥 편 1위로 소개한 집", note: `대표 메뉴 · ${p.menu}` }),
+  ];
+  outs.forEach((b, i) => fs.writeFileSync(`reel-focus-preview-${i}.jpg`, b));
+  console.log(`시안 ${outs.length}장: reel-focus-preview-0~${outs.length - 1}.jpg`);
+}
+
 async function main() {
+  if (process.env.REEL_PREVIEW === "1") return preview();
   const { db, initDb } = await import("../lib/db.ts");
   const { publishReelSmart } = await import("../lib/instagram.ts");
   await initDb();
@@ -324,17 +346,22 @@ async function main() {
   // category=릴스만 세는 이유: 모음집·큐레이션까지 함께 세면 저녁 모음집이
   // 다음 날 아침 릴스를 막는다.
   const force = process.env.MIN_GAP_MIN === "0" || process.env.QUIET_HOURS_OFF === "1"; // 수동 실행용
-  const today = await db.execute(
-    `SELECT 1 FROM posts
-     WHERE status IN ('published','publishing') AND category = '릴스'
-       AND date(created_at, '+9 hours') = date('now', '+9 hours') LIMIT 1`
-  );
+  // 한 집 집중 릴스(2026-11-25 사용자 결정) — 목요일 저녁 모음집 슬롯(roundup.yml)에서 FOCUS=1로 부른다.
+  // 대상 = 조회수 높은 지난 음식 편의 1위 식당. 발행 창은 roundup.yml 게이트가 맡는다.
+  const FOCUS = process.env.FOCUS === "1";
+  const CATEGORY = FOCUS ? "집중" : "릴스";
+  const today = await db.execute({
+    sql: `SELECT 1 FROM posts
+     WHERE category = ? AND (status = 'published' OR (status = 'publishing' AND created_at > datetime('now', '-30 minutes')))
+       AND date(created_at, '+9 hours') = date('now', '+9 hours') LIMIT 1`,
+    args: [CATEGORY],
+  });
   if (!force && today.rows.length > 0) {
     console.log("⏭️ 오늘(KST) 이미 발행됨 — 이번 회차 건너뜀");
     return;
   }
   const kstHour = (new Date().getUTCHours() + 9) % 24;
-  if (!force && (kstHour < 8 || kstHour >= 12)) {
+  if (!force && !FOCUS && (kstHour < 8 || kstHour >= 12)) {
     console.log(`⏭️ 아침 발행 창(KST 08~12시) 밖 — 현재 ${kstHour}시, 건너뜀`);
     return;
   }
@@ -347,13 +374,17 @@ async function main() {
   let data = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const r = await fetch(`${base}/api/reel-candidate`, {
+      const r = await fetch(`${base}/api/reel-candidate${FOCUS ? "?focus=1" : ""}`, {
         headers: { Authorization: `Bearer ${process.env.CRON_SECRET}` },
         signal: AbortSignal.timeout(290000),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(`후보 API HTTP ${r.status}: ${JSON.stringify(j).slice(0, 200)}`);
-      if (j.skipped) { console.log("⏭️ 스킵:", j.reason); return; }
+      if (j.skipped) {
+        console.log("⏭️ 스킵:", j.reason);
+        if (FOCUS) process.exit(3); // roundup.yml이 이 코드를 보고 지하철역 모음집으로 대신한다
+        return;
+      }
       data = j;
       break;
     } catch (e) {
@@ -608,12 +639,12 @@ ${bgm.attribution}`; // CC BY 4.0 — 저작자 표시 의무
   // 7) 중복발행 방지: 발행 '전에' dedup 마커 기록. DM용 위치정보(mapx/mapy/map_url)도 저장
   //    (웹훅 '어디야' → place_name/address/map_url로 DM 발송).
   //    이미지는 '원본' URL로 저장(대시보드 갤러리는 프록시 아닌 원본을 씀).
-  const cid = "reel-" + subject.contentId;
+  const cid = (FOCUS ? "focus-" : "reel-") + subject.contentId;
   await db.execute({
     sql: `INSERT INTO posts (content_id, place_name, address, category, image_url, image_urls, caption, status, mapx, mapy, map_url)
-          VALUES (?, ?, ?, '릴스', ?, ?, ?, 'publishing', ?, ?, ?)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'publishing', ?, ?, ?)`,
     args: [
-      cid, subject.name, subject.address, originalUrls[0], JSON.stringify(originalUrls), caption,
+      cid, subject.name, subject.address, CATEGORY, originalUrls[0], JSON.stringify(originalUrls), caption,
       subject.mapx ?? null, subject.mapy ?? null, subject.mapUrl ?? null,
     ],
   });
@@ -622,16 +653,24 @@ ${bgm.attribution}`; // CC BY 4.0 — 저작자 표시 의무
   // 일반 릴스는 트라이얼로 발행(TRIAL_REELS=0으로 끌 수 있음) — 도달 105~140에
   // 갇혀 있던 포맷이라 비팔로워 풀에서 테스트하고 성과 통과분만 전체공개(자동)한다.
   // 모음집·큐레이션은 검증된 포맷이라 정식 발행 유지(make-roundup은 trial 미사용).
-  const trial = process.env.TRIAL_REELS !== "0";
-  const mediaId = await publishReelSmart(
+  // 집중 릴스는 정식 발행(모음집 슬롯을 대신하므로) — 트라이얼은 일반 릴스만
+  const trial = !FOCUS && process.env.TRIAL_REELS !== "0";
+  let mediaId;
+  try {
+    mediaId = await publishReelSmart(
     videoUrl,
     caption,
     igMusic ? { audioId: igMusic.id, audioVolume: voiceTrack ? 30 : 100, videoVolume: 100 } : null,
     { trial }
   );
+  } catch (e) {
+    // 발행 실패는 failed로 정리 — 안 하면 publishing으로 남아 그날 재시도를 막는다(모음집과 같은 처리)
+    await db.execute({ sql: "UPDATE posts SET status = 'failed' WHERE content_id = ?", args: [cid] }).catch(() => {});
+    throw e;
+  }
   console.log("✅ 릴스 발행 완료! media id:", mediaId);
   await db.execute({
-    sql: `UPDATE posts SET ig_media_id = ?, status = 'published' WHERE content_id = ?`,
+    sql: `UPDATE posts SET ig_media_id = ?, status = 'published'${FOCUS ? ", reel_format = 'focus'" : ""} WHERE content_id = ?`,
     args: [mediaId, cid],
   });
   console.log("완료:", subject.name);

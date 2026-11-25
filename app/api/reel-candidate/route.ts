@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, initDb } from "@/lib/db";
-import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetchQuizImages } from "@/lib/tourapi";
+import { fetchCandidates, fetchByFoodKeyword, fetchOverview, fetchFoodInfo, fetchQuizImages, fetchSpotByName } from "@/lib/tourapi";
 import { generateCaption, generateNarration, generateHook } from "@/lib/caption";
 import { pickPerformingKeyword } from "@/lib/performance";
 import { searchMapUrl } from "@/lib/kakao";
@@ -25,6 +25,40 @@ export const maxDuration = 300;
  *
  * GET /api/reel-candidate  (Authorization: Bearer $CRON_SECRET)
  */
+/**
+ * 한 집 집중 릴스 후보(2026-11-25 사용자 결정) — 조회수 높은 지난 모음집·큐레이션 편의 1위 식당.
+ * 캡션의 "1. 상호 (지역)" 줄에서 이름을 읽고 관광공사에서 같은 집을 찾는다(사진은 그 집 공공누리 사진만).
+ * 이미 집중 릴스로 낸 집(focus-<contentId>)은 건너뛴다.
+ */
+const FOCUS_FOOD_RE = /(\S+)\s+(?:\d+대\s*맛집|원픽\s*\d+곳|찐\S*\s*모음|맛집\s*리스트)/;
+async function fetchFocusCandidates(): Promise<any[]> {
+  const rows = (await db.execute(
+    `SELECT content_id, caption, views FROM posts
+      WHERE status = 'published' AND (content_id LIKE 'roundup-%' OR content_id LIKE 'countdown-%')
+        AND content_id NOT LIKE 'roundup-area-%' AND content_id NOT LIKE 'roundup-stn-%'
+        AND views IS NOT NULL AND created_at > datetime('now', '-180 days')
+      ORDER BY views DESC LIMIT 30`
+  )).rows as any[];
+  const out: any[] = [];
+  for (const r of rows) {
+    const cap = String(r.caption ?? "");
+    const m = cap.match(/^1\.\s+(.+?)\s*\(([^)]+)\)\s*$/m);
+    if (!m) continue;
+    const name = m[1].replace(/🏅|📺/g, "").replace(/@\S+/g, "").trim();
+    const region = m[2].trim();
+    const title = (cap.split("\n")[0].split("|")[1] ?? "").trim();
+    const food = title.match(FOCUS_FOOD_RE)?.[1] ?? "";
+    const used = await db.execute({ sql: "SELECT 1 FROM posts WHERE content_id LIKE 'focus-%' AND place_name = ?", args: [name] });
+    if (used.rows.length) continue;
+    const spot = await fetchSpotByName(name, region).catch(() => null);
+    if (!spot) continue;
+    (spot as any).focus = { food, views: Number(r.views) || 0, episode: r.content_id };
+    out.push(spot);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization");
   if (process.env.CRON_SECRET && auth !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -48,9 +82,11 @@ export async function GET(req: NextRequest) {
 
     // 아직 릴스로 안 만든 새 맛집 발굴 (음식 사진 1장 이상)
     let capFails = 0; // 캡션 생성 실패 횟수(규칙 위반·AI 한도 등)
-    for (let attempt = 0; attempt < 5; attempt++) {
+    const focusMode = req.nextUrl.searchParams.get("focus") === "1";
+    for (let attempt = 0; attempt < (focusMode ? 1 : 5); attempt++) {
       let cands: Awaited<ReturnType<typeof fetchCandidates>> = [];
       try {
+        if (focusMode) { cands = await fetchFocusCandidates(); throw "focus"; }
         // 소스 다변화(2026-08): 서울 음식관광 DB(자체 사진 보유)가 준비돼 있으면
         // 1/4 확률로 섞는다. 나머지는 기존 TourAPI 두 경로.
         const r = Math.random();
@@ -61,22 +97,24 @@ export async function GET(req: NextRequest) {
               ? await fetchByFoodKeyword(await pickPerformingKeyword())
               : await fetchCandidates();
       } catch (e) {
-        console.error(`[reel-candidate] 후보 수집 실패(시도 ${attempt + 1}):`, String(e).slice(0, 120));
-        continue;
+        if (e !== "focus") {
+          console.error(`[reel-candidate] 후보 수집 실패(시도 ${attempt + 1}):`, String(e).slice(0, 120));
+          continue;
+        }
       }
 
       for (const s of cands) {
         try {
           const dup = await db.execute({
-            sql: "SELECT 1 FROM posts WHERE content_id IN (?, ?)",
-            args: [s.contentId, "reel-" + s.contentId],
+            sql: focusMode ? "SELECT 1 FROM posts WHERE content_id = ?" : "SELECT 1 FROM posts WHERE content_id IN (?, ?)",
+            args: focusMode ? ["focus-" + s.contentId] : [s.contentId, "reel-" + s.contentId],
           });
           if (dup.rows.length) continue;
 
           // 인기도 게이트 — 블로그 후기가 거의 없는 무명 가게는 콘텐츠 가치가 낮다.
           // (실측: 유명 노포 16,000건 vs 무명집 4건). 시도를 거듭할수록 기준을 낮춰
           // 후보가 아예 없어 발행이 멈추는 일은 없게 한다.
-          const minBuzz = [300, 100, 30, 0, 0][attempt] ?? 0;
+          const minBuzz = focusMode ? 0 : [300, 100, 30, 0, 0][attempt] ?? 0; // 집중 후보는 이미 검증된 1위 집
           if (minBuzz > 0) {
             const buzz = await blogBuzz(buzzQuery(s.name, s.address));
             if (buzz !== null && buzz < minBuzz) continue;
@@ -125,6 +163,9 @@ export async function GET(req: NextRequest) {
           const hook = await generateHook(s, { menu: info.menu, goodPrice: gp });
 
           const region = String(s.address ?? "").split(/\s+/).slice(0, 2).join(" ");
+          const fx = (s as any).focus;
+          // 집중 릴스 캡션 첫 줄 — 사실만("○○ 편 1위로 소개한 집"). "N대 맛집" 표현은 쓰지 않는다.
+          const focusLine = fx ? `🥇 맛디깅 ${fx.food ? fx.food + " 편" : "추천"} 1위로 소개한 집\n\n` : "";
           return NextResponse.json({
             contentId: s.contentId,
             name: s.name,
@@ -132,7 +173,8 @@ export async function GET(req: NextRequest) {
             category: s.category,
             imageUrls: imgs.map(proxy), // Actions는 프록시로 받음
             originalUrls: imgs, // DB 기록용 원본
-            caption: cap.caption,
+            caption: focusLine + cap.caption,
+            focus: fx ?? null,
             narration: narration ?? [],
             hook: hook ?? null,
             menu: info.menu || null, // 사진 없을 때 디자인 카드에 표시

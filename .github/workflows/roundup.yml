@@ -71,7 +71,20 @@ jobs:
 
       - name: 모음집 생성·발행
         if: steps.gate.outputs.go == '1'
-        run: npx tsx scripts/make-roundup.mjs
+        # 2026-11-25 사용자 결정: 목요일 저녁은 '한 집 집중 릴스'(지난 히트 편 1위 식당, make-reel FOCUS=1).
+        # 후보가 없거나(종료 코드 3) 실패하면 원래 목요일 슬롯(지하철역 모음집)으로 대신한다.
+        # 테마 지정·dry 수동 실행은 그대로 모음집.
+        run: |
+          DOW=$(TZ=Asia/Seoul date +%u)
+          if [ "$DOW" = "4" ] && [ -z "$ROUNDUP_THEME" ] && [ "$ROUNDUP_DRY" != "1" ]; then
+            set +e
+            FOCUS=1 TRIAL_REELS=0 npx tsx scripts/make-reel.mjs
+            rc=$?
+            set -e
+            if [ "$rc" = "0" ]; then exit 0; fi
+            echo "한 집 집중 릴스 건너뜀/실패(종료 코드 $rc) — 지하철역 모음집으로 대신"
+          fi
+          npx tsx scripts/make-roundup.mjs
         env:
           # dry 입력 시 발행 없이 표지 미리보기만 (아래 아티팩트 업로드)
           ROUNDUP_DRY: ${{ inputs.dry && '1' || '' }}

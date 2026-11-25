@@ -13,7 +13,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 수집 종류 — 새 종류는 여기 한 줄 추가. cat3은 관광공사 분류(음식점 39 하위).
 const KINDS = [
-  { key: "cafe", label: "카페·전통찻집", contentTypeId: "39", cat1: "A05", cat2: "A0502", cat3: "A05020900", exclude: /주점|호프|포차|바\b|클럽|노래/ },
+  { key: "cafe", label: "카페·전통찻집", contentTypeId: "39", cat1: "A05", cat2: "A0502", cat3: "A05020900", buzzWord: "카페", exclude: /주점|호프|포차|바\b|클럽|노래/ },
 ];
 const AREAS = [
   [1, "서울"], [2, "인천"], [3, "대전"], [4, "대구"], [5, "광주"], [6, "부산"], [7, "울산"], [8, "세종"],
@@ -66,18 +66,28 @@ async function collectKind(kind) {
 }
 
 // 인기도 — 네이버 블로그 후기 수(랭킹 lib/ranking.ts와 같은 신호). 키가 없으면 건너뛴다.
-async function addBuzz(rows, prev) {
-  const { blogBuzz, buzzQuery } = await import("../lib/naver.ts");
+// 검색어 v2(2026-11-25): "시군구 이름 카페" — v1(시군구 이름)은 "오던"·"율"·"바다다"처럼 짧고 흔한 상호가
+// 엉뚱한 글까지 세어 92만 건이 나왔다. 종류 단어(카페)를 붙여 그 가게 글만 남긴다.
+const BUZZ_V = 2;
+function cafeQuery(r, kind) {
+  const t = String(r.addr || "").split(/\s+/);
+  const sigungu = t[1] || t[0] || r.sido || "";
+  const clean = String(r.name).replace(/\[[^\]]*\]/g, "").trim();
+  return `${sigungu} ${clean} ${kind.buzzWord || ""}`.trim();
+}
+
+async function addBuzz(rows, prev, kind) {
+  const { blogBuzz } = await import("../lib/naver.ts");
   const old = new Map((prev?.items || []).map((r) => [r.contentId, r]));
   let n = 0;
   for (const r of rows) {
     const o = old.get(r.contentId);
-    // 30일 안에 잰 값은 재사용(네이버 하루 한도 아끼기)
-    if (o?.buzz != null && o.buzzAt && Date.now() - new Date(o.buzzAt).getTime() < 30 * 86400e3) { r.buzz = o.buzz; r.buzzAt = o.buzzAt; continue; }
+    // 30일 안에 같은 검색어 버전으로 잰 값은 재사용(네이버 하루 한도 아끼기)
+    if (o?.buzz != null && o.buzzV === BUZZ_V && o.buzzAt && Date.now() - new Date(o.buzzAt).getTime() < 30 * 86400e3) { r.buzz = o.buzz; r.buzzAt = o.buzzAt; r.buzzV = BUZZ_V; continue; }
     if (n >= 1500) continue;
-    const b = await blogBuzz(buzzQuery(r.name, r.addr));
+    const b = await blogBuzz(cafeQuery(r, kind));
     n++;
-    if (b != null) { r.buzz = b; r.buzzAt = new Date().toISOString().slice(0, 10); }
+    if (b != null) { r.buzz = b; r.buzzAt = new Date().toISOString().slice(0, 10); r.buzzV = BUZZ_V; }
     await sleep(120);
   }
   return n;
@@ -100,7 +110,7 @@ for (const kind of KINDS.filter((k) => !only || k.key === only)) {
     console.log(`⚠️ ${kind.label}: ${quotaHit ? "관광공사 한도 초과" : `결과가 ${rows.length}곳뿐`} — 기존 파일 유지`);
     continue;
   }
-  const measured = await addBuzz(rows, prev).catch((e) => { console.log("블로그 후기 수 실패(무시):", String(e).slice(0, 80)); return 0; });
+  const measured = await addBuzz(rows, prev, kind).catch((e) => { console.log("블로그 후기 수 실패(무시):", String(e).slice(0, 80)); return 0; });
   rows.sort((a, b) => (b.buzz ?? -1) - (a.buzz ?? -1));
   const bySido = {};
   for (const r of rows) bySido[r.sido] = (bySido[r.sido] || 0) + 1;
