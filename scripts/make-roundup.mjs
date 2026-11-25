@@ -736,7 +736,44 @@ function collectDensityPlaces(theme) {
   }));
 }
 
+/**
+ * 카페 편(2026-11-25 사용자 결정) — 자료 수집 에이전트(scripts/collect.mjs)가 모은 data/collect/cafe.json에서
+ * 시군구별 카페 10곳 이상인 곳만 테마로 만든다. 사진은 관광공사 공공누리 1·3유형만(수집 단계에서 걸렀다).
+ * 지도에서 확인 안 된 곳(verified=false)은 뺀다. 순서는 수집기의 rankScore(블로그 후기, 튀는 값 보정).
+ */
+function buildCafeThemes() {
+  let data;
+  try { data = JSON.parse(fs.readFileSync(new URL("../data/collect/cafe.json", import.meta.url), "utf8")); } catch { return []; }
+  const groups = new Map();
+  for (const c of data.items ?? []) {
+    if (c.verified === false || !c.img) continue;
+    const sg = String(c.addr ?? "").split(/\s+/)[1] ?? "";
+    if (!sg) continue;
+    const k = `${c.sido} ${sg}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(c);
+  }
+  const out = [];
+  for (const [k, list] of groups) {
+    if (list.length < 10) continue;
+    const [sido, sg] = k.split(" ");
+    const short = sg.replace(/(시|군|구)$/, "");
+    const kw = short.length >= 2 ? short : sg;
+    list.sort((a, b) => (b.rankScore ?? b.buzz ?? 0) - (a.rankScore ?? a.buzz ?? 0));
+    out.push({ key: `cafe-${sido}-${kw}`, mode: "cafe", keyword: kw, food: "카페", region: sido, count: 6, emoji: "☕", tags: [`${kw}카페`, "카페투어", "카페추천"], cafes: list });
+  }
+  return out;
+}
+
+function collectCafePlaces(theme, limit) {
+  return theme.cafes.slice(0, limit ?? 24).map((c) => ({
+    contentId: c.contentId, name: c.name, address: c.addr, region: shortRegion(c.addr),
+    imageUrl: c.img, extraImages: c.img2 ? [c.img2] : [], cafe: true,
+  }));
+}
+
 async function collectPlaces(theme, limit) {
+  if (theme.mode === "cafe") return collectCafePlaces(theme, limit);
   if (theme.mode === "route") return collectRoutePlaces(theme);
   if (theme.mode === "density") return collectDensityPlaces(theme);
   if (theme.mode === "area") return collectAreaPlaces(theme, limit);
@@ -876,7 +913,7 @@ async function pickFoodImage(place, food) {
     if (valid.length < 1) return;
 
     const visionParts = [
-          { text: `식당 사진 ${valid.length}장이야. ${food ? `"${food}" 요리가 실제로 화면에 보이는 사진의 번호만 좋은 순서대로 JSON 배열로 답해 (1번부터). 반찬·곁들임·다른 요리만 보이는 사진은 제외하고, ${food}가 보이는 사진이 한 장도 없으면 반드시 []로 답해.` : `음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터).`} 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
+          { text: food === "카페" ? `카페 사진 ${valid.length}장이야. 음료·디저트가 먹음직스럽게 보이거나 카페 공간(실내·테라스·창밖 풍경)이 예쁘게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터). 제외 대상: 간판만 크게 보이는 사진, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진, 사람 얼굴이 주인공인 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` : `식당 사진 ${valid.length}장이야. ${food ? `"${food}" 요리가 실제로 화면에 보이는 사진의 번호만 좋은 순서대로 JSON 배열로 답해 (1번부터). 반찬·곁들임·다른 요리만 보이는 사진은 제외하고, ${food}가 보이는 사진이 한 장도 없으면 반드시 []로 답해.` : `음식(요리·메뉴)이 크고 먹음직스럽게 보이는 사진의 번호를 좋은 순서대로 JSON 배열로만 답해 (1번부터).`} 제외 대상: 건물 외관·간판·내부 전경, 메뉴판, 블로그·업체 워터마크나 로고 글자가 박힌 사진. 조건에 맞는 사진이 없으면 []. 예: [3,1]` },
           ...parts,
         ];
     let text = await geminiCall(visionParts, 60);
@@ -1147,7 +1184,7 @@ async function kakaoGeo(p) {
 }
 
 async function prepareMap(db, places) {
-  places = places.filter((p) => !p.densityN);
+  places = places.filter((p) => !p.densityN && !p.cafe); // 카페는 맛집 지도에 넣지 않는다
   for (const p of places) if (!p.geo) p.geo = await kakaoGeo(p);
   const rows = (await db.execute("SELECT name, x, y FROM map_pins")).rows;
   const have = new Set(rows.map((r) => String(r.name)));
@@ -1160,7 +1197,7 @@ async function prepareMap(db, places) {
 }
 
 async function addMapPins(db, places, cid) {
-  places = places.filter((p) => !p.densityN);
+  places = places.filter((p) => !p.densityN && !p.cafe);
   let n = 0;
   for (const p of places) {
     if (!p.geo) p.geo = await kakaoGeo(p);
@@ -1250,7 +1287,7 @@ function markTv(places) {
 
 /** 한줄평(표지용) + 상세 설명(슬라이드용) 생성 — 모든 AI 실패 시 null(모음집 발행 스킵) */
 async function makeDescriptions(theme, places) {
-  const prompt = `인스타 맛집 카드뉴스 문구를 만들어줘. 주제: "${theme.mode === "area" ? theme.keyword + " 일대 맛집 모음 (음식 종류는 제각각 — 각 집의 대표 메뉴를 앞세워)" : theme.keyword + " 맛집 모음"}"
+  const prompt = `인스타 맛집 카드뉴스 문구를 만들어줘. 주제: "${theme.mode === "cafe" ? theme.keyword + " 카페 모음 (각 카페의 대표 음료·디저트나 공간 분위기를 앞세워 — 식사 메뉴처럼 쓰지 말 것)" : theme.mode === "area" ? theme.keyword + " 일대 맛집 모음 (음식 종류는 제각각 — 각 집의 대표 메뉴를 앞세워)" : theme.keyword + " 맛집 모음"}"
 
 식당 정보:
 ${places
@@ -2097,9 +2134,10 @@ async function composeCarouselCard(sharp, place, idx) {
  * (main에 문장을 넣으면 980/글자수 계산 때문에 타이포가 작아진다).
  */
 function buildHookTitle(theme, n) {
-  const main = theme.mode === "area" ? theme.keyword : theme.food || theme.keyword;
+  const main = theme.mode === "area" || theme.mode === "cafe" ? theme.keyword : theme.food || theme.keyword;
   const subs =
-    theme.mode === "area"
+    theme.mode === "cafe" ? ["카페 여기야?", "이 동네 카페 실화?", "카페 가봤어?"]
+    : theme.mode === "area"
       ? ["여기가 끝?", "진짜 여기야?", "이 동네 실화?", "여기 가봤어?"]
       : ["성지가 여기라고?", "여기가 원탑?", "이게 실화?", "진짜 여기야?"];
   const sub = subs[Math.floor(Math.random() * subs.length)];
@@ -2119,6 +2157,13 @@ function titleTail(n, sfx = "맛집") {
 }
 
 function buildPunchyTitle(theme, n) {
+  if (theme.mode === "cafe") {
+    // 카페 편: 큰 지역명 + 꼬리(원픽 N곳 / 찐카페 모음 / 카페 리스트). 지역명은 앞 6글자 밖으로.
+    const tops = [`주말에 가기 좋은`, `분위기 하나는 끝내주는`, `아는 사람만 간다는`, `요즘 난리 난`];
+    const top = tops[Math.floor(Math.random() * tops.length)];
+    const sub = titleTail(n, "카페");
+    return { text: `${top} ${theme.keyword} ${sub}`, top, main: theme.keyword, sub };
+  }
   if (theme.mode === "route") {
     const top = `${theme.routeLabel} 역마다`;
     const sub = titleTail(n);
@@ -2628,7 +2673,7 @@ function josa(word, withBatchim, without) {
 
 /** 댓글 참여 유도 문구 (전부 "추천 맛집 댓글로" 뉘앙스, 랜덤 회전) */
 function engagementLine(theme, count) {
-  const spot = theme.keyword === "카페" ? "카페" : theme.mode === "area" ? `${theme.keyword} 부근 맛집` : `${theme.keyword} 맛집`;
+  const spot = theme.keyword === "카페" ? "카페" : theme.mode === "cafe" ? `${theme.keyword} 카페` : theme.mode === "area" ? `${theme.keyword} 부근 맛집` : `${theme.keyword} 맛집`;
   const pool = [
     `여러분의 인생 ${spot}${josa(spot, "은", "는")} 어디인가요? 추천 맛집을 댓글로 남겨주세요 🙌`,
     `우리 동네 ${spot}${josa(spot, "이", "가")} 최고다! 하시는 분들, 그 집을 댓글로 추천해 주세요 🔥`,
@@ -2637,6 +2682,7 @@ function engagementLine(theme, count) {
     `같이 가고 싶은 사람을 댓글에 태그해 보세요 🤝 여러분만 아는 추천 ${spot}도 댓글로 남겨주시면 최고예요!`,
     `댓글로 추천해 주신 곳은 다음 모음집 후보에 올려드려요! 여러분의 원픽 ${spot}${josa(spot, "을", "를")} 댓글로 추천해 주세요 ✍️`,
   ];
+  if (theme.mode === "cafe") return pool[Math.floor(Math.random() * pool.length)].replace(/추천 맛집|맛집|명가/g, "카페").replace(/모음집/g, "카페 편");
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -2679,7 +2725,7 @@ function buildCaption(theme, places, descending = false, ep = null) {
     (hundredCount > 0 || goodShops.length > 0 || places.some((p) => p.tv || p.nopo) ? "\n" : "");
   // 2025-12부터 게시물당 해시태그 5개 제한 — 테마 태그(최대 3) + 큐레이션 2개만.
   // 검색 유입은 해시태그가 아니라 첫 줄의 [음식+맛집] 키워드가 담당한다.
-  const tags = [...(theme.tags ?? []).slice(0, 3), "맛집추천", "맛집리스트"]
+  const tags = [...(theme.tags ?? []).slice(0, 3), ...(theme.mode === "cafe" ? ["카페", "카페스타그램"] : ["맛집추천", "맛집리스트"])]
     .slice(0, 5)
     .map((t) => `#${t}`)
     .join(" ");
@@ -2838,13 +2884,17 @@ async function main() {
   const kstDow = new Date(Date.now() + 9 * 3600 * 1000).getUTCDay(); // 0=일
   // 2026-10-27 지하철역 맛집 시리즈(사용자 결정): 목·토 상권 → 지하철역(반경 700m, 풀 20곳+ 역만 —
   // scripts/build-stations.mjs가 data/stations.json·테마를 만든다). 화요일은 상권 그대로.
-  const SLOT_BY_DOW = ["nation", "nation", "spot", "nation", "station", "nation", "station"]; // 일~토
+  // 2026-11-25 사용자 결정: 토요일 저녁 = 카페 편(data/collect/cafe.json, 자료 수집 에이전트). 카페 테마가 모자라면 지하철역 편으로.
+  // (목요일 저녁은 roundup.yml이 한 집 집중 릴스를 먼저 시도하고, 실패하면 여기 station으로 온다)
+  const SLOT_BY_DOW = ["nation", "nation", "spot", "nation", "station", "nation", "cafe"]; // 일~토
   const slot = process.env.ROUNDUP_STYLE ? "food" : SLOT_BY_DOW[kstDow];
   const isStation = (t) => t.series === "station";
   const isSpot = (t) => t.mode === "area" && t.tour?.mapX && !isStation(t);
   const isCity = (t) => (t.mode === "area" && !t.tour?.mapX) || (t.mode !== "area" && (t.areaCode || t.areaCodes));
   const inSlot = (t) =>
-    slot === "station" ? isStation(t)
+    slot === "cafe" ? t.mode === "cafe"
+    : t.mode === "cafe" ? false
+    : slot === "station" ? isStation(t)
     : slot === "spot" ? isSpot(t)
     : slot === "city" ? isCity(t)
     : slot === "nation" ? t.mode !== "area" && !t.areaCode && !t.areaCodes
@@ -2854,13 +2904,14 @@ async function main() {
   const IDX_KEY =
     process.env.ROUNDUP_STYLE === "countdown" ? "countdown_idx"
     : process.env.ROUNDUP_STYLE === "carousel" ? "carousel_idx"
-    : slot === "spot" ? "spot_idx" : slot === "station" ? "station_idx" : slot === "city" ? "city_idx" : "roundup_idx";
+    : slot === "spot" ? "spot_idx" : slot === "station" ? "station_idx" : slot === "city" ? "city_idx" : slot === "cafe" ? "cafe_idx" : "roundup_idx";
   const idxRow = await db.execute({
     sql: "SELECT value FROM config WHERE key = ?",
     args: [IDX_KEY],
   });
   const idx = idxRow.rows.length ? Number(idxRow.rows[0].value) : 0;
   const allThemes = themesData.themes;
+  allThemes.push(...buildCafeThemes()); // 카페 편 테마(카페 슬롯·ROUNDUP_THEME=cafe-…에서만 뽑힌다)
   const all = allThemes.filter(inSlot);
   console.log(`오늘 슬롯: ${slot} — 풀 ${all.length}개`);
   // 조회수 성과로 가중한 순서 (데이터가 없거나 조회 실패면 기존 단순 로테이션)
@@ -2883,6 +2934,11 @@ async function main() {
     } catch (e) {
       console.error("후속편 예약 읽기 실패(무시):", String(e).slice(0, 120));
     }
+  }
+  if (slot === "cafe") {
+    // 카페 테마 3개까지 시도하고, 모자라면 지하철역 편으로(원래 토요일 슬롯)
+    const stations = allThemes.filter(isStation).sort(() => Math.random() - 0.5);
+    ordered.splice(3, ordered.length, ...stations);
   }
   console.log("테마 시도 순서:", ordered.slice(0, 3).map((t) => t.key).join(" → "));
 
@@ -3052,7 +3108,7 @@ async function main() {
       // 4축 합성 랭킹: 블로그 후기 수 + 카페글 + 유튜브 상위 조회수 + 네이버 리뷰순 진입.
       // 유튜브·리뷰순 키가 없거나 실패하면 그 축만 0점 — 블로그 단독과 동등하게 동작.
       const { rankComposite } = await import("../lib/ranking.ts");
-      const res = await rankComposite(places, theme.mode === "area" ? "맛집" : theme.keyword);
+      const res = await rankComposite(places, theme.mode === "area" ? "맛집" : theme.mode === "cafe" ? "카페" : theme.keyword);
       if (res?.scored) {
         places = res.ranked; // 1위가 앞
         rankBasis = res.basis;
@@ -3684,6 +3740,10 @@ function curlUpload(args) {
 function commentHashtags(theme, places) {
   const food = String(theme.food || theme.keyword || "").replace(/\s/g, "");
   const tags = [];
+  if (theme.mode === "cafe") {
+    const kw = String(theme.keyword).replace(/\s|·/g, "");
+    return [`${kw}카페`, `${kw}카페추천`, `${String(theme.region ?? "").replace(/\s/g, "")}카페`, "카페투어", "카페추천"].filter((t) => /^[가-힣A-Za-z0-9]+$/.test(t)).slice(0, 5);
+  }
   if (theme.mode === "area" && theme.keyword) {
     const kw = String(theme.keyword).replace(/\s|·/g, "");
     tags.push(`${kw}맛집`, `${kw}맛집추천`);

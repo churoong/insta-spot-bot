@@ -14,6 +14,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // 수집 종류 — 새 종류는 여기 한 줄 추가. cat3은 관광공사 분류(음식점 39 하위).
 const KINDS = [
   { key: "cafe", label: "카페·전통찻집", contentTypeId: "39", cat1: "A05", cat2: "A0502", cat3: "A05020900", buzzWord: "카페", exclude: /주점|호프|포차|바\b|클럽|노래/ },
+  // 맛집 발굴(2026-11-25 사용자 결정 "맛집이나 카페 발굴하는 에이전트") — 관광공사 음식점 전체(카페·클럽 제외).
+  // 많아서(수천 곳) 네이버 측정은 회당 상한까지만 하고 30일 재사용으로 몇 주에 걸쳐 채운다.
+  { key: "restaurant", label: "맛집", contentTypeId: "39", cat1: "A05", cat2: "A0502", skipCat3: /^A0502(0900|1000)$/, buzzWord: "", pages: 3, cap: 3000,
+    exclude: /카페|커피|베이커리|제과|디저트|주점|호프|포차|클럽|노래/ },
 ];
 const AREAS = [
   [1, "서울"], [2, "인천"], [3, "대전"], [4, "대구"], [5, "광주"], [6, "부산"], [7, "울산"], [8, "세종"],
@@ -45,11 +49,17 @@ async function tour(endpoint, params) {
 async function collectKind(kind) {
   const rows = [];
   for (const [areaCode, sido] of AREAS) {
-    const items = await tour("areaBasedList2", {
-      contentTypeId: kind.contentTypeId, areaCode: String(areaCode),
-      cat1: kind.cat1, cat2: kind.cat2, cat3: kind.cat3, numOfRows: "1000", arrange: "Q",
-    });
-    const ok = items.filter((x) => x.firstimage && (x.cpyrhtDivCd === "Type1" || x.cpyrhtDivCd === "Type3") && !kind.exclude?.test(x.title || ""));
+    const items = [];
+    for (let page = 1; page <= (kind.pages ?? 1); page++) {
+      const got = await tour("areaBasedList2", {
+        contentTypeId: kind.contentTypeId, areaCode: String(areaCode),
+        cat1: kind.cat1, cat2: kind.cat2, ...(kind.cat3 ? { cat3: kind.cat3 } : {}), numOfRows: "1000", pageNo: String(page), arrange: "Q",
+      });
+      items.push(...got);
+      if (got.length < 1000 || quotaHit) break;
+    }
+    const ok = items.filter((x) => x.firstimage && (x.cpyrhtDivCd === "Type1" || x.cpyrhtDivCd === "Type3")
+      && !kind.exclude?.test(x.title || "") && !(kind.skipCat3 && kind.skipCat3.test(String(x.cat3 || ""))));
     console.log(`  ${sido}: ${items.length}곳 중 사진·이용 가능 ${ok.length}곳`);
     for (const x of ok) {
       rows.push({
@@ -84,14 +94,14 @@ function cafeQuery(r, kind) {
 //   rankScore: 정렬용(확인된 집 > 미확인, 튀는 값은 시도 중앙값으로 대체)
 const BUZZ_CAP = 100000;
 const normName = (s) => String(s).replace(/<[^>]*>/g, "").replace(/\[[^\]]*\]|\s|\(.*?\)/g, "").toLowerCase();
-async function verifyAndFlag(rows, prev) {
+async function verifyAndFlag(rows, prev, cap = 1500) {
   const { searchLocal } = await import("../lib/naver.ts");
   const old = new Map((prev?.items || []).map((r) => [r.contentId, r]));
   let n = 0;
   for (const r of rows) {
     const o = old.get(r.contentId);
     if (o?.verified != null && o.verifiedAt && Date.now() - new Date(o.verifiedAt).getTime() < 30 * 86400e3) { r.verified = o.verified; r.verifiedAt = o.verifiedAt; continue; }
-    if (n >= 1500) continue;
+    if (n >= cap) continue;
     const sg = sigunguOf(r);
     const res = await searchLocal(`${sg} ${String(r.name).replace(/\[[^\]]*\]/g, "").trim()}`, 5);
     n++;
@@ -124,14 +134,44 @@ async function addBuzz(rows, prev, kind) {
   for (const r of rows) {
     const o = old.get(r.contentId);
     // 30일 안에 같은 검색어 버전으로 잰 값은 재사용(네이버 하루 한도 아끼기)
+    r.buzzHist = (o?.buzzHist ?? []).filter((h) => h.v === BUZZ_V).slice(-6);
     if (o?.buzz != null && o.buzzV === BUZZ_V && o.buzzAt && Date.now() - new Date(o.buzzAt).getTime() < 30 * 86400e3) { r.buzz = o.buzz; r.buzzAt = o.buzzAt; r.buzzV = BUZZ_V; continue; }
-    if (n >= 1500) continue;
+    if (n >= (kind.cap ?? 1500)) { if (o?.buzz != null && o.buzzV === BUZZ_V) { r.buzz = o.buzz; r.buzzAt = o.buzzAt; r.buzzV = BUZZ_V; } continue; }
     const b = await blogBuzz(cafeQuery(r, kind));
     n++;
-    if (b != null) { r.buzz = b; r.buzzAt = new Date().toISOString().slice(0, 10); r.buzzV = BUZZ_V; }
+    if (b != null) {
+      r.buzz = b; r.buzzAt = new Date().toISOString().slice(0, 10); r.buzzV = BUZZ_V;
+      r.buzzHist.push({ d: r.buzzAt, b, v: BUZZ_V }); // 발굴: 측정 이력(30일 간격)으로 상승세를 본다
+    }
     await sleep(120);
   }
   return n;
+}
+
+/**
+ * 발굴 리포트(2026-11-25 사용자 결정) — data/collect/discover.json에 종류별로
+ *   rising: 직전 측정(약 30일 전) 대비 블로그 후기가 30% 이상 늘고 300건 이상인 곳(뜨는 집)
+ *   fresh: 지난 수집에 없던 새 등록 중 후기가 많은 곳(새로 생긴/새로 올라온 집)
+ *   top: 지도에서 확인되고 튀는 값이 아닌 곳 중 순위 상위(믿을 만한 인기 집)
+ * 를 남긴다. 발행하지 않는다 — 새 편·한 집 집중 릴스 후보로 쓴다.
+ */
+function discover(kind, rows, prev) {
+  const file = path.join(OUT_DIR, "discover.json");
+  const all = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+  const before = new Set((prev?.items ?? []).map((r) => r.contentId));
+  const brief = (r) => ({ contentId: r.contentId, name: r.name, sido: r.sido, addr: r.addr, buzz: r.buzz ?? null, verified: r.verified ?? null, img: r.img });
+  const ok = (r) => r.verified !== false && !r.buzzSuspect;
+  const rising = rows.filter(ok).map((r) => {
+    const h = r.buzzHist ?? [];
+    if (h.length < 2) return null;
+    const a = h[h.length - 2].b, b = h[h.length - 1].b;
+    return a > 0 && b >= 300 && b / a >= 1.3 ? { ...brief(r), growth: Math.round((b / a) * 100) / 100 } : null;
+  }).filter(Boolean).sort((x, y) => y.growth - x.growth).slice(0, 30);
+  const fresh = prev ? rows.filter((r) => ok(r) && !before.has(r.contentId)).sort((a, b) => (b.buzz ?? 0) - (a.buzz ?? 0)).slice(0, 30).map(brief) : [];
+  const top = rows.filter(ok).slice(0, 30).map(brief);
+  all[kind.key] = { at: new Date().toISOString(), rising, fresh, top };
+  fs.writeFileSync(file, JSON.stringify(all, null, 1));
+  console.log(`🔎 발굴(${kind.label}): 뜨는 집 ${rising.length}곳${rising.length ? ` — ${rising.slice(0, 5).map((r) => `${r.name}(${r.sido} ×${r.growth})`).join(" · ")}` : "(측정 이력이 쌓이면 나온다)"} · 새로 올라온 집 ${fresh.length}곳${fresh.length ? ` — ${fresh.slice(0, 5).map((r) => `${r.name}(${r.sido})`).join(" · ")}` : ""}`);
 }
 
 const MARK = path.join(OUT_DIR, "_built.json");
@@ -152,7 +192,7 @@ for (const kind of KINDS.filter((k) => !only || k.key === only)) {
     continue;
   }
   const measured = await addBuzz(rows, prev, kind).catch((e) => { console.log("블로그 후기 수 실패(무시):", String(e).slice(0, 80)); return 0; });
-  const checked = await verifyAndFlag(rows, prev).catch((e) => { console.log("실제 가게 확인 실패(무시):", String(e).slice(0, 80)); return 0; });
+  const checked = await verifyAndFlag(rows, prev, kind.cap ?? 1500).catch((e) => { console.log("실제 가게 확인 실패(무시):", String(e).slice(0, 80)); return 0; });
   rows.sort((a, b) => (b.rankScore ?? b.buzz ?? -1) - (a.rankScore ?? a.buzz ?? -1));
   const suspect = rows.filter((r) => r.buzzSuspect).length, unverified = rows.filter((r) => r.verified === false).length;
   console.log(`   실제 가게 확인 새로 ${checked}곳 · 지도에서 못 찾음 ${unverified}곳 · 튀는 후기 수 ${suspect}곳(${rows.filter((r) => r.buzzSuspect).slice(0, 6).map((r) => r.name).join(", ")})`);
@@ -160,6 +200,7 @@ for (const kind of KINDS.filter((k) => !only || k.key === only)) {
   for (const r of rows) bySido[r.sido] = (bySido[r.sido] || 0) + 1;
   fs.writeFileSync(file, JSON.stringify({ kind: kind.key, label: kind.label, collectedAt: new Date().toISOString(), count: rows.length, bySido, items: rows }, null, 1));
   mark[kind.key] = new Date().toISOString();
+  discover(kind, rows, prev);
   console.log(`✅ ${kind.label} ${rows.length}곳 저장(${file}) · 후기 수 새로 잰 곳 ${measured} · 시도별 ${JSON.stringify(bySido)}`);
   console.log(`   순위 상위: ${rows.slice(0, 10).map((r) => `${r.name}(${r.sido} ${r.buzz ?? "?"}${r.verified === false ? " 미확인" : ""})`).join(" · ")}`);
 }
