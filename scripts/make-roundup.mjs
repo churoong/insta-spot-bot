@@ -2684,7 +2684,7 @@ function engagementLine(theme, count) {
     `같이 가고 싶은 사람을 댓글에 태그해 보세요 🤝 여러분만 아는 추천 ${spot}도 댓글로 남겨주시면 최고예요!`,
     `댓글로 추천해 주신 곳은 다음 모음집 후보에 올려드려요! 여러분의 원픽 ${spot}${josa(spot, "을", "를")} 댓글로 추천해 주세요 ✍️`,
   ];
-  if (theme.mode === "cafe") return pool[Math.floor(Math.random() * pool.length)].replace(/추천 맛집|맛집|명가/g, "카페").replace(/모음집/g, "카페 편");
+  if (theme.mode === "cafe") return pool[Math.floor(Math.random() * pool.length)].replace(/추천 맛집을/g, "추천 카페를").replace(/맛집|명가/g, "카페").replace(/모음집/g, "카페 편");
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
