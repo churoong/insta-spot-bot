@@ -78,6 +78,12 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 - **2026-11-25 실패 기록으로 찾은 4건 수정**: ① 좋아요 계열(타깃 좋아요·장소 피드·맛집 글·비슷한 계정 팔로워·단골, 해시태그 좋아요, `like_too`)은 차단되면 `common.pause_likes`로 **72시간** 쉰다(`likepause:until`) — 11/23·24 장소 피드 좋아요가 12시간 뒤 재개해 연속 차단. 전체 12시간 정지는 그대로 ② `big_food_accounts`가 빈 목록을 주간 캐시에 저장해 11/14~ 댓글러 팔로우·타깃 좋아요·첫 댓글이 0건 → 빈 목록은 저장 안 함, 재시도 3시간 간격(`bigacc:try`), 계정 조회 실패 기록 ③ 언팔 "Invalid unfollow mutation"(삭제·이미 언팔)은 완료 처리 ④ Termux에 tzdata가 없어 `ZoneInfo('America/Los_Angeles')` 실패 → 고정 시차(-8/+9) 폴백. 새 pip 패키지 없음.
 - 차단 신호(Challenge·PleaseWait·Feedback 등)를 받으면 6~24시간 비공식 호출을 전부 멈춘다. 상태는 DB `private_log` 테이블(`agent:alive`, `agent:paused`, `pp:<content_id>`, `likes:<날짜>`).
 
+### ▶ 2026-11-25 자료 수집 에이전트 (`scripts/collect.mjs`, `collect.yml`)
+- 사용자: "너무 모음집만 있다, 카페도 추가하자 — 일단 자료를 수집할 수 있는 에이전트를 추가하자". **발행하지 않는다** — 새 콘텐츠 재료를 `data/collect/<종류>.json`에 쌓는다(`items`: contentId·name·sido·addr·x·y·img·img2·license·buzz).
+- 지금 종류: **cafe**(관광공사 cat3 `A05020900` 카페·전통찻집, 17개 시도 areaBasedList2, 사진 있고 공공누리 1·3유형만, 주점류 상호 제외). 인기도는 네이버 블로그 후기 수(`blogBuzz`, 30일 재사용, 회당 1,500건 상한). 새 종류는 `KINDS`에 한 줄.
+- 관광공사 한도 보호: 새벽 KST 00~05시 게이트 + 종류별 7일 1회(`data/collect/_built.json`), 한도 초과·20곳 미만이면 기존 파일 유지. 수동 `gh workflow run collect.yml -f kind=cafe -f force=true`.
+- 음식점 콘텐츠의 카페 제외(`NON_RESTAURANT_CAT3`)는 그대로 — 카페는 별도 콘텐츠로만 쓴다.
+
 ### ▶ 2026-10-27 AI 검색 노출용 공개 맛집 페이지 (GEO)
 - 목적: ChatGPT·퍼플렉시티·구글 AI 요약이 "○○ 국밥 맛집" 답변에 우리를 인용하게. 인스타 알고리즘과 무관한 유입.
 - `/m`(시도별 전체) · `/m/[map_pins.id]`(식당: 어느 편 몇 위, 주소, 카카오맵 링크, 근처 소개 맛집, JSON-LD Restaurant) · `/e/[content_id]`(편: JSON-LD ItemList) · `/sitemap.xml` · `/robots.txt` · `/llms.txt`. 데이터는 `map_pins` JOIN `posts`(published)뿐 — `lib/publicmap.ts`.

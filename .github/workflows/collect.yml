@@ -1,0 +1,67 @@
+name: 자료 수집 (카페 등)
+
+# 2026-11-25 사용자 결정: 새 콘텐츠(카페 등)에 쓸 재료를 모으는 수집 에이전트. 발행은 하지 않는다.
+# 관광공사 API는 발행과 같은 하루 한도를 쓰므로 한도가 막 풀린 새벽(KST 00~05시)에만 돈다.
+# 스크립트가 종류별로 7일 안에 수집했으면 바로 끝나서 사실상 주 1회. 강제: 수동 실행에서 force.
+on:
+  schedule:
+    - cron: "20 15 * * *" # UTC 15:20 = KST 00:20
+    - cron: "50 16 * * *" # UTC 16:50 = KST 01:50
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "수집 종류(cafe) — 비우면 전체"
+        type: string
+        default: ""
+      force:
+        description: "7일 안에 수집했어도 다시"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write # data/collect 커밋용
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: 새벽 창 게이트 (KST 00:00~05:00, 수동 실행은 통과)
+        id: gate
+        run: |
+          H=$((10#$(TZ=Asia/Seoul date +%H)))
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$H" -lt 5 ]; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "새벽 창 밖(KST ${H}시) — 건너뜀. 발행용 관광공사 한도를 지킨다."
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == '1'
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.go == '1'
+        with:
+          node-version: 22
+      - name: 의존성 설치
+        if: steps.gate.outputs.go == '1'
+        run: npm ci
+      - name: 수집
+        if: steps.gate.outputs.go == '1'
+        env:
+          TOUR_API_KEY: ${{ secrets.TOUR_API_KEY }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          COLLECT: ${{ inputs.kind }}
+          FORCE: ${{ inputs.force && '1' || '' }}
+        run: npx tsx scripts/collect.mjs
+      - name: 수집 결과 커밋
+        if: steps.gate.outputs.go == '1'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/collect 2>/dev/null || true
+          git diff --cached --quiet || { git commit -m "자료 수집 갱신 ($(date +%Y-%m-%d))" && git pull --rebase -q && git push; }
