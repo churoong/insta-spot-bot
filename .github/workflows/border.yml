@@ -3,7 +3,7 @@ name: 국경선 지도 릴스 (일요일 연재)
 # 2026-10-27 사용자 결정: 시군구별 국밥 종류(카카오 로컬 집계)로 칠한 "대한민국 국밥 국경선" 지도 릴스.
 # 2026-10-28 연재: 매주 일요일 12시 전후 국밥 → 냉면 → 칼국수 → 순대 순서(config.border_idx).
 # 요일을 바꾸면 CLAUDE.md의 네 곳(이 크론·게이트, vercel.json, publish-check, 표)을 같이 고칠 것.
-# 수동 실행 기본은 dry(발행 없이 집계 + 지도 렌더 → 아티팩트). 특정 시리즈는 series 입력.
+# 수동 실행 기본은 발행(2026-11-25 변경 — Vercel 크론이 입력 없이 dispatch한다). 시안만 보려면 dry=true. 특정 시리즈는 series 입력.
 # 카카오 로컬만 쓰고 관광공사 API는 안 쓰므로 발행과 한도를 나누지 않는다.
 on:
   schedule:
@@ -19,7 +19,7 @@ on:
       dry:
         description: "발행 없이 집계·지도만 (아티팩트 border-preview)"
         type: boolean
-        default: true
+        default: false # 2026-11-25: true였을 때 Vercel 크론(입력 없이 dispatch)이 매주 dry로만 돌아 11/1~22 연재가 한 번도 발행되지 않았다
       rebuild:
         description: "30일 캐시가 있어도 다시 집계"
         type: boolean
@@ -78,7 +78,7 @@ jobs:
           FB_IG_USER_ID: ${{ secrets.FB_IG_USER_ID }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
       - name: 집계 캐시 커밋
-        if: always()
+        if: always() && steps.gate.outputs.go == '1' # 게이트 스킵이면 체크아웃이 없어 exit 128로 실패했다
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
