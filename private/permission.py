@@ -18,7 +18,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from common import get_logger, llm, nap, now_kst, state_get, state_set
+from common import get_logger, is_food_photo, llm, nap, now_kst, state_get, state_set
 
 log = get_logger("agent")
 
@@ -34,7 +34,7 @@ ASK_TEXT = ("안녕하세요! 전국 맛집을 소개하는 계정 맛디깅이�
             "출처(@{username}) 태그하고 저희 계정에 한 번 소개해도 괜찮을까요? 괜찮으시면 '네'라고 답 주세요. "
             "어려우시면 편하게 말씀 주셔도 돼요!")
 REST_ASK_TEXT = ("안녕하세요, 사장님! 전국 맛집을 소개하는 계정 맛디깅이에요 🙌 저희 맛집 리스트에서 소개해 드린 가게라 "
-                 "연락드려요. 계정에 올려주신 {kind}이 너무 좋아서, 출처(@{username}) 태그하고 저희 계정에서 한 번 더 소개해도 "
+                 "연락드려요. 계정에 올려주신 음식 {kind}이 너무 좋아서, 출처(@{username}) 태그하고 저희 계정에서 한 번 더 소개해도 "
                  "괜찮을까요? 괜찮으시면 '네'라고 답 주세요. 어려우시면 편하게 말씀 주셔도 돼요!")
 YES = re.compile(r"^\s*(네|넵|넹|예|응|ㅇㅇ|ㅇㅋ|오케이|ok|okay|yes|좋아요|좋습니다|좋죠|괜찮아요|괜찮습니다|가능|물론|그럼요|당연|그러세요|하세요|올려주세요|써주세요|사용하셔도)", re.I)
 NO = re.compile(r"안\s?돼|안됩|어렵|어려|싫|거절|아니요|아뇨|노노|\bno\b|곤란|불가|안\s?할|사양", re.I)
@@ -65,6 +65,44 @@ def _blocked(e: Exception) -> bool:
     return any(k in type(e).__name__ for k in ("Challenge", "PleaseWait", "Feedback", "LoginRequired", "Checkpoint"))
 
 
+def _thumb(m) -> str:
+    u = getattr(m, "thumbnail_url", None)
+    if not u and getattr(m, "resources", None):
+        u = getattr(m.resources[0], "thumbnail_url", None)
+    return str(u or "")
+
+
+def _pinned_pks(c, uid) -> set:
+    """프로필 상단에 고정된 게시물 — 가게가 '대표로 보여 주고 싶은' 사진이라 먼저 본다."""
+    try:
+        res = c.private_request(f"feed/user/{uid}/", params={"count": 12})
+        return {str(it.get("pk")) for it in res.get("items", []) if it.get("timeline_pinned_user_ids") or it.get("clips_tab_pinned_user_ids")}
+    except Exception:
+        return set()
+
+
+def pick_food_media(c, uid, exclude: set | None = None):
+    """식당 계정에서 소개에 쓸 '음식이 주인공인' 사진·영상 하나(2026-11-26 사용자: "핀 고정해 놓은 음식 사진 등을 써야지").
+    고정 게시물 먼저(오래돼도), 그다음 최근 180일 반응 큰 순 — 비전이 음식이라고 판정한 첫 게시물. 없으면 None."""
+    exclude = exclude or set()
+    try:
+        medias = c.user_medias(uid, amount=12)
+    except Exception as e:
+        if _blocked(e):
+            raise
+        return None
+    pinned = _pinned_pks(c, uid)
+    ok = [m for m in medias if m.media_type in (1, 2) and str(m.pk) not in exclude]
+    first = [m for m in ok if str(m.pk) in pinned]
+    rest = sorted([m for m in ok if str(m.pk) not in pinned and time.time() - m.taken_at.timestamp() < 180 * 86400],
+                  key=lambda x: -((x.like_count or 0) + (getattr(x, "play_count", 0) or 0) / 50))
+    for m in (first + rest)[:6]:
+        if is_food_photo(_thumb(m)) is True:
+            return m
+        nap(2, 5)
+    return None
+
+
 def ask_restaurants(c):
     """우리가 소개한 식당의 공식 계정(에이전트가 찾아 둔 igacct 캐시)에 '계정 사진·영상을 소개해도 될지' 묻는다.
     최근 120일 게시물 중 반응이 가장 큰 사진·영상 하나. 하루 3곳, 같은 계정 90일 1회."""
@@ -86,17 +124,10 @@ def ask_restaurants(c):
         last = state_get(f"perm-u:{uid}")
         if last and _get(last) and time.time() - float(_get(last).get("asked_at", 0)) < 90 * 86400:
             continue
-        try:
-            medias = c.user_medias(uid, amount=8)
-        except Exception as e:
-            if _blocked(e):
-                raise
-            continue
-        cands = [m for m in medias if m.media_type in (1, 2) and time.time() - m.taken_at.timestamp() < 120 * 86400 and not _get(str(m.pk))]
-        if not cands:
+        m = pick_food_media(c, uid)
+        if not m or _get(str(m.pk)):
             nap(10, 30)
             continue
-        m = max(cands, key=lambda x: (x.like_count or 0) + (getattr(x, "play_count", 0) or 0) / 50)
         kind = "영상" if m.media_type == 2 else "사진"
         try:
             c.direct_send(REST_ASK_TEXT.format(kind=kind, username=username), user_ids=[int(uid)])
@@ -109,7 +140,7 @@ def ask_restaurants(c):
         place = str(getattr(loc, "name", "") or "") if loc else ""
         pk = str(m.pk)
         _put(pk, {"uid": uid, "username": username, "code": m.code, "type": m.media_type, "location": place,
-                  "caption": (m.caption_text or "")[:600], "status": "asked", "asked_at": time.time(), "restaurant": True})
+                  "caption": (m.caption_text or "")[:600], "status": "asked", "asked_at": time.time(), "restaurant": True, "food_ok": True})
         state_set(f"perm-u:{uid}", pk)
         _bump("permask")
         _bump("permask-rest")
@@ -151,6 +182,8 @@ def ask_permissions(c):
             last = state_get(f"perm-u:{uid}")
             if last and _get(last) and time.time() - float(_get(last).get("asked_at", 0)) < 90 * 86400:
                 continue
+            if is_food_photo(_thumb(m)) is not True:  # 음식이 주인공인 게시물만 요청(2026-11-26)
+                continue
             kind = "영상" if m.media_type == 2 else "사진"
             try:
                 c.direct_send(ASK_TEXT.format(place=place or "맛집", kind=kind + "이", username=m.user.username), user_ids=[int(uid)])
@@ -160,7 +193,7 @@ def ask_permissions(c):
                 log.warning(f"허락 요청 DM 실패 @{m.user.username}: {str(e)[:100]}")
                 continue
             _put(pk, {"uid": uid, "username": m.user.username, "code": m.code, "type": m.media_type,
-                      "location": place, "caption": cap[:600], "status": "asked", "asked_at": time.time()})
+                      "location": place, "caption": cap[:600], "status": "asked", "asked_at": time.time(), "food_ok": True})
             state_set(f"perm-u:{uid}", pk)
             _bump("permask")
             log.info(f"🙏 소개 허락 요청: @{m.user.username} · {place or '위치 없음'} ({kind}, 좋아요 {m.like_count})")
@@ -205,17 +238,43 @@ def _caption(rec: dict) -> str:
             f"원본은 @{rec['username']} 님 계정에서 확인해 보세요 🙏\n\n{tags}")
 
 
+def redo_deleted(c, db):
+    """음식 확인 없이 올라갔던 회차(food_ok 없음)를 사용자가 지웠으면, 같은 허락으로 음식 사진을 골라 한 번 다시 올린다
+    (2026-11-26 사용자: "오늘 게시한 건 지울게, 다시 해봐"). 최근 7일·식당 계정·한 번만."""
+    rows = db("SELECT key, value FROM private_log WHERE key LIKE 'perm:%' AND value LIKE '%\"posted\"%'")["rows"]
+    for r in rows:
+        pk, rec = r["key"].split(":", 1)[1], json.loads(r["value"])
+        if rec.get("status") != "posted" or rec.get("food_ok") or rec.get("redone") or not rec.get("our_code"):
+            continue
+        if time.time() - float(rec.get("posted_at", 0)) > 7 * 86400:
+            continue
+        try:
+            c.media_info(c.media_pk_from_code(rec["our_code"]))
+            continue  # 아직 있다 — 사용자가 지우지 않았다
+        except Exception as e:
+            if _blocked(e):
+                raise
+            # 네트워크 오류를 '지워짐'으로 오판하면 이중 게시 — 확실히 없다는 응답(MediaNotFound·404)일 때만
+            if not re.search(r"NotFound|not found|404|does not exist|Media not", f"{type(e).__name__} {e}", re.I):
+                continue
+        rec.update({"status": "granted", "redo": True, "redone": True})
+        _put(pk, rec)
+        log.info(f"🔁 지워진 소개 글 다시 준비: @{rec['username']} (음식 사진으로)")
+
+
 def publish_granted(c):
     import engage
     from instagrapi.types import UserShort, Usertag
 
-    if _count("permpost") >= POST_PER_DAY or not engage._slot_passed("permpost"):
-        return
     from common import db
+    redo_deleted(c, db)
     rows = db("SELECT key, value FROM private_log WHERE key LIKE 'perm:%' AND value LIKE '%\"granted\"%' ORDER BY updated_at")["rows"]
     for r in rows:
         pk, rec = r["key"].split(":", 1)[1], json.loads(r["value"])
         if rec.get("status") != "granted":
+            continue
+        # 다시 올리기(redo)는 하루 1개·시각 제한을 받지 않는다 — 사용자가 지운 회차를 바로 메운다
+        if not rec.get("redo") and (_count("permpost") >= POST_PER_DAY or not engage._slot_passed("permpost")):
             continue
         try:
             info = c.media_info(pk)
@@ -225,16 +284,33 @@ def publish_granted(c):
             rec["status"] = "gone"
             _put(pk, rec)
             continue
+        # 음식이 주인공인지 확인(2026-11-26 — 가게 외관 사진이 올라간 일). 아니면 식당 계정은 고정·최근 게시물에서 음식 사진을 다시 고른다.
+        src, src_pk = info, pk
+        if not rec.get("food_ok") or rec.get("redo"):
+            if is_food_photo(_thumb(info)) is not True:
+                alt = pick_food_media(c, rec["uid"], exclude={pk}) if rec.get("restaurant") else None
+                if not alt:
+                    rec["status"] = "notfood"
+                    _put(pk, rec)
+                    log.info(f"🍽 음식 사진이 아니라 게시 안 함: @{rec['username']}")
+                    continue
+                src, src_pk = alt, str(alt.pk)
+                rec["caption"] = (alt.caption_text or rec.get("caption") or "")[:600]
+                alt_loc = getattr(alt, "location", None)
+                if alt_loc and getattr(alt_loc, "name", ""):
+                    rec["location"] = alt_loc.name
+                log.info(f"🍽 음식 사진으로 교체: @{rec['username']} {alt.code}")
+            rec["food_ok"] = True
         tmp = Path(tempfile.mkdtemp())
         try:
             caption = _caption(rec)
             tags = [Usertag(user=UserShort(pk=rec["uid"], username=rec["username"]), x=0.5, y=0.5)]
-            loc = getattr(info, "location", None)
-            if rec["type"] == 2:
-                path = c.clip_download(pk, folder=tmp)
+            loc = getattr(src, "location", None)
+            if src.media_type == 2:
+                path = c.clip_download(src_pk, folder=tmp)
                 media = c.clip_upload(path, caption, usertags=tags, location=loc)
             else:
-                path = c.photo_download(pk, folder=tmp)
+                path = c.photo_download(src_pk, folder=tmp)
                 media = c.photo_upload(path, caption, usertags=tags, location=loc)
         except Exception as e:
             if _blocked(e):
@@ -245,12 +321,16 @@ def publish_granted(c):
                 rec["status"] = "failed"
             _put(pk, rec)
             return
+        was_redo = bool(rec.pop("redo", False))
         rec["status"] = "posted"
         rec["our_code"] = media.code
         rec["posted_at"] = time.time()
+        rec["source_pk"] = src_pk
         _put(pk, rec)
         _bump("permpost")
-        log.info(f"📸 허락받은 소개 게시: https://www.instagram.com/p/{media.code}/ (원본 @{rec['username']})")
+        log.info(f"📸 허락받은 소개 게시{' (다시 올림)' if was_redo else ''}: https://www.instagram.com/p/{media.code}/ (원본 @{rec['username']})")
+        if was_redo:
+            return  # 감사 DM은 처음 올렸을 때 이미 보냈다
         try:
             nap(30, 90)
             c.direct_send(f"소개 글 올렸어요! 허락해 주셔서 정말 감사해요 🙏 https://www.instagram.com/p/{media.code}/",
