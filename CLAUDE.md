@@ -88,6 +88,7 @@ GitHub schedule 크론은 폴백(혼잡기 4~11시간 지연 + 슬롯 드롭 실
 ### ▶ 2026-11-25 스톡 음식 영상 인트로 · 허락 요청 확대
 - **스톡 영상 2초 + 표지 6초**(`reel_format = clip2+grid6`): grid8로 나갈 회차의 절반(`config.clip_idx` 교대, `CLIP_INTRO=1/0` 강제)에 무료 스톡 영상(`lib/stockclip.ts` — Pexels `PEXELS_KEY` → Pixabay `PIXABAY_KEY`, 음식 → 영어 검색어 매핑, 못 찾으면 "korean food")을 9:16으로 잘라 2초 + `buildHookTitle` 반문형 문구를 얹는다. **특정 가게 영상이 아니다** — 상호를 쓰지 않는 분위기 컷(사칭 방지, `lib/pexels.ts` 원칙). 커버는 3초 지점(표지). 키가 없거나 영상 실패면 grid8. 시안: `CLIP_FILE=<mp4> OFFLINE_RENDER=1 ROUNDUP_OFFLINE=1` → `roundup-clip-preview.mp4`. 판정은 grid8 대비 **시청 시간**(구성당 5건+).
 - **허락 요청 확대**(`private/permission.py`): 일반 게시물 조건 완화(좋아요 300 → 100, 14 → 30일, 위치 태그 선택 — 11/7~25 요청 1건뿐) + **식당 공식 계정**(`igacct` 캐시, 하루 3곳, 최근 120일 반응 최고 사진·영상, 90일 1회, `REST_ASK_TEXT`). 허락받은 경우만 게시하는 규칙은 그대로.
+- **음식 사진만**(2026-11-26 — 안녕전복 소개에 음식 아닌 사진이 올라가 사용자가 삭제): `common.is_food_photo`(Gemini 비전, YES/NO, 판정 불가는 불통과)가 요청 전·게시 직전 두 번 본다. 식당 계정은 `pick_food_media` — **고정 게시물 먼저**, 그다음 최근 180일 반응 순으로 음식이 주인공인 첫 게시물. 허락받은 게시물이 음식이 아니면 같은 허락으로 그 계정의 음식 사진으로 바꿔 올리고(식당 계정만), 아니면 `notfood`. 음식 확인 없이 올라갔다가 지워진 회차(7일 이내)는 `redo_deleted`가 한 번 다시 올린다(감사 DM 재발송 없음, MediaNotFound일 때만).
 
 ### ▶ 2026-11-25 카페 편 (토요일 저녁)
 - `make-roundup` `buildCafeThemes`: `data/collect/cafe.json`에서 지도 확인(verified≠false)된 카페가 **시군구별 10곳 이상**인 곳만 테마(`mode:"cafe"`, key `cafe-<시도>-<시군구>`, 2026-11-25 기준 12곳 — 평창·남양주·파주·서귀포·제주·용인·화성·포항·창원·고양·수원·경산). `SLOT_BY_DOW[6] = "cafe"`, 포인터 `cafe_idx`, 카페 테마 3개 실패하면 지하철역 테마로.

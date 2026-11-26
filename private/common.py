@@ -262,6 +262,30 @@ def llm(prompt: str, max_chars: int = 120) -> str | None:
         return None
 
 
+def is_food_photo(url: str) -> bool | None:
+    """사진의 주인공이 음식·음료·디저트인지 Gemini 비전으로 판정(2026-11-26 — 허락받은 소개에 가게 외관·사람 사진이
+    올라간 일이 있어서). True/False, 판정 불가(키 없음·실패)면 None — 호출부는 None도 통과시키지 않는다."""
+    key = ENV.get("GEMINI_API_KEY", "")
+    if not key or not url:
+        return None
+    try:
+        import base64
+        img = requests.get(url, timeout=20).content
+        m = ENV.get("GEMINI_VISION_MODEL") or "gemini-flash-lite-latest"
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}",
+            json={"contents": [{"parts": [
+                {"text": "이 사진의 주인공이 음식(요리)·음료·디저트이고, 먹음직스럽게 크게 보이면 YES, 가게 외관·간판·내부 전경·사람·메뉴판·글자 안내문이 주인공이면 NO. YES 또는 NO 한 단어만."},
+                {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(img).decode()}},
+            ]}], "generationConfig": {"temperature": 0, "maxOutputTokens": 5}},
+            timeout=40,
+        )
+        t = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip().upper()
+        return t.startswith("YES")
+    except Exception:
+        return None
+
+
 # ---------- 노트북이 켜져 있는 시간(2026-10-27 사용자) ----------
 # 평일 09:00~11:10, 13:10~17:40만 인터넷이 된다(11:20~13:00·저녁·주말은 없음).
 # 하루 1회 작업의 시각은 이 안에서만 고른다 — 밖에서 고르면 그날 작업이 통째로 사라진다.
